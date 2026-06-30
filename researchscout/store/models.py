@@ -1,10 +1,11 @@
-"""ORM models: canonical papers, their external-id map, raw landing, and ingest cursors."""
+"""ORM models: canonical papers, their external-id map, raw landing, ingest cursors, embeddings."""
 
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -60,3 +61,14 @@ class IngestStateRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class PaperEmbeddingRow(Base):
+    __tablename__ = "paper_embeddings"
+
+    paper_id: Mapped[str] = mapped_column(
+        ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    model_id: Mapped[str] = mapped_column(String, primary_key=True)
+    embedding: Mapped[list[float]] = mapped_column(Vector(384))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
