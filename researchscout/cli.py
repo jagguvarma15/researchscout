@@ -86,9 +86,18 @@ def ingest(
 
 
 @app.command()
-def index() -> None:
+def index(
+    batch_size: Annotated[int, typer.Option("--batch", help="Embedding batch size.")] = 64,
+) -> None:
     """Embed stored papers into the pgvector index."""
-    _todo("index", "PR 05")
+    from researchscout.embed.local import LocalEmbedder
+    from researchscout.store.db import session_scope
+    from researchscout.store.vectors import index_papers
+
+    embedder = LocalEmbedder()
+    with session_scope() as session:
+        count = index_papers(session, embedder, batch_size=batch_size)
+    typer.secho(f"Embedded {count} paper(s) with {embedder.model_id}.", fg=typer.colors.GREEN)
 
 
 @app.command()
