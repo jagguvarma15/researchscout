@@ -1,10 +1,13 @@
 """The ``scout`` command-line interface.
 
-Most commands are stubs at this stage: they print which PR will implement them, so the full
+Commands that aren't implemented yet are stubs that print which PR will implement them, so the full
 command surface is already visible from ``scout --help``. Each later PR fills in its command.
 """
 
 from __future__ import annotations
+
+from datetime import datetime
+from typing import Annotated
 
 import typer
 
@@ -64,15 +67,53 @@ def ask() -> None:
 
 
 @sources_app.command("list")
-def sources_list() -> None:
-    """List registered sources and their enabled/health state."""
-    _todo("sources list", "PR 02")
+def sources_list(
+    probe: Annotated[bool, typer.Option(help="Probe each source's health.")] = False,
+) -> None:
+    """List registered sources with their kind, enabled state, and (optionally) health."""
+    from researchscout.sources.base import registered_sources, source_config
+
+    for cls in registered_sources():
+        cfg = source_config(cls.name)
+        enabled = bool(cfg.get("enabled", False))
+        line = f"{cls.name:<16} kind={cls.kind:<8} enabled={str(enabled).lower()}"
+        if probe:
+            line += f"  health={cls().health()}"
+        typer.echo(line)
 
 
 @sources_app.command("test")
-def sources_test() -> None:
+def sources_test(
+    name: Annotated[str, typer.Argument(help="Source name, e.g. 'arxiv'.")],
+    since: Annotated[datetime, typer.Option(help="Fetch items submitted on/after this date.")],
+    category: Annotated[str | None, typer.Option(help="Category override, e.g. cs.LG.")] = None,
+    limit: Annotated[int, typer.Option(help="Max items to print.")] = 10,
+) -> None:
     """Fetch + normalize from one source and print the results (no persistence)."""
-    _todo("sources test", "PR 02")
+    from researchscout.schema import Signal
+    from researchscout.sources import get_source
+    from researchscout.sources.arxiv import ArxivSource
+
+    try:
+        src = get_source(name)
+    except KeyError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    if category is not None and isinstance(src, ArxivSource):
+        src.categories = [category]
+
+    items, _ = src.fetch(since, cursor=None)
+    items = items[:limit]
+    typer.secho(f"{src.name}: fetched {len(items)} item(s)", fg=typer.colors.GREEN)
+    for raw in items:
+        obj = src.normalize(raw)
+        if isinstance(obj, Signal):
+            typer.echo(f"  signal {obj.type} paper={obj.paper_id} value={obj.value}")
+        else:
+            authors = ", ".join(a.name for a in obj.authors[:3])
+            typer.echo(f"  {obj.id}  {obj.published_at:%Y-%m-%d}  {obj.title}")
+            typer.echo(f"      {authors}  [{', '.join(obj.categories)}]")
 
 
 @db_app.command("upgrade")

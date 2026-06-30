@@ -1,0 +1,156 @@
+"""arXiv content source — the first connector.
+
+Fetches recent submissions from the arXiv API (Atom), one page per ``fetch`` call (cursor =
+pagination offset), and normalizes each entry into a canonical ``Paper``. ``fetch`` (network) and
+``normalize`` (pure) are deliberately split so normalization is testable from a saved fixture.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import urlparse
+
+import feedparser
+import httpx
+
+from researchscout.schema import Author, Paper, canonical_id, normalize_arxiv_id
+from researchscout.sources.base import HealthStatus, RawItem, Source, register, source_config
+
+_API_URL = "https://export.arxiv.org/api/query"
+_DEFAULT_CATEGORIES = ("cs.LG", "cs.AI", "cs.CL")
+_REQUEST_TIMEOUT = 30.0
+
+
+def _to_utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt.astimezone(UTC)
+
+
+@register
+class ArxivSource(Source):
+    name = "arxiv"
+    kind = "content"
+
+    def __init__(self, categories: list[str] | None = None, page_size: int = 100) -> None:
+        cfg_categories = source_config(self.name).get("categories")
+        self.categories: list[str] = categories or cfg_categories or list(_DEFAULT_CATEGORIES)
+        self.page_size = page_size
+
+    def _search_query(self, since: datetime) -> str:
+        cats = " OR ".join(f"cat:{c}" for c in self.categories)
+        lo = _to_utc(since).strftime("%Y%m%d%H%M")
+        hi = datetime.now(UTC).strftime("%Y%m%d%H%M")
+        return f"({cats}) AND submittedDate:[{lo} TO {hi}]"
+
+    def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
+        start = int(cursor) if cursor else 0
+        params = {
+            "search_query": self._search_query(since),
+            "start": str(start),
+            "max_results": str(self.page_size),
+            "sortBy": "submittedDate",
+            "sortOrder": "descending",
+        }
+        resp = httpx.get(_API_URL, params=params, timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+        resp.raise_for_status()
+        feed = feedparser.parse(resp.text)
+        fetched_at = datetime.now(UTC)
+        items = [
+            RawItem(source=self.name, fetched_at=fetched_at, payload=_entry_payload(entry))
+            for entry in feed.entries
+        ]
+        next_cursor = str(start + self.page_size) if len(items) == self.page_size else None
+        return items, next_cursor
+
+    def normalize(self, raw: RawItem) -> Paper:
+        return _normalize_payload(raw.payload)
+
+    def health(self) -> HealthStatus:
+        try:
+            resp = httpx.get(
+                _API_URL,
+                params={"search_query": "all", "max_results": "1"},
+                timeout=_REQUEST_TIMEOUT,
+                follow_redirects=True,
+            )
+        except httpx.HTTPError:
+            return "error"
+        if resp.status_code == 429:
+            return "rate_limited"
+        return "ok" if resp.is_success else "error"
+
+
+def _entry_payload(entry: Any) -> dict[str, Any]:
+    """Extract the fields we need from a feedparser Atom entry into a plain dict."""
+    return {
+        "id": entry.get("id"),
+        "title": entry.get("title"),
+        "summary": entry.get("summary"),
+        "authors": [a.get("name") for a in entry.get("authors", []) if a.get("name")],
+        "categories": [t.get("term") for t in entry.get("tags", []) if t.get("term")],
+        "published": entry.get("published"),
+        "updated": entry.get("updated"),
+        "links": [
+            {
+                "href": link.get("href"),
+                "type": link.get("type"),
+                "rel": link.get("rel"),
+                "title": link.get("title"),
+            }
+            for link in entry.get("links", [])
+        ],
+    }
+
+
+def _arxiv_id_from_url(url: str | None) -> str | None:
+    if not url:
+        return None
+    tail = urlparse(url).path.rsplit("/", 1)[-1]
+    return tail or None
+
+
+def _parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _pdf_url(links: list[dict[str, Any]]) -> str | None:
+    for link in links:
+        if link.get("title") == "pdf" or link.get("type") == "application/pdf":
+            href = link.get("href")
+            return href if isinstance(href, str) else None
+    return None
+
+
+def _normalize_payload(payload: dict[str, Any]) -> Paper:
+    raw_id = _arxiv_id_from_url(payload.get("id"))
+    if not raw_id:
+        raise ValueError("arXiv entry is missing an id")
+    bare_id = normalize_arxiv_id(raw_id)
+    external_ids = {"arxiv": bare_id}
+
+    title = " ".join((payload.get("title") or "").split())
+    abstract = " ".join((payload.get("summary") or "").split())
+    authors = [Author(name=name) for name in payload.get("authors", [])]
+
+    published = _parse_dt(payload.get("published"))
+    if published is None:
+        raise ValueError(f"arXiv entry {bare_id} is missing a published date")
+
+    return Paper(
+        id=canonical_id(external_ids, title, authors),
+        external_ids=external_ids,
+        title=title,
+        abstract=abstract,
+        authors=authors,
+        categories=list(payload.get("categories", [])),
+        published_at=published,
+        updated_at=_parse_dt(payload.get("updated")),
+        source="arxiv",
+        url=payload.get("id"),
+        pdf_url=_pdf_url(payload.get("links", [])),
+    )
