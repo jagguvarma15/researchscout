@@ -119,7 +119,12 @@ def sources_test(
 @db_app.command("upgrade")
 def db_upgrade() -> None:
     """Apply database migrations (alembic upgrade head)."""
-    _todo("db upgrade", "PR 03")
+    from alembic.config import Config
+
+    from alembic import command
+
+    command.upgrade(Config("alembic.ini"), "head")
+    typer.secho("Database is at head.", fg=typer.colors.GREEN)
 
 
 @signals_app.command("show")
