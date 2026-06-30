@@ -1,0 +1,8 @@
+# Source registry — enabling/disabling a source is config, not code.
+# This is a stub for PR 01; it becomes load-bearing in PR 02 (Source interface + registry).
+sources:
+  arxiv:
+    enabled: true
+    kind: content
+    cadence: daily
+    categories: [cs.LG, cs.AI, cs.CL]
