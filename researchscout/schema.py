@@ -11,7 +11,7 @@ import hashlib
 import re
 import unicodedata
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -22,7 +22,7 @@ class Author(BaseModel):
     affiliation: str | None = None
 
 
-class SignalType(str, Enum):
+class SignalType(StrEnum):
     """Kinds of evidence about a paper's importance, observed over time."""
 
     citation = "citation"

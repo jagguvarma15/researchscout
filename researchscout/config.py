@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """ResearchScout settings. Override any field via ``RS_<FIELD>`` env vars or a local ``.env``."""
+    """Settings; override any field via ``RS_<FIELD>`` env vars or a local ``.env`` file."""
 
     model_config = SettingsConfigDict(
         env_prefix="RS_",
