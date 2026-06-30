@@ -43,9 +43,46 @@ def version() -> None:
 
 
 @app.command()
-def ingest() -> None:
+def ingest(
+    since: Annotated[datetime, typer.Option(help="Ingest items submitted on/after this date.")],
+    source: Annotated[str, typer.Option(help="Source name.")] = "arxiv",
+    category: Annotated[str | None, typer.Option(help="Category override, e.g. cs.LG.")] = None,
+    max_items: Annotated[int | None, typer.Option("--max", help="Max items to ingest.")] = None,
+) -> None:
     """Fetch a source, normalize, dedup, and store (idempotent, replayable)."""
-    _todo("ingest", "PR 04")
+    import httpx
+
+    from researchscout.ingest.pipeline import run_ingest
+    from researchscout.sources import get_source
+    from researchscout.sources.arxiv import ArxivSource
+    from researchscout.store.db import session_scope
+
+    try:
+        src = get_source(source)
+    except KeyError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    if category is not None and isinstance(src, ArxivSource):
+        src.categories = [category]
+
+    try:
+        with session_scope() as session:
+            summary = run_ingest(session, src, since, max_items=max_items)
+    except httpx.HTTPStatusError as exc:
+        code = exc.response.status_code
+        hint = " (rate limited — wait and retry)" if code == 429 else ""
+        typer.secho(f"{source}: request failed with HTTP {code}{hint}.", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+    except httpx.HTTPError as exc:
+        typer.secho(f"{source}: request failed: {exc}", fg=typer.colors.RED)
+        raise typer.Exit(code=1) from exc
+
+    typer.secho(
+        f"{summary.source}: fetched={summary.fetched} new={summary.new_papers} "
+        f"collapsed={summary.collapsed} raw={summary.raw_stored}",
+        fg=typer.colors.GREEN,
+    )
 
 
 @app.command()
