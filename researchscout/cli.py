@@ -126,9 +126,28 @@ def search(
 
 
 @app.command()
-def ask() -> None:
+def ask(
+    question: Annotated[str, typer.Argument(help="Your question / topic.")],
+    days: Annotated[int | None, typer.Option(help="Freshness window in days.")] = None,
+    k: Annotated[int, typer.Option("-k", help="Papers to ground the answer on.")] = 8,
+) -> None:
     """Answer a question with a grounded, cited summary of recent papers."""
-    _todo("ask", "PR 07")
+    from researchscout.answer import answer
+    from researchscout.embed.local import LocalEmbedder
+    from researchscout.llm.openai_compat import OpenAICompatLLM
+    from researchscout.store.db import session_scope
+
+    embedder = LocalEmbedder()
+    llm = OpenAICompatLLM()
+    with session_scope() as session:
+        result = answer(session, embedder, llm, question, k=k, days=days)
+
+    typer.echo(result.text)
+    if result.cited:
+        typer.secho(f"\nCited: {', '.join(result.cited)}", fg=typer.colors.GREEN)
+    if result.hallucinated:
+        dropped = ", ".join(result.hallucinated)
+        typer.secho(f"Dropped (not retrieved): {dropped}", fg=typer.colors.YELLOW)
 
 
 @sources_app.command("list")
