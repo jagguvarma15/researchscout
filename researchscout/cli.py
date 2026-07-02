@@ -101,9 +101,28 @@ def index(
 
 
 @app.command()
-def search() -> None:
+def search(
+    query: Annotated[str, typer.Argument(help="Search query / topic.")],
+    days: Annotated[int | None, typer.Option(help="Freshness window in days.")] = None,
+    category: Annotated[str | None, typer.Option(help="Filter to a category, e.g. cs.LG.")] = None,
+    k: Annotated[int, typer.Option("-k", "--top-k", help="Number of results.")] = 10,
+) -> None:
     """Freshness-aware semantic search over stored papers."""
-    _todo("search", "PR 06")
+    from researchscout.embed.local import LocalEmbedder
+    from researchscout.retrieve.search import retrieve
+    from researchscout.store.db import session_scope
+
+    embedder = LocalEmbedder()
+    categories = [category] if category else None
+    with session_scope() as session:
+        results = retrieve(session, embedder, query, k=k, days=days, categories=categories)
+
+    if not results:
+        typer.secho("No results in the freshness window.", fg=typer.colors.YELLOW)
+        return
+    for item in results:
+        paper = item.paper
+        typer.echo(f"  {item.score:.3f}  {paper.id}  {paper.published_at:%Y-%m-%d}  {paper.title}")
 
 
 @app.command()
