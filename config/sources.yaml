@@ -6,3 +6,7 @@ sources:
     kind: content
     cadence: daily
     categories: [cs.LG, cs.AI, cs.CL]
+  semantic_scholar:
+    enabled: true
+    kind: signal
+    cadence: daily
