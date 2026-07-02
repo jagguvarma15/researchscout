@@ -212,6 +212,34 @@ def db_upgrade() -> None:
 
 
 @signals_app.command("show")
-def signals_show() -> None:
+def signals_show(
+    paper_id: Annotated[str, typer.Argument(help="Canonical paper id.")],
+    days: Annotated[int, typer.Option(help="Look-back window in days.")] = 90,
+) -> None:
     """Show the signal time series for a paper."""
-    _todo("signals show", "PR 08")
+    from datetime import UTC, datetime, timedelta
+
+    from sqlalchemy import select
+
+    from researchscout.store.db import session_scope
+    from researchscout.store.models import SignalRow
+
+    since = datetime.now(UTC) - timedelta(days=days)
+    with session_scope() as session:
+        rows = (
+            session.execute(
+                select(SignalRow)
+                .where(SignalRow.paper_id == paper_id, SignalRow.observed_at >= since)
+                .order_by(SignalRow.type, SignalRow.observed_at)
+            )
+            .scalars()
+            .all()
+        )
+
+    if not rows:
+        typer.secho(f"No signals for {paper_id} in the last {days}d.", fg=typer.colors.YELLOW)
+        return
+    for row in rows:
+        typer.echo(
+            f"  {row.observed_at:%Y-%m-%d %H:%M}  {row.type:<16} {row.source:<14} {row.value}"
+        )
