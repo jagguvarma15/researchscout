@@ -33,7 +33,7 @@ def session(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
         s.execute(
             text(
                 "TRUNCATE papers, paper_external_ids, raw_items, ingest_state, "
-                "paper_embeddings RESTART IDENTITY CASCADE"
+                "paper_embeddings, signals RESTART IDENTITY CASCADE"
             )
         )
         yield s
