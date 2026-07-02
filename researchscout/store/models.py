@@ -1,4 +1,4 @@
-"""ORM models: canonical papers, their external-id map, raw landing, ingest cursors, embeddings."""
+"""ORM models: papers, external-id map, raw landing, ingest cursors, embeddings, and signals."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -72,3 +72,16 @@ class PaperEmbeddingRow(Base):
     model_id: Mapped[str] = mapped_column(String, primary_key=True)
     embedding: Mapped[list[float]] = mapped_column(Vector(384))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SignalRow(Base):
+    __tablename__ = "signals"
+    __table_args__ = (Index("ix_signals_paper_type_time", "paper_id", "type", "observed_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    paper_id: Mapped[str] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"))
+    type: Mapped[str] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String)
+    value: Mapped[float] = mapped_column(Float)
+    signal_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
