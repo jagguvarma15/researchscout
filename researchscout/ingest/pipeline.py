@@ -16,6 +16,7 @@ from researchscout.schema import Paper, Signal
 from researchscout.sources.base import Source
 from researchscout.store.papers import find_by_external_id, link_external_ids, upsert_paper
 from researchscout.store.raw import append_raw
+from researchscout.store.signals import append_signal
 from researchscout.store.state import save_state
 
 
@@ -25,6 +26,7 @@ class IngestSummary:
     fetched: int = 0
     new_papers: int = 0
     collapsed: int = 0
+    signals: int = 0
     raw_stored: int = 0
 
 
@@ -58,7 +60,9 @@ def run_ingest(
 
             obj = source.normalize(raw)
             if isinstance(obj, Signal):
-                raise NotImplementedError("signal ingestion arrives in PR 09")
+                append_signal(session, obj)
+                summary.signals += 1
+                continue
             existing = _resolve_existing(session, obj)
             if existing is not None:
                 link_external_ids(session, existing, obj.external_ids)
