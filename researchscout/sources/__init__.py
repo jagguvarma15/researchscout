@@ -1,6 +1,6 @@
 """Source connectors and the registry. Importing this package registers all connectors."""
 
-from researchscout.sources import arxiv  # noqa: F401  (import registers ArxivSource)
+from researchscout.sources import arxiv, s2_signal  # noqa: F401  (import registers connectors)
 from researchscout.sources.base import (
     RawItem,
     Source,
