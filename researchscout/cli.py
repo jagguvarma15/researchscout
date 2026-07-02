@@ -80,7 +80,7 @@ def ingest(
 
     typer.secho(
         f"{summary.source}: fetched={summary.fetched} new={summary.new_papers} "
-        f"collapsed={summary.collapsed} raw={summary.raw_stored}",
+        f"collapsed={summary.collapsed} signals={summary.signals} raw={summary.raw_stored}",
         fg=typer.colors.GREEN,
     )
 
