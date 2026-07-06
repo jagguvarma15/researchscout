@@ -1,0 +1,74 @@
+---
+import Base from '../../layouts/Base.astro';
+import { fetchDigest, formatDate, renderDigestBody } from '../../lib/api';
+
+const slug = Astro.params.slug ?? '';
+const digest = await fetchDigest(slug);
+if (digest === null) {
+  Astro.response.status = 404;
+}
+---
+
+<Base title={digest?.title ?? 'Not found'}>
+  {
+    digest === null ? (
+      <>
+        <h1>Digest not found</h1>
+        <p>
+          Nothing published under <code>{slug}</code>.{' '}
+          <a href="/digests">Back to the archive</a>.
+        </p>
+      </>
+    ) : (
+      <article>
+        <h1>{digest.title}</h1>
+        <p class="meta">
+          {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
+        </p>
+        <div
+          class="body"
+          set:html={renderDigestBody(digest.body, new Set(digest.items.map((i) => i.paper_id)))}
+        />
+        <h2>Ranked papers</h2>
+        <ol class="ranked">
+          {digest.items.map((item) => (
+            <li>
+              <a href={`/papers/${item.paper_id}`}>{item.title}</a>
+              <span class="meta">
+                score {item.score.toFixed(3)}
+                {item.citations > 0 && ` · ${item.citations} citations`}
+              </span>
+            </li>
+          ))}
+        </ol>
+        <p>
+          <a href="/digests">Back to the archive</a>
+        </p>
+      </article>
+    )
+  }
+</Base>
+
+<style>
+  h1 {
+    font-size: 1.4rem;
+    margin-bottom: 0.25rem;
+  }
+  h2 {
+    font-size: 1.05rem;
+    margin-top: 2rem;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .body {
+    margin-top: 1rem;
+  }
+  .ranked li {
+    margin: 0.4rem 0;
+  }
+  .ranked .meta {
+    margin-left: 0.5rem;
+  }
+</style>
