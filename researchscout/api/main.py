@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from researchscout import __version__
-from researchscout.api.routers import ask, papers
+from researchscout.api.routers import ask, chat, papers
 
 
 def create_app() -> FastAPI:
@@ -13,6 +13,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="ResearchScout API", version=__version__)
     app.include_router(papers.router, prefix="/v1")
     app.include_router(ask.router, prefix="/v1")
+    app.include_router(chat.router, prefix="/v1")
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
