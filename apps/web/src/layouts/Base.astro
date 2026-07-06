@@ -25,6 +25,7 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
         {
           Astro.locals.user ? (
             <>
+              <a href="/saved">Saved</a>
               <span class="who">{Astro.locals.user.username}</span>
               <a href="/auth/logout">Sign out</a>
             </>
