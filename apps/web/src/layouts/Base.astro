@@ -1,4 +1,6 @@
 ---
+import ChatDrawer from '../components/ChatDrawer.svelte';
+
 interface Props {
   title?: string;
 }
@@ -38,6 +40,7 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
     <footer>
       <span>Papers from arXiv and friends, scored by freshness and signals.</span>
     </footer>
+    <ChatDrawer client:load authenticated={Astro.locals.user !== null} />
   </body>
 </html>
 
