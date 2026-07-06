@@ -4,8 +4,19 @@ kind: Ingress
 metadata:
   name: researchscout
   labels: {{- include "rs.labels" . | nindent 4 }}
+  {{- if .Values.ingress.tls.enabled }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.issuer }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.siteHost }}
+        - {{ .Values.ingress.authHost }}
+      secretName: researchscout-tls
+  {{- end }}
   rules:
     - host: {{ .Values.ingress.siteHost }}
       http:
