@@ -12,6 +12,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
+from researchscout.events.sink import EventSink, NullSink
 from researchscout.schema import Paper, Signal
 from researchscout.sources.base import Source
 from researchscout.store.papers import find_by_external_id, link_external_ids, upsert_paper
@@ -45,8 +46,14 @@ def run_ingest(
     since: datetime,
     *,
     max_items: int | None = None,
+    events: EventSink | None = None,
 ) -> IngestSummary:
-    """Fetch a source page by page, normalize, dedup, and store; return a run summary."""
+    """Fetch a source page by page, normalize, dedup, and store; return a run summary.
+
+    ``events`` receives a ``paper_created`` per genuinely new paper (collapsed duplicates and
+    signals stay silent); the default ``NullSink`` keeps the pull path event-free.
+    """
+    sink = events if events is not None else NullSink()
     summary = IngestSummary(source=source.name)
     cursor: str | None = None
     while True:
@@ -70,10 +77,12 @@ def run_ingest(
             else:
                 upsert_paper(session, obj)
                 summary.new_papers += 1
+                sink.paper_created(obj)
 
         save_state(session, source.name, next_cursor, since)
         reached_max = max_items is not None and summary.fetched >= max_items
         if next_cursor is None or reached_max:
             break
         cursor = next_cursor
+    sink.flush()
     return summary
