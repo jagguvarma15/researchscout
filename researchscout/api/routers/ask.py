@@ -9,6 +9,7 @@ from openai import OpenAIError
 from sqlalchemy.orm import Session
 
 from researchscout.answer import answer
+from researchscout.api.auth import User, require_user
 from researchscout.api.deps import get_embedder, get_llm, get_session
 from researchscout.api.schemas import AskRequest, AskResponse, UsedPaper
 from researchscout.embed.base import Embedder
@@ -20,6 +21,7 @@ router = APIRouter(tags=["ask"])
 @router.post("/ask")
 def ask(
     body: AskRequest,
+    user: Annotated[User, Depends(require_user)],
     session: Annotated[Session, Depends(get_session)],
     embedder: Annotated[Embedder, Depends(get_embedder)],
     llm: Annotated[LLM, Depends(get_llm)],
