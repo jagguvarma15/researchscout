@@ -49,6 +49,19 @@ export async function fetchPapers(params: FeedParams): Promise<PaperSummary[] | 
   }
 }
 
+export async function fetchSaved(accessToken: string): Promise<PaperSummary[] | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/me/saved`, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { items: PaperSummary[] };
+    return body.items;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchPaper(id: string): Promise<PaperSummary | null> {
   try {
     const response = await fetch(`${API_URL}/v1/papers/${id}`);
