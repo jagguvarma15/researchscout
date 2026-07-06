@@ -14,11 +14,14 @@ services:
       RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
       RS_OIDC_ISSUER: http://localhost:8080/realms/researchscout
       RS_OIDC_JWKS_URL: http://keycloak:8080/realms/researchscout/protocol/openid-connect/certs
+      RS_REDIS_URL: redis://redis:6379
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     healthcheck:
       test:
         [

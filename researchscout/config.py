@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Where to fetch signing keys; defaults to the issuer's JWKS endpoint. Override when the
     # issuer URL (what the browser sees) is not reachable from inside the container network.
     oidc_jwks_url: str | None = None
+    redis_url: str = "redis://localhost:6379"
+    chat_rate_limit: int = 20
+    chat_rate_window_seconds: int = 600
 
 
 def get_settings() -> Settings:
