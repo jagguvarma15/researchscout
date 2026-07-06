@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379"
     chat_rate_limit: int = 20
     chat_rate_window_seconds: int = 600
+    # Host default targets compose's published listener; containers override to kafka:9092.
+    kafka_bootstrap_servers: str = "localhost:29092"
 
 
 def get_settings() -> Settings:
