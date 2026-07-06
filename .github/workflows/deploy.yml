@@ -45,8 +45,29 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/researchscout-${{ matrix.name }}:${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/researchscout-${{ matrix.name }}:latest
 
-  deploy:
+  scan:
     needs: build
+    if: vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    strategy:
+      matrix:
+        name: [api, web, worker]
+    steps:
+      - name: Scan the pushed image before it ships
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository_owner }}/researchscout-${{ matrix.name }}:${{ github.sha }}
+          severity: CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy:
+    needs: scan
     if: vars.DEPLOY_ENABLED == 'true'
     runs-on: ubuntu-latest
     steps:

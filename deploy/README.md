@@ -47,6 +47,19 @@ Push to main. `ci.yml` gates; `deploy.yml` builds the three arm64 images nativel
 to the VM, and runs `helm secrets upgrade` with that tag. Rollback is
 `helm rollback rs <revision>` on the VM.
 
+## Hardening
+
+- **Backups**: create an Object Storage bucket (`researchscout-backups`) and a customer secret
+  key in OCI, put the S3 endpoint + keys in the encrypted secrets values, and set
+  `backup.enabled=true` in values-prod. Nightly `pg_dump` lands in the bucket; restore with
+  `pg_restore -d researchscout <file>`.
+- **Status page**: set `uptimeKuma.enabled=true` and point a `status.` DNS record at the VM;
+  configure monitors for the site, auth, and a dead-man check on the digest CronJob.
+- **Renovate**: install the Renovate GitHub App on the repo — `renovate.json` groups
+  OpenTelemetry and Astro packages and batches minor/patch bumps weekly.
+- **Trivy**: CI fails on CRITICAL/HIGH filesystem findings and leaked secrets; deploys scan
+  each pushed image for CRITICALs before the helm upgrade runs.
+
 ## Memory budget on 12GB
 
 k3s ~1GB, app plane ~4.5GB, Kafka+Keycloak ~1.5GB, obs plane ~2.5GB: ~9.5GB, plus the 4GB
