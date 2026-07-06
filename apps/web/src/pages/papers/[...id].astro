@@ -1,0 +1,88 @@
+---
+import Base from '../../layouts/Base.astro';
+import { fetchPaper, formatDate } from '../../lib/api';
+
+// Rest param, not a plain [id]: canonical ids like doi:10.1145/nnn.mmm contain slashes.
+const id = Astro.params.id ?? '';
+const paper = await fetchPaper(id);
+if (paper === null) {
+  Astro.response.status = 404;
+}
+---
+
+<Base title={paper?.title ?? 'Not found'}>
+  {
+    paper === null ? (
+      <>
+        <h1>Paper not found</h1>
+        <p>
+          Nothing stored under <code>{id}</code>. <a href="/">Back to the feed</a>.
+        </p>
+      </>
+    ) : (
+      <article>
+        <h1>{paper.title}</h1>
+        <p class="meta">
+          {formatDate(paper.published_at)}
+          {paper.venue && ` · ${paper.venue}`}
+          {' · '}
+          <code>{paper.id}</code>
+          {paper.categories.map((cat) => (
+            <span class="badge">{cat}</span>
+          ))}
+        </p>
+        <p class="authors">
+          {paper.authors
+            .map((author) =>
+              author.affiliation ? `${author.name} (${author.affiliation})` : author.name,
+            )
+            .join(', ')}
+        </p>
+        <p class="abstract">{paper.abstract}</p>
+        <p class="links">
+          {paper.url && (
+            <a href={paper.url} rel="noopener">
+              Landing page
+            </a>
+          )}
+          {paper.pdf_url && (
+            <a href={paper.pdf_url} rel="noopener">
+              PDF
+            </a>
+          )}
+          <a href="/">Back to the feed</a>
+        </p>
+      </article>
+    )
+  }
+</Base>
+
+<style>
+  h1 {
+    font-size: 1.4rem;
+    line-height: 1.3;
+    margin-bottom: 0.25rem;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .badge {
+    display: inline-block;
+    margin-left: 0.5rem;
+    padding: 0.05rem 0.45rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    font-size: 0.75rem;
+  }
+  .authors {
+    font-size: 0.92rem;
+  }
+  .abstract {
+    white-space: pre-line;
+  }
+  .links {
+    display: flex;
+    gap: 1rem;
+  }
+</style>
