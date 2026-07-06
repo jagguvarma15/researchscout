@@ -11,6 +11,7 @@ from researchscout.schema import Paper
 TOPIC_INGEST_JOBS = "ingest.jobs"
 TOPIC_PAPERS_NEW = "papers.new"
 TOPIC_PAPERS_SAVED = "papers.saved"
+TOPIC_DIGESTS_PUBLISHED = "digests.published"
 
 
 class IngestJob(BaseModel):
@@ -38,3 +39,13 @@ class PaperSaved(BaseModel):
     paper_id: str
     saved: bool
     at: datetime
+
+
+class DigestPublished(BaseModel):
+    """A weekly digest was (re)published; consumed by the Airtable archive sync."""
+
+    schema_version: int = 1
+    slug: str
+    title: str
+    period_start: datetime
+    period_end: datetime
