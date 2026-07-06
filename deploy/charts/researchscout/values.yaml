@@ -88,3 +88,20 @@ cron:
   digest:
     enabled: false
     schedule: "0 7 * * 1"
+
+# Nightly off-box dumps to any S3-compatible bucket (OCI Object Storage on the free tier).
+# Credentials belong in the SOPS-encrypted secrets values, not here.
+backup:
+  enabled: false
+  schedule: "0 4 * * *"
+  bucket: researchscout-backups
+  s3:
+    provider: Other
+    endpoint: ""
+    accessKey: ""
+    secretKey: ""
+
+uptimeKuma:
+  enabled: false
+  image: louislam/uptime-kuma:1
+  host: status.example.com
