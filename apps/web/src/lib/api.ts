@@ -75,3 +75,53 @@ export async function fetchPaper(id: string): Promise<PaperSummary | null> {
 export function formatDate(iso: string): string {
   return iso.slice(0, 10);
 }
+
+export interface DigestSummary {
+  slug: string;
+  title: string;
+  period_start: string;
+  period_end: string;
+}
+
+export interface DigestDetail extends DigestSummary {
+  body: string;
+  items: { paper_id: string; title: string; score: number; citations: number }[];
+}
+
+export async function fetchDigests(): Promise<DigestSummary[] | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/digests`);
+    if (!response.ok) return null;
+    const body = (await response.json()) as { items: DigestSummary[] };
+    return body.items;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchDigest(slug: string): Promise<DigestDetail | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/digests/${slug}`);
+    if (!response.ok) return null;
+    return (await response.json()) as DigestDetail;
+  } catch {
+    return null;
+  }
+}
+
+// Digest bodies are plain LLM text: escape everything, then turn [scheme:id] citations into
+// paper links and blank lines into paragraph breaks. Only ids actually in the digest get
+// linked — an id the model invented stays as escaped plain text instead of a dead link.
+export function renderDigestBody(text: string, validIds: Set<string>): string {
+  const escaped = text
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+  const linked = escaped.replace(/\[([a-z]+:[^\]\s]+)\]/g, (match, id: string) =>
+    validIds.has(id) ? `<a href="/papers/${id}">[${id}]</a>` : match,
+  );
+  return linked
+    .split(/\n{2,}/)
+    .map((block) => `<p>${block.replaceAll('\n', '<br />')}</p>`)
+    .join('');
+}
