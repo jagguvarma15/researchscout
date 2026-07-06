@@ -10,6 +10,7 @@ from researchscout.schema import Paper
 
 TOPIC_INGEST_JOBS = "ingest.jobs"
 TOPIC_PAPERS_NEW = "papers.new"
+TOPIC_PAPERS_SAVED = "papers.saved"
 
 
 class IngestJob(BaseModel):
@@ -27,3 +28,13 @@ class PaperCreated(BaseModel):
 
     schema_version: int = 1
     paper: Paper
+
+
+class PaperSaved(BaseModel):
+    """A user saved (or unsaved) a paper; consumed by the Airtable reading-list sync."""
+
+    schema_version: int = 1
+    user_sub: str
+    paper_id: str
+    saved: bool
+    at: datetime
