@@ -45,5 +45,15 @@ services:
       timeout: 3s
       retries: 10
 
+  web:
+    build:
+      context: apps/web
+      dockerfile: ../../deploy/docker/web.Dockerfile
+    profiles: ["core"]
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "4321:4321"
+
 volumes:
   pgdata:
