@@ -1,0 +1,23 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "schedule": ["before 8am on monday"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Group the OpenTelemetry SDK and instrumentation packages (versioned in lockstep)",
+      "matchPackageNames": ["/^opentelemetry-/"],
+      "groupName": "opentelemetry"
+    },
+    {
+      "description": "Group Astro and its integrations",
+      "matchPackageNames": ["astro", "/^@astrojs//"],
+      "groupName": "astro"
+    },
+    {
+      "description": "Patch and minor updates merge quietly; majors get their own PRs",
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "minor-and-patch"
+    }
+  ]
+}
