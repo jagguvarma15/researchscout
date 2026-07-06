@@ -168,6 +168,76 @@ def serve_api(
     uvicorn.run("researchscout.api.main:app", host=host, port=port, reload=reload)
 
 
+@app.command()
+def digest(
+    days: Annotated[
+        int | None, typer.Option(help="Window in days (default from settings).")
+    ] = None,
+    k: Annotated[int | None, typer.Option("-k", help="Papers to include.")] = None,
+) -> None:
+    """Build and publish this week's digest (LLM summary over the window's top papers)."""
+    from researchscout.config import get_settings
+    from researchscout.digest import build_digest
+    from researchscout.events.publish import publish_digest_published
+    from researchscout.llm.openai_compat import OpenAICompatLLM
+    from researchscout.store.db import session_scope
+    from researchscout.store.digests import upsert_digest
+
+    settings = get_settings()
+    window = days if days is not None else settings.digest_days
+    top_k = k if k is not None else settings.digest_top_k
+    llm = OpenAICompatLLM()
+    with session_scope() as session:
+        result = build_digest(session, llm, days=window, k=top_k)
+        if result is None:
+            typer.secho(f"No papers in the last {window}d — no digest.", fg=typer.colors.YELLOW)
+            raise typer.Exit(code=1)
+        upsert_digest(session, result)
+    publish_digest_published(result.slug, result.title, result.period_start, result.period_end)
+    typer.secho(
+        f"published {result.slug}: {len(result.items)} papers, {len(result.cited)} cited",
+        fg=typer.colors.GREEN,
+    )
+
+
+@jobs_app.command("emit-watchlist")
+def jobs_emit_watchlist(
+    since_days: Annotated[int, typer.Option(help="Ingest window per job, in days.")] = 1,
+) -> None:
+    """Emit one ingest job per enabled Airtable watchlist row (the scheduler entrypoint)."""
+    from datetime import UTC, timedelta
+
+    from pyairtable import Api
+
+    from researchscout.config import get_settings
+    from researchscout.events.kafka import ensure_topics, producer
+    from researchscout.events.schemas import TOPIC_INGEST_JOBS, TOPIC_PAPERS_NEW
+    from researchscout.ingest.watchlist import jobs_from_rows
+
+    settings = get_settings()
+    if not settings.airtable_api_key or not settings.airtable_base_id:
+        typer.secho(
+            "RS_AIRTABLE_API_KEY and RS_AIRTABLE_BASE_ID are required.", fg=typer.colors.RED
+        )
+        raise typer.Exit(code=1)
+    table = Api(settings.airtable_api_key).table(
+        settings.airtable_base_id, settings.airtable_watchlist_table
+    )
+    since = datetime.now(UTC) - timedelta(days=since_days)
+    jobs = jobs_from_rows(table.all(), since=since)
+    if not jobs:
+        typer.secho("Watchlist has no enabled rows.", fg=typer.colors.YELLOW)
+        return
+    ensure_topics([TOPIC_INGEST_JOBS, TOPIC_PAPERS_NEW])
+    client = producer()
+    for job in jobs:
+        client.produce(
+            TOPIC_INGEST_JOBS, key=job.source.encode(), value=job.model_dump_json().encode()
+        )
+    client.flush()
+    typer.secho(f"emitted {len(jobs)} watchlist job(s)", fg=typer.colors.GREEN)
+
+
 @jobs_app.command("emit-ingest")
 def jobs_emit_ingest(
     since: Annotated[datetime, typer.Option(help="Ingest items submitted on/after this date.")],
