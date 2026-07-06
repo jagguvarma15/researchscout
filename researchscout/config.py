@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     airtable_api_key: str = ""
     airtable_base_id: str = ""
     airtable_saved_table: str = "Saved papers"
+    airtable_watchlist_table: str = "Watchlist"
+    airtable_digest_table: str = "Digest archive"
+    digest_days: int = 7
+    digest_top_k: int = 10
 
 
 def get_settings() -> Settings:
