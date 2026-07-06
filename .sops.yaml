@@ -1,0 +1,6 @@
+# Encrypt everything under deploy/secrets/ to the deploy age key.
+# Generate a key with `age-keygen`, put its public key here, and keep the private key in the
+# SOPS_AGE_KEY GitHub secret and on the VM (~/.config/sops/age/keys.txt).
+creation_rules:
+  - path_regex: deploy/secrets/.*\.yaml$
+    age: age1REPLACE_WITH_YOUR_PUBLIC_KEY
