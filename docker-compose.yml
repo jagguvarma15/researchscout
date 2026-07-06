@@ -1,6 +1,8 @@
 # Profiles group services into RAM-budgeted subsets for the 8GB dev machine:
-#   docker compose --profile core up        # db + api
-# `db` has no profile so `docker compose up -d db` keeps working on its own.
+#   docker compose --profile core up        # db + api + web + keycloak + redis
+#   docker compose --profile events up      # kafka + ingest/embed workers (+ db)
+# Run core plus at most one extra profile at a time; `db` has no profile so
+# `docker compose up -d db` keeps working on its own.
 services:
   api:
     build:
@@ -91,5 +93,57 @@ services:
     ports:
       - "6379:6379"
 
+  kafka:
+    image: apache/kafka:4.3.1
+    profiles: ["events"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,PLAINTEXT_HOST://:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_HEAP_OPTS: -Xmx256m
+    ports:
+      - "29092:29092"
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+
+  ingest-worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker.Dockerfile
+    profiles: ["events"]
+    command: ["scout", "worker", "ingest"]
+    environment:
+      RS_DATABASE_URL: postgresql+psycopg://researchscout:researchscout@db:5432/researchscout
+      RS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+  embed-worker:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker.Dockerfile
+    profiles: ["events"]
+    command: ["scout", "worker", "embed"]
+    environment:
+      RS_DATABASE_URL: postgresql+psycopg://researchscout:researchscout@db:5432/researchscout
+      RS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
 volumes:
   pgdata:
+  kafkadata:

@@ -24,10 +24,14 @@ sources_app = typer.Typer(help="Inspect and test content/signal sources.", no_ar
 db_app = typer.Typer(help="Database setup and migrations.", no_args_is_help=True)
 signals_app = typer.Typer(help="Inspect the signal time series.", no_args_is_help=True)
 serve_app = typer.Typer(help="Run ResearchScout services.", no_args_is_help=True)
+jobs_app = typer.Typer(help="Emit event-plane jobs.", no_args_is_help=True)
+worker_app = typer.Typer(help="Run event-plane workers.", no_args_is_help=True)
 app.add_typer(sources_app, name="sources")
 app.add_typer(db_app, name="db")
 app.add_typer(signals_app, name="signals")
 app.add_typer(serve_app, name="serve")
+app.add_typer(jobs_app, name="jobs")
+app.add_typer(worker_app, name="worker")
 
 
 def _todo(command: str, pr: str) -> None:
@@ -162,6 +166,52 @@ def serve_api(
     import uvicorn
 
     uvicorn.run("researchscout.api.main:app", host=host, port=port, reload=reload)
+
+
+@jobs_app.command("emit-ingest")
+def jobs_emit_ingest(
+    since: Annotated[datetime, typer.Option(help="Ingest items submitted on/after this date.")],
+    source: Annotated[str, typer.Option(help="Source name.")] = "arxiv",
+    category: Annotated[str | None, typer.Option(help="Category override, e.g. cs.LG.")] = None,
+    max_items: Annotated[int | None, typer.Option("--max", help="Max items to ingest.")] = None,
+) -> None:
+    """Publish an ingest job to the event plane (requires the `kafka` extra)."""
+    from researchscout.events.kafka import ensure_topics, producer
+    from researchscout.events.schemas import TOPIC_INGEST_JOBS, TOPIC_PAPERS_NEW, IngestJob
+
+    job = IngestJob(
+        source=source,
+        since=since,
+        max_items=max_items,
+        categories=[category] if category else None,
+    )
+    ensure_topics([TOPIC_INGEST_JOBS, TOPIC_PAPERS_NEW])
+    client = producer()
+    client.produce(TOPIC_INGEST_JOBS, key=source.encode(), value=job.model_dump_json().encode())
+    client.flush()
+    typer.secho(f"emitted ingest job for {source} since {since:%Y-%m-%d}", fg=typer.colors.GREEN)
+
+
+@worker_app.command("ingest")
+def worker_ingest() -> None:
+    """Consume ingest jobs and store papers, publishing new ones to papers.new."""
+    import logging
+
+    from researchscout.workers.ingest_worker import run
+
+    logging.basicConfig(level=logging.INFO)
+    run()
+
+
+@worker_app.command("embed")
+def worker_embed() -> None:
+    """Consume papers.new and index embeddings."""
+    import logging
+
+    from researchscout.workers.embed_worker import run
+
+    logging.basicConfig(level=logging.INFO)
+    run()
 
 
 @sources_app.command("list")
