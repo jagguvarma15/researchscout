@@ -84,9 +84,9 @@ def answer_stream(
         span["retrieved"] = len(used)
         yield StreamMeta(retrieved=len(used), used=used)
         if not used:
-            yield Answer(
-                text="No recent papers match this question.", cited=[], hallucinated=[], used=[]
-            )
+            empty = "No recent papers match this question."
+            yield StreamDelta(text=empty)
+            yield Answer(text=empty, cited=[], hallucinated=[], used=[])
             return
 
         user_prompt = f"Question: {question}\n\nPapers:\n{_context(used)}"
