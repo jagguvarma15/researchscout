@@ -1,0 +1,23 @@
+# k3d overrides: locally built images, one replica of everything, embed worker off to spare
+# RAM on the 8GB dev machine (chat still works; indexing runs via `scout index` when needed).
+image:
+  pullPolicy: Never
+  api:
+    repository: researchscout/api
+    tag: local
+  web:
+    repository: researchscout/web
+    tag: local
+  worker:
+    repository: researchscout/worker
+    tag: local
+
+postgres:
+  storage: 1Gi
+
+kafka:
+  storage: 1Gi
+
+workers:
+  embed:
+    enabled: false
