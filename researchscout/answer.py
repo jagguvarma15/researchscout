@@ -7,6 +7,7 @@ invented (a hallucinated citation never survives into ``Answer.cited``).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
@@ -34,10 +35,71 @@ class Answer:
     used: list[ScoredPaper]
 
 
+@dataclass
+class StreamMeta:
+    """First stream event: what retrieval found, before any generation."""
+
+    retrieved: int
+    used: list[ScoredPaper]
+
+
+@dataclass
+class StreamDelta:
+    """A chunk of generated answer text."""
+
+    text: str
+
+
 def _context(papers: list[ScoredPaper]) -> str:
     return "\n\n".join(
         f"[{item.paper.id}] {item.paper.title}\n{item.paper.abstract}" for item in papers
     )
+
+
+def _post_check(text: str, used: list[ScoredPaper]) -> Answer:
+    """Split found citations into retrieved vs invented (invented never survive)."""
+    found = list(dict.fromkeys(_CITATION_RE.findall(text)))
+    valid = {item.paper.id for item in used}
+    cited = [cid for cid in found if cid in valid]
+    hallucinated = [cid for cid in found if cid not in valid]
+    return Answer(text=text, cited=cited, hallucinated=hallucinated, used=used)
+
+
+def answer_stream(
+    session: Session,
+    embedder: Embedder,
+    llm: LLM,
+    question: str,
+    *,
+    k: int = 8,
+    days: int | None = None,
+) -> Iterator[StreamMeta | StreamDelta | Answer]:
+    """Streaming variant of :func:`answer`: meta first, then deltas, then the final Answer.
+
+    The final :class:`Answer` carries the citation post-check over the accumulated text — the
+    same guarantee as the non-streaming path, it just arrives after the last delta.
+    """
+    with trace_span("ask", question=question, k=k, days=days, streaming=True) as span:
+        used = retrieve(session, embedder, question, k=k, days=days)
+        span["retrieved"] = len(used)
+        yield StreamMeta(retrieved=len(used), used=used)
+        if not used:
+            yield Answer(
+                text="No recent papers match this question.", cited=[], hallucinated=[], used=[]
+            )
+            return
+
+        user_prompt = f"Question: {question}\n\nPapers:\n{_context(used)}"
+        parts: list[str] = []
+        for delta in llm.stream(_SYSTEM_PROMPT, user_prompt):
+            parts.append(delta)
+            yield StreamDelta(text=delta)
+        span["model"] = llm.model
+
+        result = _post_check("".join(parts), used)
+        span["cited"] = len(result.cited)
+        span["hallucinated"] = len(result.hallucinated)
+        yield result
 
 
 def answer(
@@ -62,10 +124,7 @@ def answer(
         text = llm.complete(_SYSTEM_PROMPT, user_prompt)
         span["model"] = llm.model
 
-        found = list(dict.fromkeys(_CITATION_RE.findall(text)))
-        valid = {item.paper.id for item in used}
-        cited = [cid for cid in found if cid in valid]
-        hallucinated = [cid for cid in found if cid not in valid]
-        span["cited"] = len(cited)
-        span["hallucinated"] = len(hallucinated)
-        return Answer(text=text, cited=cited, hallucinated=hallucinated, used=used)
+        result = _post_check(text, used)
+        span["cited"] = len(result.cited)
+        span["hallucinated"] = len(result.hallucinated)
+        return result
