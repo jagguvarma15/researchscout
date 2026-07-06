@@ -7,6 +7,7 @@ created lazily, so importing this module doesn't require a running server.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from functools import cached_property
 from typing import Any
 
@@ -44,3 +45,18 @@ class OpenAICompatLLM(LLM):
             temperature=temperature,
         )
         return str(response.choices[0].message.content or "")
+
+    def stream(self, system: str, user: str, *, temperature: float = 0.2) -> Iterator[str]:
+        response = self._client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=temperature,
+            stream=True,
+        )
+        for chunk in response:
+            # Some providers send keep-alive chunks with no choices.
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield str(chunk.choices[0].delta.content)
