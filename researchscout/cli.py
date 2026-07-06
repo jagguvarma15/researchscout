@@ -214,6 +214,17 @@ def worker_embed() -> None:
     run()
 
 
+@worker_app.command("airtable")
+def worker_airtable() -> None:
+    """Consume papers.saved and mirror reading lists into Airtable."""
+    import logging
+
+    from researchscout.workers.airtable_sync import run
+
+    logging.basicConfig(level=logging.INFO)
+    run()
+
+
 @sources_app.command("list")
 def sources_list(
     probe: Annotated[bool, typer.Option(help="Probe each source's health.")] = False,
