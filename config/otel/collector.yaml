@@ -1,0 +1,43 @@
+# One collector, one fan-out point. Apps only ever know OTLP/gRPC :4317; where telemetry
+# lands is decided here. To mirror everything to Dynatrace during a trial, uncomment the
+# otlphttp/dynatrace exporter and add it to each pipeline's exporter list.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 96
+  batch: {}
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+  # otlphttp/dynatrace:
+  #   endpoint: https://<tenant>.live.dynatrace.com/api/v2/otlp
+  #   headers:
+  #     Authorization: "Api-Token ${env:DT_API_TOKEN}"
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp/tempo]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/loki]
