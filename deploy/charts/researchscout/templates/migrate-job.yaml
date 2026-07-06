@@ -1,0 +1,26 @@
+# Runs alembic to head on every install/upgrade, before the app pods roll.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-migrate-{{ .Release.Revision }}
+  labels: {{- include "rs.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app: migrate
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: "{{ .Values.image.api.repository }}:{{ .Values.image.api.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["scout", "db", "upgrade"]
+          env:
+            - name: RS_DATABASE_URL
+              value: {{ include "rs.dbUrl" . | quote }}

@@ -1,0 +1,6 @@
+apiVersion: v2
+name: researchscout
+description: ResearchScout - the app plane (API, web, workers, Keycloak, Kafka, Postgres, Redis)
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
