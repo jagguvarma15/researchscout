@@ -7,6 +7,7 @@ from openai import OpenAIError
 import researchscout.api.routers.ask as ask_router
 import researchscout.api.routers.papers as papers_router
 from researchscout.answer import Answer
+from researchscout.api.auth import User, require_user
 from researchscout.api.deps import get_embedder, get_llm, get_session
 from researchscout.api.main import create_app
 from researchscout.retrieve.search import ScoredPaper
@@ -30,6 +31,7 @@ def _client() -> TestClient:
     app.dependency_overrides[get_session] = lambda: None
     app.dependency_overrides[get_embedder] = lambda: None
     app.dependency_overrides[get_llm] = lambda: None
+    app.dependency_overrides[require_user] = lambda: User(sub="tester", username="tester")
     return TestClient(app)
 
 

@@ -12,6 +12,8 @@ services:
       RS_LLM_BASE_URL: ${RS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
       RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
       RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
+      RS_OIDC_ISSUER: http://localhost:8080/realms/researchscout
+      RS_OIDC_JWKS_URL: http://keycloak:8080/realms/researchscout/protocol/openid-connect/certs
     ports:
       - "8000:8000"
     depends_on:
@@ -52,8 +54,39 @@ services:
     profiles: ["core"]
     environment:
       API_URL: http://api:8000
+      SITE_URL: http://localhost:4321
+      KEYCLOAK_PUBLIC_URL: http://localhost:8080
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      OIDC_CLIENT_ID: web-bff
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-dev-secret}
+      SESSION_REDIS_URL: redis://redis:6379
     ports:
       - "4321:4321"
+    depends_on:
+      - redis
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.6
+    profiles: ["core"]
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      # Fixed issuer so tokens validate identically from the browser (localhost) and from
+      # inside the compose network (keycloak); backchannel requests stay dynamic.
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      JAVA_OPTS_APPEND: -Xmx256m
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config/keycloak:/opt/keycloak/data/import:ro
+
+  redis:
+    image: redis:8-alpine
+    profiles: ["core"]
+    ports:
+      - "6379:6379"
 
 volumes:
   pgdata:

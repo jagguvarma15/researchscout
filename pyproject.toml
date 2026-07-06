@@ -23,6 +23,7 @@ dependencies = [
 api = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [project.scripts]
@@ -38,6 +39,7 @@ dev = [
     "testcontainers>=4.0",
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "pyjwt[crypto]>=2.9",
 ]
 
 [build-system]

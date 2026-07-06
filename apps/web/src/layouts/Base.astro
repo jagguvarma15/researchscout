@@ -19,6 +19,18 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
     <header>
       <a class="brand" href="/">ResearchScout</a>
       <span class="tagline">a radar for AI/ML research</span>
+      <span class="auth">
+        {
+          Astro.locals.user ? (
+            <>
+              <span class="who">{Astro.locals.user.username}</span>
+              <a href="/auth/logout">Sign out</a>
+            </>
+          ) : (
+            <a href="/auth/login">Sign in</a>
+          )
+        }
+      </span>
     </header>
     <main>
       <slot />
@@ -70,6 +82,15 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
   .tagline {
     color: var(--muted);
     font-size: 0.9rem;
+  }
+  .auth {
+    margin-left: auto;
+    display: flex;
+    gap: 0.75rem;
+    font-size: 0.9rem;
+  }
+  .auth .who {
+    color: var(--muted);
   }
   main {
     padding: 1.5rem 0 3rem;
