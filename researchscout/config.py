@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     llm_api_key: str = "ollama"
     freshness_days: int = 30
     sources_config_path: Path = Path("config/sources.yaml")
+    oidc_issuer: str = "http://localhost:8080/realms/researchscout"
+    oidc_audience: str = "api"
+    # Where to fetch signing keys; defaults to the issuer's JWKS endpoint. Override when the
+    # issuer URL (what the browser sees) is not reachable from inside the container network.
+    oidc_jwks_url: str | None = None
 
 
 def get_settings() -> Settings:
