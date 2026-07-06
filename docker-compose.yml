@@ -95,7 +95,7 @@ services:
 
   kafka:
     image: apache/kafka:4.3.1
-    profiles: ["events"]
+    profiles: ["events", "airtable"]
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -138,6 +138,25 @@ services:
     environment:
       RS_DATABASE_URL: postgresql+psycopg://researchscout:researchscout@db:5432/researchscout
       RS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+
+  # Opt-in profile: needs real Airtable credentials in the environment or .env.
+  airtable-sync:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker.Dockerfile
+    profiles: ["airtable"]
+    command: ["scout", "worker", "airtable"]
+    environment:
+      RS_DATABASE_URL: postgresql+psycopg://researchscout:researchscout@db:5432/researchscout
+      RS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      RS_AIRTABLE_API_KEY: ${RS_AIRTABLE_API_KEY:-}
+      RS_AIRTABLE_BASE_ID: ${RS_AIRTABLE_BASE_ID:-}
+      RS_AIRTABLE_SAVED_TABLE: ${RS_AIRTABLE_SAVED_TABLE:-Saved papers}
     depends_on:
       db:
         condition: service_healthy
