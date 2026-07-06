@@ -6,10 +6,12 @@ from fastapi import FastAPI
 
 from researchscout import __version__
 from researchscout.api.routers import ask, chat, digests, papers, saved
+from researchscout.obs.otel import init_otel, instrument_app
 
 
 def create_app() -> FastAPI:
     """Build the API app: routers under ``/v1``, liveness probe at ``/healthz``."""
+    init_otel("researchscout-api")
     app = FastAPI(title="ResearchScout API", version=__version__)
     app.include_router(papers.router, prefix="/v1")
     app.include_router(ask.router, prefix="/v1")
@@ -21,6 +23,7 @@ def create_app() -> FastAPI:
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    instrument_app(app)
     return app
 
 
