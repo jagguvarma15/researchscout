@@ -1,0 +1,87 @@
+# Defaults describe the single-node production shape; values-local.yaml overrides for k3d.
+# Real secret material is overridden at deploy time (SOPS + helm-secrets); the literals here
+# are dev-grade placeholders so local installs work out of the box.
+
+image:
+  pullPolicy: IfNotPresent
+  api:
+    repository: ghcr.io/jagguvarma15/researchscout-api
+    tag: latest
+  web:
+    repository: ghcr.io/jagguvarma15/researchscout-web
+    tag: latest
+  worker:
+    repository: ghcr.io/jagguvarma15/researchscout-worker
+    tag: latest
+
+# Browser-facing origins; also drive Keycloak's pinned issuer and the realm's redirect URIs.
+siteUrl: http://scout.localtest.me:8080
+authUrl: http://auth.localtest.me:8080
+
+ingress:
+  enabled: true
+  className: traefik
+  siteHost: scout.localtest.me
+  authHost: auth.localtest.me
+
+postgres:
+  image: pgvector/pgvector:pg16
+  storage: 2Gi
+  user: researchscout
+  password: researchscout
+  database: researchscout
+
+kafka:
+  enabled: true
+  image: apache/kafka:4.3.1
+  storage: 2Gi
+  heap: -Xmx256m
+
+redis:
+  image: redis:8-alpine
+
+keycloak:
+  image: quay.io/keycloak/keycloak:26.6
+  adminUser: admin
+  adminPassword: admin
+  javaOpts: -Xmx256m
+
+oidc:
+  clientSecret: dev-secret
+  demoUserEnabled: true
+
+llm:
+  baseUrl: http://host.k3d.internal:11435/v1
+  model: qwen2.5:3b-instruct
+  apiKey: ollama
+
+otel:
+  enabled: false
+  endpoint: http://otel-collector:4317
+
+api:
+  replicas: 1
+
+web:
+  replicas: 1
+
+workers:
+  ingest:
+    enabled: true
+  embed:
+    enabled: true
+  airtable:
+    enabled: false
+    apiKey: ""
+    baseId: ""
+
+cron:
+  ingest:
+    enabled: false
+    schedule: "0 6 * * *"
+    source: arxiv
+    sinceDays: 1
+    maxItems: 200
+  digest:
+    enabled: false
+    schedule: "0 7 * * 1"
