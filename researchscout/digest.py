@@ -1,0 +1,119 @@
+"""Weekly digests: rank the window's papers by freshness and citation buzz, then summarize.
+
+The summary follows the same grounded-citation contract as :func:`researchscout.answer.answer`:
+the model may cite only the ranked papers, and any invented id is dropped by the post-check.
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from researchscout.answer import _CITATION_RE
+from researchscout.llm.base import LLM
+from researchscout.obs.trace import trace_span
+from researchscout.schema import Paper
+from researchscout.store.models import SignalRow
+from researchscout.store.papers import list_papers
+
+_SYSTEM_PROMPT = (
+    "You are writing a weekly research digest for a reader deciding what to read. "
+    "Summarize the papers provided below, leading with the most important work. "
+    "For every claim, cite the paper id in square brackets, e.g. [arxiv:2401.12345]. "
+    "Never invent ids or facts."
+)
+
+_HALF_LIFE_DAYS = 14.0
+_CANDIDATE_POOL = 200
+
+
+@dataclass
+class RankedPaper:
+    paper: Paper
+    score: float
+    citations: float
+
+
+@dataclass
+class Digest:
+    slug: str
+    title: str
+    period_start: datetime
+    period_end: datetime
+    body: str
+    cited: list[str]
+    items: list[RankedPaper]
+
+
+def week_slug(end: datetime) -> str:
+    """ISO-week slug, e.g. ``2026-w27`` — one digest per week, re-runs replace it."""
+    iso = end.isocalendar()
+    return f"{iso.year}-w{iso.week:02d}"
+
+
+def _latest_citations(session: Session, paper_id: str) -> float:
+    """The most recent cumulative citation count observed for a paper (0 when unobserved)."""
+    value = session.execute(
+        select(SignalRow.value)
+        .where(SignalRow.paper_id == paper_id, SignalRow.type == "citation")
+        .order_by(SignalRow.observed_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return float(value) if value is not None else 0.0
+
+
+def rank_window(session: Session, *, days: int = 7, k: int = 10) -> list[RankedPaper]:
+    """Top ``k`` papers of the window: recency-decayed, citation-boosted."""
+    now = datetime.now(UTC)
+    ranked: list[RankedPaper] = []
+    for paper in list_papers(session, days=days, limit=_CANDIDATE_POOL):
+        citations = _latest_citations(session, paper.id)
+        age_days = max((now - paper.published_at).total_seconds() / 86400.0, 0.0)
+        score = math.exp(-age_days / _HALF_LIFE_DAYS) * (1.0 + math.log1p(citations))
+        ranked.append(RankedPaper(paper=paper, score=score, citations=citations))
+    ranked.sort(key=lambda item: item.score, reverse=True)
+    return ranked[:k]
+
+
+def build_digest(
+    session: Session,
+    llm: LLM,
+    *,
+    days: int = 7,
+    k: int = 10,
+) -> Digest | None:
+    """Rank the window and synthesize the digest; None when the window is empty."""
+    end = datetime.now(UTC)
+    start = end - timedelta(days=days)
+    with trace_span("digest", days=days, k=k) as span:
+        items = rank_window(session, days=days, k=k)
+        span["ranked"] = len(items)
+        if not items:
+            return None
+
+        context = "\n\n".join(
+            f"[{item.paper.id}] {item.paper.title}\n{item.paper.abstract}" for item in items
+        )
+        user_prompt = f"Digest window: {start:%Y-%m-%d} to {end:%Y-%m-%d}\n\nPapers:\n{context}"
+        body = llm.complete(_SYSTEM_PROMPT, user_prompt)
+        span["model"] = llm.model
+
+        found = list(dict.fromkeys(_CITATION_RE.findall(body)))
+        valid = {item.paper.id for item in items}
+        cited = [cid for cid in found if cid in valid]
+        span["cited"] = len(cited)
+
+        slug = week_slug(end)
+        return Digest(
+            slug=slug,
+            title=f"Research radar, week {slug.split('-w')[1]} {end.year}",
+            period_start=start,
+            period_end=end,
+            body=body,
+            cited=cited,
+            items=items,
+        )

@@ -21,6 +21,7 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
     <header>
       <a class="brand" href="/">ResearchScout</a>
       <span class="tagline">a radar for AI/ML research</span>
+      <a class="nav" href="/digests">Digests</a>
       <span class="auth">
         {
           Astro.locals.user ? (
@@ -86,6 +87,10 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
   .tagline {
     color: var(--muted);
     font-size: 0.9rem;
+  }
+  .nav {
+    font-size: 0.9rem;
+    margin-left: 0.5rem;
   }
   .auth {
     margin-left: auto;

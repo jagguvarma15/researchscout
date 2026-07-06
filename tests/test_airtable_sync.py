@@ -4,9 +4,9 @@ from typing import Any
 import pytest
 
 import researchscout.workers.airtable_sync as sync_mod
-from researchscout.events.schemas import PaperSaved
+from researchscout.events.schemas import DigestPublished, PaperSaved
 from researchscout.schema import Author, Paper
-from researchscout.workers.airtable_sync import handle_saved
+from researchscout.workers.airtable_sync import handle_digest, handle_saved
 
 AT = datetime(2026, 7, 6, tzinfo=UTC)
 
@@ -29,6 +29,7 @@ class FakeTable:
         self.rows = rows or []
         self.created: list[dict[str, Any]] = []
         self.deleted: list[str] = []
+        self.updated: list[tuple[str, Any]] = []
 
     def all(self, formula: object = None) -> list[dict[str, Any]]:
         return self.rows
@@ -38,6 +39,9 @@ class FakeTable:
 
     def delete(self, row_id: str) -> None:
         self.deleted.append(row_id)
+
+    def update(self, row_id: str, fields: dict[str, Any]) -> None:
+        self.updated.append((row_id, fields["Slug"]))
 
 
 def _event(saved: bool) -> PaperSaved:
@@ -85,3 +89,26 @@ def test_save_survives_missing_paper(monkeypatch: pytest.MonkeyPatch) -> None:
     handle_saved(None, table, _event(saved=True))
     assert table.created[0]["Title"] == "arxiv:2401.00001"
     assert table.created[0]["Link"] == ""
+
+
+def _digest_event() -> DigestPublished:
+    return DigestPublished(
+        slug="2026-w28",
+        title="Research radar, week 28 2026",
+        period_start=datetime(2026, 6, 29, tzinfo=UTC),
+        period_end=AT,
+    )
+
+
+def test_digest_archives_once() -> None:
+    table = FakeTable()
+    handle_digest(table, _digest_event())
+    assert table.created[0]["Slug"] == "2026-w28"
+    assert table.created[0]["Title"].startswith("Research radar")
+
+
+def test_digest_republish_updates_in_place() -> None:
+    table = FakeTable(rows=[{"id": "rec1", "fields": {"Slug": "2026-w28"}}])
+    handle_digest(table, _digest_event())
+    assert table.created == []
+    assert table.updated == [("rec1", "2026-w28")]

@@ -12,7 +12,12 @@ from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
-from researchscout.events.schemas import TOPIC_PAPERS_SAVED, PaperSaved
+from researchscout.events.schemas import (
+    TOPIC_DIGESTS_PUBLISHED,
+    TOPIC_PAPERS_SAVED,
+    DigestPublished,
+    PaperSaved,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,16 +34,24 @@ def _on_delivery(err: Any, message: Any) -> None:
         logger.warning("event delivery failed for %s: %s", message.topic(), err)
 
 
-def publish_paper_saved(user_sub: str, paper_id: str, saved: bool) -> None:
-    event = PaperSaved(user_sub=user_sub, paper_id=paper_id, saved=saved, at=datetime.now(UTC))
+def _publish(topic: str, key: str, payload: str) -> None:
     try:
         client = _producer()
-        client.produce(
-            TOPIC_PAPERS_SAVED,
-            key=paper_id.encode(),
-            value=event.model_dump_json().encode(),
-            on_delivery=_on_delivery,
-        )
+        client.produce(topic, key=key.encode(), value=payload.encode(), on_delivery=_on_delivery)
         client.poll(0)
     except Exception:  # noqa: BLE001 - best-effort by design
-        logger.warning("could not publish papers.saved for %s", paper_id, exc_info=True)
+        logger.warning("could not publish %s for %s", topic, key, exc_info=True)
+
+
+def publish_paper_saved(user_sub: str, paper_id: str, saved: bool) -> None:
+    event = PaperSaved(user_sub=user_sub, paper_id=paper_id, saved=saved, at=datetime.now(UTC))
+    _publish(TOPIC_PAPERS_SAVED, paper_id, event.model_dump_json())
+
+
+def publish_digest_published(
+    slug: str, title: str, period_start: datetime, period_end: datetime
+) -> None:
+    event = DigestPublished(
+        slug=slug, title=title, period_start=period_start, period_end=period_end
+    )
+    _publish(TOPIC_DIGESTS_PUBLISHED, slug, event.model_dump_json())

@@ -1,8 +1,10 @@
-"""Consume ``papers.saved`` and mirror each user's reading list into Airtable.
+"""Mirror the event plane into Airtable: reading lists (``papers.saved``) and the digest
+archive (``digests.published``).
 
-Rows are keyed by (user, paper id): a save creates the row if missing, an unsave deletes it —
-so at-least-once replays are free. Enrichment (title/link) comes from the paper store at sync
-time; if the paper is somehow gone, the row still lands with the id.
+Rows are keyed — (user, paper id) for saves, slug for digests — so at-least-once replays are
+free: creates skip existing rows, unsaves delete whatever matches. Enrichment (title/link)
+comes from the paper store at sync time; if the paper is somehow gone, the row still lands
+with the id.
 """
 
 from __future__ import annotations
@@ -12,7 +14,12 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from researchscout.events.schemas import TOPIC_PAPERS_SAVED, PaperSaved
+from researchscout.events.schemas import (
+    TOPIC_DIGESTS_PUBLISHED,
+    TOPIC_PAPERS_SAVED,
+    DigestPublished,
+    PaperSaved,
+)
 from researchscout.store.papers import get_paper
 
 logger = logging.getLogger(__name__)
@@ -42,8 +49,25 @@ def handle_saved(session: Session, table: Any, event: PaperSaved) -> None:
     )
 
 
+def handle_digest(table: Any, event: DigestPublished) -> None:
+    """Archive one digest run (idempotent: the slug row is created once, then updated)."""
+    from pyairtable.formulas import match
+
+    fields = {
+        "Slug": event.slug,
+        "Title": event.title,
+        "From": event.period_start.isoformat(),
+        "To": event.period_end.isoformat(),
+    }
+    existing = table.all(formula=match({"Slug": event.slug}))
+    if existing:
+        table.update(existing[0]["id"], fields)
+    else:
+        table.create(fields)
+
+
 def run() -> None:  # pragma: no cover - composition loop, exercised live
-    """The worker loop: poll, mirror, commit."""
+    """The worker loop: poll both topics, mirror, commit."""
     from pyairtable import Api
 
     from researchscout.config import get_settings
@@ -53,13 +77,13 @@ def run() -> None:  # pragma: no cover - composition loop, exercised live
     settings = get_settings()
     if not settings.airtable_api_key or not settings.airtable_base_id:
         raise SystemExit("RS_AIRTABLE_API_KEY and RS_AIRTABLE_BASE_ID are required")
-    table = Api(settings.airtable_api_key).table(
-        settings.airtable_base_id, settings.airtable_saved_table
-    )
+    api = Api(settings.airtable_api_key)
+    saved_table = api.table(settings.airtable_base_id, settings.airtable_saved_table)
+    digest_table = api.table(settings.airtable_base_id, settings.airtable_digest_table)
 
-    ensure_topics([TOPIC_PAPERS_SAVED])
-    client = consumer("rs-airtable", [TOPIC_PAPERS_SAVED])
-    logger.info("airtable sync consuming %s", TOPIC_PAPERS_SAVED)
+    ensure_topics([TOPIC_PAPERS_SAVED, TOPIC_DIGESTS_PUBLISHED])
+    client = consumer("rs-airtable", [TOPIC_PAPERS_SAVED, TOPIC_DIGESTS_PUBLISHED])
+    logger.info("airtable sync consuming %s, %s", TOPIC_PAPERS_SAVED, TOPIC_DIGESTS_PUBLISHED)
     while True:
         message = client.poll(1.0)
         if message is None:
@@ -67,14 +91,17 @@ def run() -> None:  # pragma: no cover - composition loop, exercised live
         if message.error():
             logger.error("consumer error: %s", message.error())
             continue
-        event = PaperSaved.model_validate_json(message.value())
         try:
-            with session_scope() as session:
-                handle_saved(session, table, event)
+            if message.topic() == TOPIC_PAPERS_SAVED:
+                saved = PaperSaved.model_validate_json(message.value())
+                with session_scope() as session:
+                    handle_saved(session, saved_table, saved)
+                logger.info("synced %s saved=%s", saved.paper_id, saved.saved)
+            else:
+                digest = DigestPublished.model_validate_json(message.value())
+                handle_digest(digest_table, digest)
+                logger.info("archived digest %s", digest.slug)
         except Exception:
-            logger.exception(
-                "airtable sync failed for %s; leaving offset uncommitted", event.paper_id
-            )
+            logger.exception("airtable sync failed; leaving offset uncommitted")
             continue
         client.commit(message)
-        logger.info("synced %s saved=%s", event.paper_id, event.saved)

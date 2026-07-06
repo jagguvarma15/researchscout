@@ -74,6 +74,18 @@ class PaperEmbeddingRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class DigestRow(Base):
+    __tablename__ = "digests"
+
+    slug: Mapped[str] = mapped_column(String, primary_key=True)
+    title: Mapped[str] = mapped_column(Text)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    body: Mapped[str] = mapped_column(Text)
+    items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SavedPaperRow(Base):
     __tablename__ = "saved_papers"
 

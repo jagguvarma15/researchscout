@@ -1,0 +1,57 @@
+---
+import Base from '../../layouts/Base.astro';
+import { fetchDigests, formatDate } from '../../lib/api';
+
+const digests = await fetchDigests();
+---
+
+<Base title="Digests">
+  <h1>Weekly digests</h1>
+
+  {digests === null && <p class="empty">The API is unreachable — try again in a moment.</p>}
+  {digests !== null && digests.length === 0 && <p class="empty">No digests published yet.</p>}
+
+  {
+    digests !== null && (
+      <ul class="list">
+        {digests.map((digest) => (
+          <li>
+            <a class="title" href={`/digests/${digest.slug}`}>
+              {digest.title}
+            </a>
+            <p class="meta">
+              {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
+            </p>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</Base>
+
+<style>
+  h1 {
+    font-size: 1.3rem;
+  }
+  .list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .list li {
+    padding: 0.9rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .title {
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0.25rem 0 0;
+  }
+  .empty {
+    color: var(--muted);
+  }
+</style>
