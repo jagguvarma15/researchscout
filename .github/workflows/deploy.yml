@@ -56,7 +56,7 @@ jobs:
         name: [api, web, worker]
     steps:
       - name: Scan the pushed image before it ships
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ghcr.io/${{ github.repository_owner }}/researchscout-${{ matrix.name }}:${{ github.sha }}
           severity: CRITICAL
