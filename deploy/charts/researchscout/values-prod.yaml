@@ -1,0 +1,42 @@
+# Production shape for the single-node k3s VM. Replace example.com with your domain and keep
+# real secret values in the SOPS-encrypted deploy/secrets/secrets.prod.yaml, not here.
+image:
+  pullPolicy: IfNotPresent
+  api:
+    repository: ghcr.io/jagguvarma15/researchscout-api
+  web:
+    repository: ghcr.io/jagguvarma15/researchscout-web
+  worker:
+    repository: ghcr.io/jagguvarma15/researchscout-worker
+
+siteUrl: https://scout.example.com
+authUrl: https://auth.example.com
+
+ingress:
+  siteHost: scout.example.com
+  authHost: auth.example.com
+  tls:
+    enabled: true
+    issuer: letsencrypt
+
+postgres:
+  storage: 10Gi
+
+kafka:
+  storage: 5Gi
+
+oidc:
+  demoUserEnabled: false
+
+otel:
+  enabled: true
+
+llm:
+  baseUrl: https://api.openai.com/v1
+  model: gpt-4o-mini
+
+cron:
+  ingest:
+    enabled: true
+  digest:
+    enabled: true

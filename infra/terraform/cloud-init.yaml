@@ -1,0 +1,22 @@
+#cloud-config
+# k3s single node + a 4GB swap safety net for the 12GB free tier. Oracle's Ubuntu images
+# ship restrictive iptables rules, so 80/443 are opened explicitly and persisted.
+package_update: true
+packages:
+  - curl
+  - age
+
+swap:
+  filename: /swapfile
+  size: 4G
+  maxsize: 4G
+
+runcmd:
+  - iptables -I INPUT 6 -m state --state NEW -p tcp --dport 80 -j ACCEPT
+  - iptables -I INPUT 6 -m state --state NEW -p tcp --dport 443 -j ACCEPT
+  - netfilter-persistent save
+  - curl -sfL https://get.k3s.io | sh -
+  - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  - curl -fsSLo /usr/local/bin/sops https://github.com/getsops/sops/releases/latest/download/sops-$(uname -s | tr A-Z a-z).arm64 && chmod +x /usr/local/bin/sops
+  - sudo -u ubuntu helm plugin install https://github.com/jkroepke/helm-secrets
+  - mkdir -p /home/ubuntu/.kube && cp /etc/rancher/k3s/k3s.yaml /home/ubuntu/.kube/config && chown -R ubuntu:ubuntu /home/ubuntu/.kube

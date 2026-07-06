@@ -23,6 +23,9 @@ ingress:
   className: traefik
   siteHost: scout.localtest.me
   authHost: auth.localtest.me
+  tls:
+    enabled: false
+    issuer: letsencrypt
 
 postgres:
   image: pgvector/pgvector:pg16
