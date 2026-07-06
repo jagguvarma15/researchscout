@@ -1,6 +1,8 @@
 ---
+import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
-import { fetchPapers, formatDate, PAGE_SIZE } from '../lib/api';
+import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE } from '../lib/api';
+import { getAccessToken, SESSION_COOKIE } from '../lib/auth';
 
 const params = Astro.url.searchParams;
 const q = params.get('q') ?? '';
@@ -9,6 +11,14 @@ const category = params.get('category') ?? '';
 const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
 
 const items = await fetchPapers({ q, days, category, page });
+
+const authenticated = Astro.locals.user !== null;
+let savedIds = new Set<string>();
+if (authenticated) {
+  const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
+  const token = sid ? await getAccessToken(sid) : null;
+  if (token) savedIds = new Set(((await fetchSaved(token)) ?? []).map((p) => p.id));
+}
 
 function pageLink(target: number): string {
   const next = new URLSearchParams(Astro.url.searchParams);
@@ -33,6 +43,12 @@ function pageLink(target: number): string {
       <ul class="feed">
         {items.map((paper) => (
           <li>
+            <SaveButton
+              client:visible
+              paperId={paper.id}
+              saved={savedIds.has(paper.id)}
+              {authenticated}
+            />
             <a class="title" href={`/papers/${paper.id}`}>
               {paper.title}
             </a>

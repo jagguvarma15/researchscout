@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     chat_rate_window_seconds: int = 600
     # Host default targets compose's published listener; containers override to kafka:9092.
     kafka_bootstrap_servers: str = "localhost:29092"
+    airtable_api_key: str = ""
+    airtable_base_id: str = ""
+    airtable_saved_table: str = "Saved papers"
 
 
 def get_settings() -> Settings:
