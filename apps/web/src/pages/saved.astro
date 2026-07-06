@@ -1,0 +1,74 @@
+---
+import SaveButton from '../components/SaveButton.svelte';
+import Base from '../layouts/Base.astro';
+import { fetchSaved, formatDate, type PaperSummary } from '../lib/api';
+import { getAccessToken, SESSION_COOKIE } from '../lib/auth';
+
+const authenticated = Astro.locals.user !== null;
+let items: PaperSummary[] | null = null;
+if (authenticated) {
+  const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
+  const token = sid ? await getAccessToken(sid) : null;
+  if (token) items = await fetchSaved(token);
+}
+---
+
+<Base title="Saved papers">
+  <h1>Saved papers</h1>
+
+  {!authenticated && <p class="empty"><a href="/auth/login?returnTo=/saved">Sign in</a> to keep a reading list.</p>}
+  {authenticated && items === null && <p class="empty">The API is unreachable — try again in a moment.</p>}
+  {authenticated && items !== null && items.length === 0 && (
+    <p class="empty">Nothing saved yet — star papers in the <a href="/">feed</a>.</p>
+  )}
+
+  {
+    authenticated && items !== null && (
+      <ul class="feed">
+        {items.map((paper) => (
+          <li>
+            <SaveButton client:visible paperId={paper.id} saved={true} {authenticated} />
+            <a class="title" href={`/papers/${paper.id}`}>
+              {paper.title}
+            </a>
+            <p class="meta">
+              {formatDate(paper.published_at)}
+              {' · '}
+              {paper.authors
+                .slice(0, 3)
+                .map((author) => author.name)
+                .join(', ')}
+            </p>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</Base>
+
+<style>
+  h1 {
+    font-size: 1.3rem;
+  }
+  .feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .feed li {
+    padding: 0.9rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .title {
+    font-weight: 600;
+    text-decoration: none;
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0.25rem 0 0;
+  }
+  .empty {
+    color: var(--muted);
+  }
+</style>
