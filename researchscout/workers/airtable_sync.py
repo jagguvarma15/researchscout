@@ -68,6 +68,9 @@ def handle_digest(table: Any, event: DigestPublished) -> None:
 
 def run() -> None:  # pragma: no cover - composition loop, exercised live
     """The worker loop: poll both topics, mirror, commit."""
+    from researchscout.obs.otel import init_otel
+
+    init_otel("researchscout-airtable-sync")
     from pyairtable import Api
 
     from researchscout.config import get_settings
