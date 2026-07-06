@@ -76,8 +76,10 @@ def test_stream_empty_retrieval_short_circuits(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: [])
     events = list(answer_stream(None, None, ChunkedLLM(["unused"]), "q"))
     assert isinstance(events[0], StreamMeta) and events[0].retrieved == 0
+    # The no-results text still arrives as a delta, so clients render uniformly from tokens.
+    assert isinstance(events[1], StreamDelta)
     assert isinstance(events[-1], Answer) and events[-1].used == []
-    assert len(events) == 2
+    assert len(events) == 3
 
 
 def test_default_stream_is_single_chunk(monkeypatch: pytest.MonkeyPatch) -> None:
