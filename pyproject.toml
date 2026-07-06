@@ -19,6 +19,12 @@ dependencies = [
     "openai>=1.0",
 ]
 
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
 [project.scripts]
 scout = "researchscout.cli:app"
 
@@ -30,6 +36,8 @@ dev = [
     "mypy>=1.10",
     "types-pyyaml>=6",
     "testcontainers>=4.0",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
 ]
 
 [build-system]
@@ -56,6 +64,7 @@ module = [
     "feedparser",
     "alembic",
     "alembic.*",
+    "uvicorn",
     "sentence_transformers",
     "sentence_transformers.*",
     "pgvector",

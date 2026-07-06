@@ -23,9 +23,11 @@ app = typer.Typer(
 sources_app = typer.Typer(help="Inspect and test content/signal sources.", no_args_is_help=True)
 db_app = typer.Typer(help="Database setup and migrations.", no_args_is_help=True)
 signals_app = typer.Typer(help="Inspect the signal time series.", no_args_is_help=True)
+serve_app = typer.Typer(help="Run ResearchScout services.", no_args_is_help=True)
 app.add_typer(sources_app, name="sources")
 app.add_typer(db_app, name="db")
 app.add_typer(signals_app, name="signals")
+app.add_typer(serve_app, name="serve")
 
 
 def _todo(command: str, pr: str) -> None:
@@ -148,6 +150,18 @@ def ask(
     if result.hallucinated:
         dropped = ", ".join(result.hallucinated)
         typer.secho(f"Dropped (not retrieved): {dropped}", fg=typer.colors.YELLOW)
+
+
+@serve_app.command("api")
+def serve_api(
+    host: Annotated[str, typer.Option(help="Bind address.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port.")] = 8000,
+    reload: Annotated[bool, typer.Option(help="Auto-reload on code changes (dev).")] = False,
+) -> None:
+    """Run the HTTP API with uvicorn (requires the `api` extra)."""
+    import uvicorn
+
+    uvicorn.run("researchscout.api.main:app", host=host, port=port, reload=reload)
 
 
 @sources_app.command("list")

@@ -21,12 +21,12 @@ class OpenAICompatLLM(LLM):
         self,
         base_url: str | None = None,
         model: str | None = None,
-        api_key: str = "ollama",
+        api_key: str | None = None,
     ) -> None:
         settings = get_settings()
         self.base_url = base_url or settings.llm_base_url
         self.model = model or settings.llm_model
-        self._api_key = api_key
+        self._api_key = api_key or settings.llm_api_key
 
     @cached_property
     def _client(self) -> Any:

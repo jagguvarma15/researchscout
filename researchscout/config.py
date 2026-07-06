@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     llm_base_url: str = "http://localhost:11434/v1"
     llm_model: str = "qwen2.5:3b-instruct"
+    llm_api_key: str = "ollama"
     freshness_days: int = 30
     sources_config_path: Path = Path("config/sources.yaml")
 

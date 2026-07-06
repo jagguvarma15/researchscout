@@ -1,4 +1,34 @@
+# Profiles group services into RAM-budgeted subsets for the 8GB dev machine:
+#   docker compose --profile core up        # db + api
+# `db` has no profile so `docker compose up -d db` keeps working on its own.
 services:
+  api:
+    build:
+      context: .
+      dockerfile: deploy/docker/api.Dockerfile
+    profiles: ["core"]
+    environment:
+      RS_DATABASE_URL: postgresql+psycopg://researchscout:researchscout@db:5432/researchscout
+      RS_LLM_BASE_URL: ${RS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
+      RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
   db:
     image: pgvector/pgvector:pg16
     environment:

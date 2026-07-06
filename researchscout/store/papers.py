@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import cast, select
+from sqlalchemy.dialects.postgresql import ARRAY, TEXT, insert
 from sqlalchemy.orm import Session
 
 from researchscout.schema import Author, Paper
@@ -54,6 +56,26 @@ def find_by_external_id(session: Session, scheme: str, value: str) -> str | None
             ExternalIdRow.value == value,
         )
     ).scalar_one_or_none()
+
+
+def list_papers(
+    session: Session,
+    *,
+    days: int | None = None,
+    categories: list[str] | None = None,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[Paper]:
+    """List papers newest-first, optionally windowed by days and filtered by category."""
+    stmt = select(PaperRow.id).order_by(PaperRow.published_at.desc())
+    if days is not None:
+        window_start = datetime.now(UTC) - timedelta(days=days)
+        stmt = stmt.where(PaperRow.published_at >= window_start)
+    if categories:
+        stmt = stmt.where(PaperRow.categories.op("?|")(cast(categories, ARRAY(TEXT))))
+    ids = session.execute(stmt.limit(limit).offset(offset)).scalars().all()
+    papers = (get_paper(session, paper_id) for paper_id in ids)
+    return [paper for paper in papers if paper is not None]
 
 
 def get_paper(session: Session, paper_id: str) -> Paper | None:
