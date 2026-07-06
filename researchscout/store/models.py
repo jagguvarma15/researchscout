@@ -74,6 +74,16 @@ class PaperEmbeddingRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SavedPaperRow(Base):
+    __tablename__ = "saved_papers"
+
+    user_sub: Mapped[str] = mapped_column(String, primary_key=True)
+    paper_id: Mapped[str] = mapped_column(
+        ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SignalRow(Base):
     __tablename__ = "signals"
     __table_args__ = (Index("ix_signals_paper_type_time", "paper_id", "type", "observed_at"),)
