@@ -67,3 +67,26 @@ class AskResponse(BaseModel):
     cited: list[str]
     hallucinated: list[str]
     used: list[UsedPaper]
+
+
+class DigestItem(BaseModel):
+    paper_id: str
+    title: str
+    score: float
+    citations: float
+
+
+class DigestSummary(BaseModel):
+    slug: str
+    title: str
+    period_start: datetime
+    period_end: datetime
+
+
+class DigestDetail(DigestSummary):
+    body: str
+    items: list[DigestItem]
+
+
+class DigestList(BaseModel):
+    items: list[DigestSummary]
