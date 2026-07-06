@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     airtable_digest_table: str = "Digest archive"
     digest_days: int = 7
     digest_top_k: int = 10
+    # Observability: OTel is off unless a collector is reachable; LangSmith rides its own
+    # standard env vars (LANGSMITH_TRACING / LANGSMITH_API_KEY).
+    otel_enabled: bool = False
+    otlp_endpoint: str = "http://localhost:4317"
 
 
 def get_settings() -> Settings:

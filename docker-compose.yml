@@ -1,6 +1,7 @@
 # Profiles group services into RAM-budgeted subsets for the 8GB dev machine:
 #   docker compose --profile core up        # db + api + web + keycloak + redis
 #   docker compose --profile events up      # kafka + ingest/embed workers (+ db)
+#   docker compose --profile obs up         # otel-collector + tempo + loki + prometheus + grafana
 # Run core plus at most one extra profile at a time; `db` has no profile so
 # `docker compose up -d db` keeps working on its own.
 services:
@@ -17,6 +18,8 @@ services:
       RS_OIDC_ISSUER: http://localhost:8080/realms/researchscout
       RS_OIDC_JWKS_URL: http://keycloak:8080/realms/researchscout/protocol/openid-connect/certs
       RS_REDIS_URL: redis://redis:6379
+      RS_OTEL_ENABLED: ${RS_OTEL_ENABLED:-false}
+      RS_OTLP_ENDPOINT: http://otel-collector:4317
     ports:
       - "8000:8000"
     depends_on:
@@ -163,6 +166,51 @@ services:
       kafka:
         condition: service_started
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.155.0
+    profiles: ["obs"]
+    command: ["--config=/etc/otelcol/collector.yaml"]
+    volumes:
+      - ./config/otel/collector.yaml:/etc/otelcol/collector.yaml:ro
+    ports:
+      - "4317:4317"
+
+  tempo:
+    image: grafana/tempo:3.0.0
+    profiles: ["obs"]
+    command: ["-config.file=/etc/tempo/tempo.yaml"]
+    volumes:
+      - ./config/tempo/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempodata:/var/tempo
+    ports:
+      - "3200:3200"
+
+  loki:
+    image: grafana/loki:3.7.3
+    profiles: ["obs"]
+    ports:
+      - "3100:3100"
+
+  prometheus:
+    image: prom/prometheus:v3.13.0
+    profiles: ["obs"]
+    volumes:
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    profiles: ["obs"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+
 volumes:
   pgdata:
   kafkadata:
+  tempodata:

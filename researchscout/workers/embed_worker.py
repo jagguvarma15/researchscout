@@ -27,6 +27,9 @@ def handle_paper(session: Session, embedder: Embedder, event: PaperCreated) -> N
 
 def run() -> None:  # pragma: no cover - composition loop, exercised live
     """The worker loop: poll, embed, commit."""
+    from researchscout.obs.otel import init_otel
+
+    init_otel("researchscout-embed-worker")
     from researchscout.embed.local import LocalEmbedder
     from researchscout.events.kafka import consumer, ensure_topics
     from researchscout.store.db import session_scope

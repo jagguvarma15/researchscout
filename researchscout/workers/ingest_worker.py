@@ -29,6 +29,9 @@ def handle_job(session: Session, job: IngestJob, sink: EventSink) -> IngestSumma
 
 def run() -> None:  # pragma: no cover - composition loop, exercised live
     """The worker loop: poll, handle, commit."""
+    from researchscout.obs.otel import init_otel
+
+    init_otel("researchscout-ingest-worker")
     from researchscout.events.kafka import consumer, ensure_topics
     from researchscout.events.sink import KafkaEventSink
     from researchscout.store.db import session_scope

@@ -31,9 +31,18 @@ class OpenAICompatLLM(LLM):
 
     @cached_property
     def _client(self) -> Any:
+        import os
+
         from openai import OpenAI
 
-        return OpenAI(base_url=self.base_url, api_key=self._api_key)
+        client = OpenAI(base_url=self.base_url, api_key=self._api_key)
+        if os.environ.get("LANGSMITH_TRACING", "").lower() == "true":
+            # Each LLM call becomes a nested LangSmith LLM run (prompts, latency, tokens),
+            # auto-parented under the surrounding trace_span via contextvars.
+            from langsmith.wrappers import wrap_openai
+
+            client = wrap_openai(client)
+        return client
 
     def complete(self, system: str, user: str, *, temperature: float = 0.2) -> str:
         response = self._client.chat.completions.create(
