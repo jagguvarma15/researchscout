@@ -95,7 +95,7 @@ svg[data-icon] {
 
 .container {
   width: 100%;
-  max-width: 70rem;
+  max-width: 105rem;
   margin: 0;
   padding: 0 var(--gutter);
 }
@@ -265,6 +265,7 @@ svg[data-icon] {
 
 .digest-body a {
   display: inline-block;
+  overflow-wrap: anywhere;
   padding: 0 0.5rem;
   border-radius: var(--radius-full);
   background: var(--accent-soft);
