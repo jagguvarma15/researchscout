@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 
 from researchscout.embed.base import Embedder
 from researchscout.retrieve.search import retrieve
-from researchscout.schema import Author, Paper
+from researchscout.schema import Author, Paper, Signal, SignalType
 from researchscout.store.papers import upsert_paper
+from researchscout.store.signals import append_signal
 from researchscout.store.vectors import index_papers
 
 pytestmark = pytest.mark.integration
@@ -85,3 +86,49 @@ def test_category_filter(session: Session) -> None:
     results = retrieve(session, embedder, "q", k=10, days=30, categories=["cs.AI"])
     ids = [item.paper.id for item in results]
     assert ids == ["arxiv:2401.00004"]
+
+
+def _setup_hybrid(session: Session) -> MockEmbedder:
+    """Three same-age papers: two near-duplicates (same vector) and one lexical target."""
+    rows = [
+        ("2402.00001", "Gradient descent dynamics", 0),
+        ("2402.00002", "Gradient descent convergence", 0),
+        ("2402.00003", "Sparse quantization tricks", 1),
+    ]
+    # Both query vectors are orthogonal to the quantization paper's document vector, so any
+    # ranking of it above the others must come from the lexical leg, not similarity.
+    mapping: dict[str, list[float]] = {"q": _onehot(0), "quantization": _onehot(2)}
+    for arxiv, title, slot in rows:
+        upsert_paper(session, _paper(arxiv, title, 2))
+        mapping[f"{title}\n\nx"] = _onehot(slot)
+    session.flush()
+    embedder = MockEmbedder(mapping)
+    index_papers(session, embedder)
+    return embedder
+
+
+def test_lexical_match_ranks_first_despite_orthogonal_vector(session: Session) -> None:
+    embedder = _setup_hybrid(session)
+    results = retrieve(session, embedder, "quantization", k=10, days=30)
+    ids = [item.paper.id for item in results]
+    assert "arxiv:2402.00003" in ids
+    # RRF: the lexical hit collects contributions from both legs and floats to the top.
+    assert ids[0] == "arxiv:2402.00003"
+
+
+def test_cited_paper_outranks_uncited_near_duplicate(session: Session) -> None:
+    embedder = _setup_hybrid(session)
+    append_signal(
+        session,
+        Signal(
+            paper_id="arxiv:2402.00002",
+            type=SignalType.citation,
+            source="test",
+            value=50.0,
+            observed_at=datetime.now(UTC),
+        ),
+    )
+    results = retrieve(session, embedder, "q", k=10, days=30)
+    ids = [item.paper.id for item in results]
+    # Same vector, same age: only the citation authority separates the two.
+    assert ids.index("arxiv:2402.00002") < ids.index("arxiv:2402.00001")
