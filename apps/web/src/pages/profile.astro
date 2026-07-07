@@ -2,8 +2,16 @@
 import { Icon } from 'astro-icon/components';
 import InterestsEditor from '../components/InterestsEditor.svelte';
 import Base from '../layouts/Base.astro';
+import { fetchInterests } from '../lib/api';
+import { getAccessToken, SESSION_COOKIE } from '../lib/auth';
 
 const user = Astro.locals.user;
+let interests: string[] | null = null;
+if (user) {
+  const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
+  const token = sid ? await getAccessToken(sid) : null;
+  if (token) interests = await fetchInterests(token);
+}
 ---
 
 <Base title="Profile">
@@ -27,7 +35,7 @@ const user = Astro.locals.user;
           <p class="blurb">
             Topics you care about — up to 20, each a short phrase. Changes save as you go.
           </p>
-          <InterestsEditor client:load />
+          <InterestsEditor client:load initial={interests} />
         </section>
       </>
     )
