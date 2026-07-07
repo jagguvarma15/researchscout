@@ -2,7 +2,7 @@
 import { Icon } from 'astro-icon/components';
 import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
-import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE } from '../lib/api';
+import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE, type PaperSummary } from '../lib/api';
 import { getAccessToken, SESSION_COOKIE } from '../lib/auth';
 
 const params = Astro.url.searchParams;
@@ -12,6 +12,22 @@ const category = params.get('category') ?? '';
 const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
 
 const items = await fetchPapers({ q, days, category, page });
+
+// The API returns papers newest-first; fold them into one group per publication
+// day so the feed reads as a timeline.
+const groups: { date: string; papers: PaperSummary[] }[] = [];
+for (const paper of items ?? []) {
+  const date = formatDate(paper.published_at);
+  const last = groups[groups.length - 1];
+  if (last && last.date === date) last.papers.push(paper);
+  else groups.push({ date, papers: [paper] });
+}
+
+function formatDayHeading(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`)
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    .toUpperCase();
+}
 
 const authenticated = Astro.locals.user !== null;
 let savedIds = new Set<string>();
@@ -79,39 +95,43 @@ function pageLink(target: number): string {
   }
 
   {
-    items !== null && (
-      <ul class="feed">
-        {items.map((paper) => (
-          <li class="row">
-            <div class="row-head">
-              <a class="title" href={`/papers/${paper.id}`}>
-                {paper.title}
-              </a>
-              <SaveButton
-                client:visible
-                paperId={paper.id}
-                saved={savedIds.has(paper.id)}
-                {authenticated}
-              />
-            </div>
-            <p class="meta">
-              {formatDate(paper.published_at)}
-              {' · '}
-              {paper.authors
-                .slice(0, 3)
-                .map((author) => author.name)
-                .join(', ')}
-              {paper.authors.length > 3 && ' et al.'}
-              {paper.categories.map((cat) => (
-                <span class="badge">{cat}</span>
-              ))}
-              {paper.score !== null && <span class="badge badge-score">{paper.score.toFixed(3)}</span>}
-            </p>
-            <p class="abstract">{paper.abstract}</p>
-          </li>
-        ))}
-      </ul>
-    )
+    items !== null &&
+      groups.map((group) => (
+        <section class="day">
+          <h2 class="day-heading">{formatDayHeading(group.date)}</h2>
+          <ul class="feed">
+            {group.papers.map((paper) => (
+              <li class="row">
+                <div class="row-head">
+                  <a class="title" href={`/papers/${paper.id}`}>
+                    {paper.title}
+                  </a>
+                  <SaveButton
+                    client:visible
+                    paperId={paper.id}
+                    saved={savedIds.has(paper.id)}
+                    {authenticated}
+                  />
+                </div>
+                <p class="meta">
+                  {paper.authors
+                    .slice(0, 3)
+                    .map((author) => author.name)
+                    .join(', ')}
+                  {paper.authors.length > 3 && ' et al.'}
+                  {paper.categories.map((cat) => (
+                    <span class="badge">{cat}</span>
+                  ))}
+                  {paper.score !== null && (
+                    <span class="badge badge-score">{paper.score.toFixed(3)}</span>
+                  )}
+                </p>
+                <p class="abstract">{paper.abstract}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
   }
 
   {
@@ -138,9 +158,9 @@ function pageLink(target: number): string {
   .searchbar {
     display: flex;
     gap: 0.5rem;
+    max-width: 46rem;
     padding: 0.6rem;
     margin-bottom: var(--space-6);
-    box-shadow: none;
   }
   .search {
     flex: 1;
@@ -157,7 +177,6 @@ function pageLink(target: number): string {
     color: var(--muted);
     font-size: var(--text-xs);
     border-color: transparent;
-    background: var(--surface-2);
   }
   .filter:focus-visible {
     color: var(--ink);
@@ -165,17 +184,29 @@ function pageLink(target: number): string {
   .empty p {
     margin: 0;
   }
+  .day {
+    margin-bottom: var(--space-6);
+  }
+  .day-heading {
+    margin: 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
   .feed {
     list-style: none;
     margin: 0;
     padding: 0;
   }
   .row {
-    padding: 1.35rem 0;
+    padding: 1.25rem 0;
     border-bottom: 1px solid var(--line);
   }
-  .row:first-child {
-    padding-top: 0;
+  .row:last-child {
+    border-bottom: none;
   }
   .row-head {
     display: flex;
@@ -203,6 +234,7 @@ function pageLink(target: number): string {
     vertical-align: 0.1em;
   }
   .abstract {
+    max-width: 70ch;
     margin: 0.5rem 0 0;
     color: var(--muted);
     font-size: 0.92rem;
