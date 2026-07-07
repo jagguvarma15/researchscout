@@ -3,13 +3,16 @@
    .badge, .input) used by every page and both islands. */
 
 :root {
-  /* Neutral scale on pure white. */
-  --bg: #ffffff;
+  /* Neutral scale on a soft beige base (per the ResearchScout.dc design round);
+     surfaces stay white so content lifts gently off the page. */
+  --bg: #faf7f1;
+  --bg-translucent: rgb(250 247 241 / 0.88); /* header/footer over the pattern */
+  --pattern-line: rgb(23 25 28 / 0.028); /* the background line grid, barely-there */
   --surface: #ffffff;
-  --surface-2: #f5f7fa;
+  --surface-2: #f4f0e8;
   --ink: #17191c;
-  --muted: #5d6570; /* 5.9:1 on white */
-  --line: #e4e7eb;
+  --muted: #5d6570; /* 5.7:1 on the beige */
+  --line: #e6e1d5;
 
   /* Accent family. */
   --accent: #0f62fe;
@@ -52,7 +55,11 @@ body {
   margin: 0;
   min-height: 100dvh;
   color: var(--ink);
-  background: var(--bg);
+  /* Fine line grid at high transparency over the beige base. */
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(0deg, var(--pattern-line) 0 1px, transparent 1px 36px),
+    repeating-linear-gradient(90deg, var(--pattern-line) 0 1px, transparent 1px 36px);
   font-family: var(--font-sans);
   font-size: var(--text-md);
   line-height: 1.55;
