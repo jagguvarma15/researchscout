@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
 from pydantic import BaseModel, Field
 
@@ -90,3 +91,11 @@ class DigestDetail(DigestSummary):
 
 class DigestList(BaseModel):
     items: list[DigestSummary]
+
+
+class InterestList(BaseModel):
+    interests: list[str]
+
+
+class InterestUpdate(BaseModel):
+    interests: list[Annotated[str, Field(min_length=1, max_length=40)]] = Field(max_length=20)
