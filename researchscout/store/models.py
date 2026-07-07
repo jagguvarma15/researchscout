@@ -96,6 +96,14 @@ class SavedPaperRow(Base):
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class UserInterestRow(Base):
+    __tablename__ = "user_interests"
+
+    user_sub: Mapped[str] = mapped_column(String, primary_key=True)
+    interest: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class SignalRow(Base):
     __tablename__ = "signals"
     __table_args__ = (Index("ix_signals_paper_type_time", "paper_id", "type", "observed_at"),)
