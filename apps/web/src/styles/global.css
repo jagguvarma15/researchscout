@@ -82,13 +82,20 @@ svg[data-icon] {
   vertical-align: -0.125em;
 }
 
-/* Layout ------------------------------------------------------------------ */
+/* Layout: a wide, left-anchored page in the documentation-site register —
+   no centered narrow column. Long-form text blocks cap their own measure. */
 
 .container {
   width: 100%;
-  max-width: 46rem;
-  margin: 0 auto;
-  padding: 0 1.25rem;
+  max-width: 70rem;
+  margin: 0;
+  padding: 0 2.25rem;
+}
+
+@media (max-width: 48rem) {
+  .container {
+    padding: 0 1.25rem;
+  }
 }
 
 /* Buttons ------------------------------------------------------------------ */
