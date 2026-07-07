@@ -165,13 +165,14 @@ svg[data-icon] {
   height: 1.05em;
 }
 
-/* Cards: quiet contained surfaces — hairline border, barely-there shadow. ---- */
+/* Cards: quiet tinted panels — no borders, no shadows; sections separate
+   through whitespace and hairline rules. ------------------------------------ */
 
 .card {
-  background: var(--surface);
-  border: 1px solid var(--line);
+  background: var(--surface-2);
+  border: none;
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
+  box-shadow: none;
   padding: 1.1rem 1.25rem;
 }
 
