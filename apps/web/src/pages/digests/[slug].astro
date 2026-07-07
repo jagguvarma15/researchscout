@@ -1,4 +1,5 @@
 ---
+import { Icon } from 'astro-icon/components';
 import Base from '../../layouts/Base.astro';
 import { fetchDigest, formatDate, renderDigestBody } from '../../lib/api';
 
@@ -12,37 +13,45 @@ if (digest === null) {
 <Base title={digest?.title ?? 'Not found'}>
   {
     digest === null ? (
-      <>
-        <h1>Digest not found</h1>
-        <p>
-          Nothing published under <code>{slug}</code>.{' '}
-          <a href="/digests">Back to the archive</a>.
-        </p>
-      </>
+      <div class="card empty">
+        <Icon name="lucide:file-question" aria-hidden="true" />
+        <div>
+          <h1 class="notfound-title">Digest not found</h1>
+          <p class="notfound-body">
+            Nothing published under <code>{slug}</code>.{' '}
+            <a href="/digests">Back to the archive</a>.
+          </p>
+        </div>
+      </div>
     ) : (
       <article>
-        <h1>{digest.title}</h1>
-        <p class="meta">
-          {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
-        </p>
-        <div
-          class="body"
-          set:html={renderDigestBody(digest.body, new Set(digest.items.map((i) => i.paper_id)))}
-        />
-        <h2>Ranked papers</h2>
+        <header class="card intro">
+          <h1>{digest.title}</h1>
+          <p class="meta">
+            {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
+          </p>
+          <div
+            class="digest-body"
+            set:html={renderDigestBody(digest.body, new Set(digest.items.map((i) => i.paper_id)))}
+          />
+        </header>
+        <h2 class="ranked-title">Ranked papers</h2>
         <ol class="ranked">
           {digest.items.map((item) => (
             <li>
               <a href={`/papers/${item.paper_id}`}>{item.title}</a>
-              <span class="meta">
-                score {item.score.toFixed(3)}
-                {item.citations > 0 && ` · ${item.citations} citations`}
+              <span class="scores">
+                <span class="badge badge-score">score {item.score.toFixed(3)}</span>
+                {item.citations > 0 && <span class="badge">{item.citations} citations</span>}
               </span>
             </li>
           ))}
         </ol>
-        <p>
-          <a href="/digests">Back to the archive</a>
+        <p class="back">
+          <a class="btn btn-ghost" href="/digests">
+            <Icon name="lucide:chevron-left" aria-hidden="true" />
+            Back to the archive
+          </a>
         </p>
       </article>
     )
@@ -50,25 +59,73 @@ if (digest === null) {
 </Base>
 
 <style>
-  h1 {
-    font-size: 1.4rem;
-    margin-bottom: 0.25rem;
+  .notfound-title {
+    font-size: var(--text-lg);
+    margin: 0 0 0.25rem;
   }
-  h2 {
-    font-size: 1.05rem;
-    margin-top: 2rem;
+  .notfound-body {
+    margin: 0;
+  }
+  .intro {
+    padding: 1.5rem 1.6rem;
+    box-shadow: none;
+  }
+  h1 {
+    font-size: var(--text-xl);
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    margin: 0;
   }
   .meta {
     color: var(--muted);
     font-size: 0.85rem;
+    margin: 0.45rem 0 1.2rem;
   }
-  .body {
-    margin-top: 1rem;
+  .ranked-title {
+    font-size: var(--text-lg);
+    letter-spacing: -0.01em;
+    margin: var(--space-6) 0 var(--space-2);
+  }
+  .ranked {
+    list-style: none;
+    counter-reset: rank;
+    margin: 0;
+    padding: 0;
   }
   .ranked li {
-    margin: 0.4rem 0;
+    counter-increment: rank;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.75rem;
+    padding: 0.85rem 0;
+    border-bottom: 1px solid var(--line);
   }
-  .ranked .meta {
-    margin-left: 0.5rem;
+  .ranked li::before {
+    content: counter(rank);
+    min-width: 1.4rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .ranked a {
+    flex: 1;
+    min-width: 12rem;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .ranked a:hover {
+    color: var(--accent);
+  }
+  .scores {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .back {
+    margin: var(--space-5) 0 0;
   }
 </style>
