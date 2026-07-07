@@ -12,6 +12,21 @@ if (authenticated) {
   const token = sid ? await getAccessToken(sid) : null;
   if (token) items = await fetchSaved(token);
 }
+
+// Same timeline grouping as the feed: one group per publication day, newest first.
+const groups: { date: string; papers: PaperSummary[] }[] = [];
+for (const paper of items ?? []) {
+  const date = formatDate(paper.published_at);
+  const last = groups[groups.length - 1];
+  if (last && last.date === date) last.papers.push(paper);
+  else groups.push({ date, papers: [paper] });
+}
+
+function formatDayHeading(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`)
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    .toUpperCase();
+}
 ---
 
 <Base title="Saved papers">
@@ -47,34 +62,49 @@ if (authenticated) {
   }
 
   {
-    authenticated && items !== null && (
-      <ul class="feed">
-        {items.map((paper) => (
-          <li class="row">
-            <div class="row-head">
-              <a class="title" href={`/papers/${paper.id}`}>
-                {paper.title}
-              </a>
-              <SaveButton client:visible paperId={paper.id} saved={true} {authenticated} />
-            </div>
-            <p class="meta">
-              {formatDate(paper.published_at)}
-              {' · '}
-              {paper.authors
-                .slice(0, 3)
-                .map((author) => author.name)
-                .join(', ')}
-            </p>
-          </li>
-        ))}
-      </ul>
-    )
+    authenticated &&
+      items !== null &&
+      groups.map((group) => (
+        <section class="day">
+          <h2 class="day-heading">{formatDayHeading(group.date)}</h2>
+          <ul class="feed">
+            {group.papers.map((paper) => (
+              <li class="row">
+                <div class="row-head">
+                  <a class="title" href={`/papers/${paper.id}`}>
+                    {paper.title}
+                  </a>
+                  <SaveButton client:visible paperId={paper.id} saved={true} {authenticated} />
+                </div>
+                <p class="meta">
+                  {paper.authors
+                    .slice(0, 3)
+                    .map((author) => author.name)
+                    .join(', ')}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
   }
 </Base>
 
 <style>
   .empty p {
     margin: 0;
+  }
+  .day {
+    margin-bottom: var(--space-6);
+  }
+  .day-heading {
+    margin: 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
   }
   .feed {
     list-style: none;
@@ -85,8 +115,8 @@ if (authenticated) {
     padding: 1.1rem 0;
     border-bottom: 1px solid var(--line);
   }
-  .row:first-child {
-    padding-top: 0;
+  .row:last-child {
+    border-bottom: none;
   }
   .row-head {
     display: flex;
