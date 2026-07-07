@@ -12,7 +12,9 @@ services:
     profiles: ["core"]
     environment:
       RS_DATABASE_URL: postgresql+psycopg://researchscout:researchscout@db:5432/researchscout
-      RS_LLM_BASE_URL: ${RS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      # Deliberately NOT ${RS_LLM_BASE_URL}: the host .env points at localhost:11434, which is
+      # wrong inside a container. Cloud users set RS_LLM_BASE_URL_DOCKER too.
+      RS_LLM_BASE_URL: ${RS_LLM_BASE_URL_DOCKER:-http://host.docker.internal:11434/v1}
       RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
       RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
       RS_OIDC_ISSUER: http://localhost:8080/realms/researchscout

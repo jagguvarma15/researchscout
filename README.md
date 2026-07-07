@@ -1,6 +1,26 @@
 # researchscout
 ResearchScout ingests new AI/ML papers and their surrounding signals (citations, code adoption, social buzz), then scores, clusters, and summarizes them to separate breakthrough from noise - so you know what's worth reading right now.
 
+## Quickstart
+
+Needs Docker, [uv](https://docs.astral.sh/uv/), and pnpm. Chat needs an LLM: the defaults
+target local [Ollama](https://ollama.com) (`brew install ollama`, run `ollama serve`, then
+`ollama pull qwen2.5:3b-instruct` — one-time ~2.3GB), or point `RS_LLM_*` in `.env` at any
+OpenAI-compatible provider.
+
+```bash
+make setup    # deps + .env
+make start    # db, redis, keycloak, api, web — prints the URLs when ready
+make seed     # ~25 real arXiv papers, embedded and searchable
+```
+
+Then open http://localhost:4321: browse and search the feed, sign in as `demo` / `demo`, and
+ask the chat drawer about the papers — answers stream with citations. Star papers (`/saved`),
+run `make digest` and visit `/digests` for the weekly summary. `make start-all` adds the Kafka
+event plane (`scout jobs emit-ingest` then `make logs` to watch papers flow through the
+workers). `make stop` shuts everything down; `make clean` also wipes the data; plain `make`
+lists every target.
+
 ## Development
 
 Requires [uv](https://docs.astral.sh/uv/). The project pins Python 3.12 via `.python-version`
