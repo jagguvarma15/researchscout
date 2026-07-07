@@ -7,14 +7,18 @@
   const MAX_INTERESTS = 20;
   const MAX_LENGTH = 40;
 
-  let interests = $state<string[]>([]);
+  // The page passes the server-rendered list when it could fetch one; the client
+  // load is only a fallback so the editor still works if that fetch failed.
+  let { initial = null }: { initial?: string[] | null } = $props();
+
+  let interests = $state<string[]>(initial ?? []);
   let draft = $state('');
   let busy = $state(false);
-  let loaded = $state(false);
+  let loaded = $state(initial !== null);
   let error = $state('');
 
   $effect(() => {
-    void load();
+    if (!loaded) void load();
   });
 
   async function load() {
