@@ -1,6 +1,8 @@
 <script lang="ts">
-  // Star toggle for the reading list. Goes through the authenticated proxy; signed-out
+  // Bookmark toggle for the reading list. Goes through the authenticated proxy; signed-out
   // visitors are sent to login instead of seeing a dead button.
+
+  import { Bookmark, BookmarkCheck } from 'lucide-svelte';
 
   let {
     paperId,
@@ -30,27 +32,64 @@
 </script>
 
 <button
-  class="star"
+  class="save"
   class:saved
   onclick={toggle}
   disabled={busy}
   aria-pressed={saved}
+  aria-label={saved ? 'Remove from reading list' : 'Save to reading list'}
   title={saved ? 'Remove from reading list' : 'Save to reading list'}
 >
-  {saved ? '★' : '☆'}
+  {#if saved}
+    <BookmarkCheck size={18} fill="currentColor" fill-opacity={0.18} aria-hidden="true" />
+  {:else}
+    <Bookmark size={18} aria-hidden="true" />
+  {/if}
 </button>
 
 <style>
-  .star {
-    border: none;
+  .save {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    flex-shrink: 0;
+    border: 1px solid transparent;
+    border-radius: 999px;
     background: none;
-    font-size: 1.15rem;
-    line-height: 1;
     cursor: pointer;
-    color: var(--muted, #6a7076);
-    padding: 0 0.2rem;
+    color: var(--muted, #5d6570);
+    transition:
+      color 0.15s ease,
+      background-color 0.15s ease,
+      transform 0.15s ease;
   }
-  .star.saved {
-    color: #e8a13c;
+  .save:hover:not(:disabled) {
+    background: var(--surface-2, #f5f7fa);
+    color: var(--ink, #17191c);
+  }
+  .save:active:not(:disabled) {
+    transform: scale(0.92);
+  }
+  .save:focus-visible {
+    outline: 2px solid var(--accent, #0f62fe);
+    outline-offset: 2px;
+  }
+  .save:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .save.saved {
+    color: var(--accent, #0f62fe);
+  }
+  .save.saved:hover:not(:disabled) {
+    background: var(--accent-soft, #edf3ff);
+    color: var(--accent-hover, #0043ce);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .save {
+      transition: none;
+    }
   }
 </style>

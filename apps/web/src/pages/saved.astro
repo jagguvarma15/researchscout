@@ -1,4 +1,5 @@
 ---
+import { Icon } from 'astro-icon/components';
 import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchSaved, formatDate, type PaperSummary } from '../lib/api';
@@ -11,64 +12,130 @@ if (authenticated) {
   const token = sid ? await getAccessToken(sid) : null;
   if (token) items = await fetchSaved(token);
 }
+
+// Same timeline grouping as the feed: one group per publication day, newest first.
+const groups: { date: string; papers: PaperSummary[] }[] = [];
+for (const paper of items ?? []) {
+  const date = formatDate(paper.published_at);
+  const last = groups[groups.length - 1];
+  if (last && last.date === date) last.papers.push(paper);
+  else groups.push({ date, papers: [paper] });
+}
+
+function formatDayHeading(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`)
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+    .toUpperCase();
+}
 ---
 
 <Base title="Saved papers">
-  <h1>Saved papers</h1>
-
-  {!authenticated && <p class="empty"><a href="/auth/login?returnTo=/saved">Sign in</a> to keep a reading list.</p>}
-  {authenticated && items === null && <p class="empty">The API is unreachable — try again in a moment.</p>}
-  {authenticated && items !== null && items.length === 0 && (
-    <p class="empty">Nothing saved yet — star papers in the <a href="/">feed</a>.</p>
-  )}
+  <h1 class="page-title">Saved papers</h1>
 
   {
-    authenticated && items !== null && (
-      <ul class="feed">
-        {items.map((paper) => (
-          <li>
-            <SaveButton client:visible paperId={paper.id} saved={true} {authenticated} />
-            <a class="title" href={`/papers/${paper.id}`}>
-              {paper.title}
-            </a>
-            <p class="meta">
-              {formatDate(paper.published_at)}
-              {' · '}
-              {paper.authors
-                .slice(0, 3)
-                .map((author) => author.name)
-                .join(', ')}
-            </p>
-          </li>
-        ))}
-      </ul>
+    !authenticated && (
+      <div class="card empty">
+        <Icon name="lucide:lock" aria-hidden="true" />
+        <p>
+          <a href="/auth/login?returnTo=/saved">Sign in</a> to keep a reading list.
+        </p>
+      </div>
     )
+  }
+  {
+    authenticated && items === null && (
+      <div class="card empty">
+        <Icon name="lucide:cloud-off" aria-hidden="true" />
+        <p>The API is unreachable — try again in a moment.</p>
+      </div>
+    )
+  }
+  {
+    authenticated && items !== null && items.length === 0 && (
+      <div class="card empty">
+        <Icon name="lucide:bookmark-plus" aria-hidden="true" />
+        <p>
+          Nothing saved yet — bookmark papers in the <a href="/">feed</a>.
+        </p>
+      </div>
+    )
+  }
+
+  {
+    authenticated &&
+      items !== null &&
+      groups.map((group) => (
+        <section class="day">
+          <h2 class="day-heading">{formatDayHeading(group.date)}</h2>
+          <ul class="feed">
+            {group.papers.map((paper) => (
+              <li class="row">
+                <div class="row-head">
+                  <a class="title" href={`/papers/${paper.id}`}>
+                    {paper.title}
+                  </a>
+                  <SaveButton client:visible paperId={paper.id} saved={true} {authenticated} />
+                </div>
+                <p class="meta">
+                  {paper.authors
+                    .slice(0, 3)
+                    .map((author) => author.name)
+                    .join(', ')}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ))
   }
 </Base>
 
 <style>
-  h1 {
-    font-size: 1.3rem;
+  .empty p {
+    margin: 0;
+  }
+  .day {
+    margin-bottom: var(--space-6);
+  }
+  .day-heading {
+    margin: 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
   }
   .feed {
     list-style: none;
     margin: 0;
     padding: 0;
   }
-  .feed li {
-    padding: 0.9rem 0;
+  .row {
+    padding: 1.1rem 0;
     border-bottom: 1px solid var(--line);
   }
+  .row:last-child {
+    border-bottom: none;
+  }
+  .row-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
   .title {
+    flex: 1;
     font-weight: 600;
+    line-height: 1.4;
+    color: var(--ink);
     text-decoration: none;
+  }
+  .title:hover {
+    color: var(--accent);
   }
   .meta {
     color: var(--muted);
     font-size: 0.85rem;
-    margin: 0.25rem 0 0;
-  }
-  .empty {
-    color: var(--muted);
+    margin: 0.35rem 0 0;
   }
 </style>
