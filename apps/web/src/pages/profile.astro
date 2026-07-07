@@ -1,0 +1,64 @@
+---
+import { Icon } from 'astro-icon/components';
+import InterestsEditor from '../components/InterestsEditor.svelte';
+import Base from '../layouts/Base.astro';
+
+const user = Astro.locals.user;
+---
+
+<Base title="Profile">
+  <h1 class="page-title">Profile</h1>
+
+  {
+    user === null ? (
+      <div class="card empty">
+        <Icon name="lucide:lock" aria-hidden="true" />
+        <p>
+          <a href="/auth/login?returnTo=/profile">Sign in</a> to manage your profile.
+        </p>
+      </div>
+    ) : (
+      <>
+        <p class="who">
+          Signed in as <strong>{user.username}</strong>.
+        </p>
+        <section class="interests">
+          <h2>Research interests</h2>
+          <p class="blurb">
+            Topics you care about — up to 20, each a short phrase. Changes save as you go.
+          </p>
+          <InterestsEditor client:load />
+        </section>
+      </>
+    )
+  }
+</Base>
+
+<style>
+  .empty p {
+    margin: 0;
+  }
+  .who {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.92rem;
+  }
+  .who strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .interests {
+    margin-top: var(--space-6);
+  }
+  .interests h2 {
+    font-size: var(--text-lg);
+    letter-spacing: -0.01em;
+    margin: 0 0 0.35rem;
+  }
+  .blurb {
+    max-width: 70ch;
+    margin: 0 0 1.1rem;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+</style>
