@@ -2,6 +2,8 @@
   // The chat side panel: a single island, closed by default. Talks to the API through the
   // authenticated same-origin proxy (/api/chat) and renders the SSE stream token by token.
 
+  import { Lock, MessageCircle, Send, X } from 'lucide-svelte';
+
   interface UsedPaper {
     id: string;
     title: string;
@@ -105,18 +107,30 @@
   }
 </script>
 
-<button class="fab" onclick={() => (open = !open)} aria-expanded={open}>
-  {open ? 'Close' : 'Ask'}
+<button
+  class="fab"
+  onclick={() => (open = !open)}
+  aria-expanded={open}
+  aria-label={open ? 'Close the chat panel' : 'Ask about papers'}
+>
+  {#if open}
+    <X size={22} aria-hidden="true" />
+  {:else}
+    <MessageCircle size={22} aria-hidden="true" />
+  {/if}
 </button>
 
 <aside class="drawer" class:open aria-label="Ask about research papers" aria-hidden={!open}>
   <header>
     <strong>Ask about papers</strong>
-    <button class="close" onclick={() => (open = false)}>&times;</button>
+    <button class="close" onclick={() => (open = false)} aria-label="Close">
+      <X size={18} aria-hidden="true" />
+    </button>
   </header>
 
   {#if !authenticated}
     <div class="gate">
+      <span class="gate-mark"><Lock size={20} aria-hidden="true" /></span>
       <p>Chat is for signed-in readers.</p>
       <a class="signin" href="/auth/login">Sign in to ask</a>
     </div>
@@ -149,7 +163,9 @@
         bind:value={input}
         disabled={busy}
       />
-      <button type="submit" disabled={busy || !input.trim()}>Send</button>
+      <button type="submit" disabled={busy || !input.trim()} aria-label="Send">
+        <Send size={17} aria-hidden="true" />
+      </button>
     </form>
   {/if}
 </aside>
@@ -160,15 +176,25 @@
     right: 1.25rem;
     bottom: 1.25rem;
     z-index: 30;
-    padding: 0.6rem 1.1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 3.25rem;
+    height: 3.25rem;
     border: none;
     border-radius: 999px;
     background: var(--accent, #0f62fe);
     color: #fff;
-    font: inherit;
-    font-weight: 600;
     cursor: pointer;
-    box-shadow: 0 4px 14px rgb(0 0 0 / 0.18);
+    box-shadow: 0 2px 8px rgb(23 25 28 / 0.18);
+    transition: background-color 0.15s ease;
+  }
+  .fab:hover {
+    background: var(--accent-hover, #0043ce);
+  }
+  .fab:focus-visible {
+    outline: 2px solid var(--accent, #0f62fe);
+    outline-offset: 2px;
   }
   .drawer {
     position: fixed;
@@ -180,41 +206,86 @@
     display: flex;
     flex-direction: column;
     background: #fff;
-    border-left: 1px solid var(--line, #e3e6e8);
-    box-shadow: -8px 0 24px rgb(0 0 0 / 0.06);
+    border-left: 1px solid var(--line, #e4e7eb);
+    box-shadow: -8px 0 24px rgb(23 25 28 / 0.06);
     transform: translateX(100%);
     transition: transform 0.2s ease;
   }
   .drawer.open {
     transform: translateX(0);
   }
+  @media (prefers-reduced-motion: reduce) {
+    .drawer,
+    .fab {
+      transition: none;
+    }
+  }
   header {
     display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 0.55rem;
     padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--line, #e3e6e8);
+    border-bottom: 1px solid var(--line, #e4e7eb);
   }
   .close {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
     border: none;
+    border-radius: 999px;
     background: none;
-    font-size: 1.4rem;
-    line-height: 1;
     cursor: pointer;
-    color: var(--muted, #6a7076);
+    color: var(--muted, #5d6570);
+    transition: background-color 0.15s ease;
+  }
+  .close:hover {
+    background: var(--surface-2, #f5f7fa);
+    color: var(--ink, #17191c);
+  }
+  .close:focus-visible {
+    outline: 2px solid var(--accent, #0f62fe);
+    outline-offset: 2px;
   }
   .gate {
-    padding: 2rem 1.25rem;
+    padding: 2.5rem 1.25rem;
     text-align: center;
+  }
+  .gate-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 999px;
+    background: var(--accent-soft, #edf3ff);
+    color: var(--accent-ink, #0043ce);
+  }
+  .gate p {
+    margin: 0.75rem 0 0;
+    color: var(--muted, #5d6570);
   }
   .signin {
     display: inline-block;
-    margin-top: 0.5rem;
-    padding: 0.5rem 1rem;
-    border-radius: 8px;
+    margin-top: 1rem;
+    padding: 0.5rem 1.25rem;
+    border-radius: 999px;
     background: var(--accent, #0f62fe);
     color: #fff;
+    font-weight: 550;
+    font-size: 0.9rem;
     text-decoration: none;
+    box-shadow: 0 1px 2px rgb(23 25 28 / 0.1);
+    transition: background-color 0.15s ease;
+  }
+  .signin:hover {
+    background: var(--accent-hover, #0043ce);
+  }
+  .signin:focus-visible {
+    outline: 2px solid var(--accent, #0f62fe);
+    outline-offset: 2px;
   }
   .messages {
     flex: 1;
@@ -225,13 +296,13 @@
     gap: 0.75rem;
   }
   .hint {
-    color: var(--muted, #6a7076);
+    color: var(--muted, #5d6570);
     font-size: 0.9rem;
   }
   .msg p {
     margin: 0;
-    padding: 0.55rem 0.8rem;
-    border-radius: 10px;
+    padding: 0.6rem 0.9rem;
+    border-radius: 14px;
     font-size: 0.92rem;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -240,29 +311,39 @@
     background: var(--accent, #0f62fe);
     color: #fff;
     margin-left: 2rem;
+    border-bottom-right-radius: 4px;
   }
   .msg.assistant p {
-    background: #f2f4f6;
+    background: var(--surface-2, #f5f7fa);
+    border: 1px solid var(--line, #e4e7eb);
     margin-right: 2rem;
+    border-bottom-left-radius: 4px;
   }
   .msg.error p {
     background: #fdecec;
+    border-color: #f5c8c8;
     color: #8b1d1d;
   }
   .citations {
     display: flex;
     flex-wrap: wrap;
     gap: 0.4rem;
-    padding: 0.35rem 0 0 !important;
+    padding: 0.4rem 0 0 !important;
     background: none !important;
+    border: none !important;
   }
   .citations a {
-    font-size: 0.78rem;
-    border: 1px solid var(--line, #e3e6e8);
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: var(--accent-soft, #edf3ff);
     border-radius: 999px;
-    padding: 0.05rem 0.5rem;
+    padding: 0.05rem 0.55rem;
     text-decoration: none;
-    color: var(--accent, #0f62fe);
+    color: var(--accent-ink, #0043ce);
+    transition: background-color 0.15s ease;
+  }
+  .citations a:hover {
+    background: #dfe9ff;
   }
   .cursor {
     animation: blink 1s step-start infinite;
@@ -272,27 +353,55 @@
       opacity: 0;
     }
   }
+  @media (prefers-reduced-motion: reduce) {
+    .cursor {
+      animation: none;
+    }
+  }
   form {
     display: flex;
     gap: 0.5rem;
     padding: 0.9rem 1.25rem;
-    border-top: 1px solid var(--line, #e3e6e8);
+    border-top: 1px solid var(--line, #e4e7eb);
   }
   input {
     flex: 1;
-    padding: 0.5rem 0.7rem;
-    border: 1px solid var(--line, #e3e6e8);
-    border-radius: 8px;
+    min-width: 0;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--line, #e4e7eb);
+    border-radius: 999px;
+    background: #fff;
     font: inherit;
+    font-size: 0.92rem;
+  }
+  input::placeholder {
+    color: var(--muted, #5d6570);
+  }
+  input:focus-visible {
+    outline: 2px solid var(--accent, #0f62fe);
+    outline-offset: 1px;
+    border-color: var(--accent, #0f62fe);
   }
   form button {
-    padding: 0.5rem 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.6rem;
+    height: 2.6rem;
+    flex-shrink: 0;
     border: none;
-    border-radius: 8px;
+    border-radius: 999px;
     background: var(--accent, #0f62fe);
     color: #fff;
-    font: inherit;
     cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+  form button:hover:not(:disabled) {
+    background: var(--accent-hover, #0043ce);
+  }
+  form button:focus-visible {
+    outline: 2px solid var(--accent, #0f62fe);
+    outline-offset: 2px;
   }
   form button:disabled {
     opacity: 0.5;
