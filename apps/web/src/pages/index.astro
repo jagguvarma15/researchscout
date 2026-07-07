@@ -1,4 +1,5 @@
 ---
+import { Icon } from 'astro-icon/components';
 import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE } from '../lib/api';
@@ -28,30 +29,71 @@ function pageLink(target: number): string {
 ---
 
 <Base>
-  <form method="get" action="/">
-    <input type="search" name="q" placeholder="Search papers semantically…" value={q} />
-    <input type="text" name="category" placeholder="cs.LG" value={category} size="8" />
-    <input type="number" name="days" placeholder="days" value={days} min="1" max="365" size="5" />
-    <button type="submit">Search</button>
+  <form class="card searchbar" method="get" action="/">
+    <input
+      class="input search"
+      type="search"
+      name="q"
+      placeholder="Search papers semantically…"
+      aria-label="Search papers"
+      value={q}
+    />
+    <input
+      class="input filter"
+      type="text"
+      name="category"
+      placeholder="cs.LG"
+      aria-label="Category"
+      value={category}
+      size="8"
+    />
+    <input
+      class="input filter"
+      type="number"
+      name="days"
+      placeholder="days"
+      aria-label="Days back"
+      value={days}
+      min="1"
+      max="365"
+      size="5"
+    />
+    <button class="btn btn-primary" type="submit">Search</button>
   </form>
 
-  {items === null && <p class="empty">The API is unreachable — try again in a moment.</p>}
-  {items !== null && items.length === 0 && <p class="empty">No papers found.</p>}
+  {
+    items === null && (
+      <div class="card empty">
+        <Icon name="lucide:cloud-off" aria-hidden="true" />
+        <p>The API is unreachable — try again in a moment.</p>
+      </div>
+    )
+  }
+  {
+    items !== null && items.length === 0 && (
+      <div class="card empty">
+        <Icon name="lucide:search-x" aria-hidden="true" />
+        <p>No papers match that search — widen the filters and scan again.</p>
+      </div>
+    )
+  }
 
   {
     items !== null && (
       <ul class="feed">
         {items.map((paper) => (
-          <li>
-            <SaveButton
-              client:visible
-              paperId={paper.id}
-              saved={savedIds.has(paper.id)}
-              {authenticated}
-            />
-            <a class="title" href={`/papers/${paper.id}`}>
-              {paper.title}
-            </a>
+          <li class="row">
+            <div class="row-head">
+              <a class="title" href={`/papers/${paper.id}`}>
+                {paper.title}
+              </a>
+              <SaveButton
+                client:visible
+                paperId={paper.id}
+                saved={savedIds.has(paper.id)}
+                {authenticated}
+              />
+            </div>
             <p class="meta">
               {formatDate(paper.published_at)}
               {' · '}
@@ -63,7 +105,7 @@ function pageLink(target: number): string {
               {paper.categories.map((cat) => (
                 <span class="badge">{cat}</span>
               ))}
-              {paper.score !== null && <span class="badge score">{paper.score.toFixed(3)}</span>}
+              {paper.score !== null && <span class="badge badge-score">{paper.score.toFixed(3)}</span>}
             </p>
             <p class="abstract">{paper.abstract}</p>
           </li>
@@ -74,81 +116,120 @@ function pageLink(target: number): string {
 
   {
     items !== null && !q && (
-      <nav class="pager">
-        {page > 1 && <a href={pageLink(page - 1)}>&larr; Newer</a>}
-        {items.length === PAGE_SIZE && <a href={pageLink(page + 1)}>Older &rarr;</a>}
+      <nav class="pager" aria-label="Pagination">
+        {page > 1 && (
+          <a class="btn btn-ghost" href={pageLink(page - 1)}>
+            <Icon name="lucide:chevron-left" aria-hidden="true" />
+            Newer
+          </a>
+        )}
+        {items.length === PAGE_SIZE && (
+          <a class="btn btn-ghost older" href={pageLink(page + 1)}>
+            Older
+            <Icon name="lucide:chevron-right" aria-hidden="true" />
+          </a>
+        )}
       </nav>
     )
   }
 </Base>
 
 <style>
-  form {
+  .searchbar {
     display: flex;
     gap: 0.5rem;
-    margin-bottom: 1.5rem;
+    padding: 0.6rem;
+    margin-bottom: var(--space-6);
+    box-shadow: none;
   }
-  input[type='search'] {
+  .search {
     flex: 1;
+    min-width: 0;
+    border-color: transparent;
+    font-size: var(--text-md);
   }
-  input,
-  button {
-    padding: 0.45rem 0.6rem;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    font: inherit;
+  .search:hover {
+    border-color: var(--line);
   }
-  button {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-    cursor: pointer;
+  .filter {
+    width: 6.5rem;
+    padding: 0.55rem 0.6rem;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    border-color: transparent;
+    background: var(--surface-2);
+  }
+  .filter:focus-visible {
+    color: var(--ink);
+  }
+  .empty p {
+    margin: 0;
   }
   .feed {
     list-style: none;
     margin: 0;
     padding: 0;
   }
-  .feed li {
-    padding: 1rem 0;
+  .row {
+    padding: 1.35rem 0;
     border-bottom: 1px solid var(--line);
   }
+  .row:first-child {
+    padding-top: 0;
+  }
+  .row-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
   .title {
+    flex: 1;
     font-weight: 600;
     font-size: 1.05rem;
+    line-height: 1.4;
+    color: var(--ink);
     text-decoration: none;
+  }
+  .title:hover {
+    color: var(--accent);
   }
   .meta {
     color: var(--muted);
     font-size: 0.85rem;
-    margin: 0.25rem 0;
+    margin: 0.4rem 0 0;
   }
-  .badge {
-    display: inline-block;
+  .meta .badge {
     margin-left: 0.5rem;
-    padding: 0.05rem 0.45rem;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    font-size: 0.75rem;
-  }
-  .badge.score {
-    border-color: var(--accent);
-    color: var(--accent);
+    vertical-align: 0.1em;
   }
   .abstract {
-    margin: 0.25rem 0 0;
+    margin: 0.5rem 0 0;
+    color: var(--muted);
     font-size: 0.92rem;
+    line-height: 1.6;
     display: -webkit-box;
     -webkit-line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
-  .empty {
-    color: var(--muted);
-  }
   .pager {
     display: flex;
     justify-content: space-between;
-    padding-top: 1rem;
+    gap: 0.5rem;
+    padding-top: var(--space-5);
+  }
+  .pager .older {
+    margin-left: auto;
+  }
+  @media (max-width: 40rem) {
+    .searchbar {
+      flex-wrap: wrap;
+    }
+    .search {
+      flex-basis: 100%;
+    }
+    .filter {
+      flex: 1;
+    }
   }
 </style>
