@@ -1,9 +1,21 @@
-"""Freshness-aware retrieval: embed the query, ANN over pgvector with filters, recency-weight, rank.
+"""Authority-weighted hybrid retrieval: vector + lexical legs fused by RRF, freshness-aware.
 
-Freshness is a correctness property here: the date window is a hard filter, not a soft penalty — a
-paper outside the window is never returned. Within the window, results are re-ranked by semantic
-similarity times a recency weight, so a slightly-less-similar but much newer paper can outrank an
-older one. We over-fetch by similarity first so the recency re-rank has candidates to promote.
+The algorithm, in order:
+
+1. **Hard freshness filter** — the date window is a correctness property, not a soft penalty; a
+   paper outside the window is never returned. Category filters apply to both legs the same way.
+2. **Two retrieval legs** over the filtered pool: pgvector cosine ANN on the query embedding, and
+   Postgres full-text search (``websearch_to_tsquery`` + ``ts_rank_cd`` over the generated,
+   title-weighted ``search_tsv`` column). Each leg contributes its top ``_LEG_K`` candidates.
+3. **Reciprocal Rank Fusion** — a candidate's fused score is ``sum(1 / (60 + rank))`` across the
+   legs it appears in (rank is 1-based). RRF needs no score calibration between cosine distance
+   and ts_rank, and papers found by both legs float upward.
+4. **Recency and authority reweighting** — the fused score is multiplied by the existing
+   exponential recency weight and by ``1 + log1p(latest citation count)``; we have no citation
+   edges for PageRank, so the citation signal series stands in as the authority prior.
+
+If the query yields no tsquery lexemes (stopwords only) or the lexical leg errors, retrieval
+degrades gracefully to vector-only.
 """
 
 from __future__ import annotations
@@ -14,17 +26,21 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import ColumnElement, cast
 from sqlalchemy.dialects.postgresql import ARRAY, TEXT
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
 from researchscout.schema import Paper
+from researchscout.store.lexical import lexical_search
 from researchscout.store.models import PaperRow
 from researchscout.store.papers import get_paper
+from researchscout.store.signals import latest_value
 from researchscout.store.vectors import search as vector_search
 
 _DEFAULT_HALF_LIFE_DAYS = 14.0
-_OVERFETCH = 4
+_LEG_K = 40
+_RRF_K = 60
 
 
 @dataclass
@@ -57,20 +73,37 @@ def retrieve(
     categories: list[str] | None = None,
     half_life_days: float = _DEFAULT_HALF_LIFE_DAYS,
 ) -> list[ScoredPaper]:
-    """Return up to ``k`` papers within the freshness window, ranked by similarity x recency."""
+    """Up to ``k`` in-window papers, ranked by RRF(vector, lexical) x recency x authority."""
     window_days = days if days is not None else get_settings().freshness_days
-    query_vector = embedder.embed_query(query)
     where = _filters(window_days, categories)
-    candidates = vector_search(session, query_vector, k=k * _OVERFETCH, where=where)
 
+    query_vector = embedder.embed_query(query)
+    vector_hits = vector_search(session, query_vector, k=_LEG_K, where=where)
+    try:
+        lexical_hits = lexical_search(session, query, k=_LEG_K, where=where)
+    except SQLAlchemyError:
+        session.rollback()
+        lexical_hits = []
+
+    fused: dict[str, float] = {}
+    for hits in (vector_hits, lexical_hits):
+        for rank, (paper_id, _leg_score) in enumerate(hits, start=1):
+            fused[paper_id] = fused.get(paper_id, 0.0) + 1.0 / (_RRF_K + rank)
+
+    distances = dict(vector_hits)
     scored: list[ScoredPaper] = []
-    for paper_id, distance in candidates:
+    for paper_id, rrf_score in fused.items():
         paper = get_paper(session, paper_id)
         if paper is None:
             continue
-        similarity = 1.0 - distance
-        score = similarity * _recency_weight(paper.published_at, half_life_days)
-        scored.append(ScoredPaper(paper=paper, score=score, distance=distance))
+        citations = latest_value(session, paper_id, "citation")
+        score = (
+            rrf_score
+            * _recency_weight(paper.published_at, half_life_days)
+            * (1.0 + math.log1p(citations))
+        )
+        # Lexical-only hits have no measured cosine distance; report the maximum.
+        scored.append(ScoredPaper(paper=paper, score=score, distance=distances.get(paper_id, 1.0)))
 
     scored.sort(key=lambda item: item.score, reverse=True)
     return scored[:k]
