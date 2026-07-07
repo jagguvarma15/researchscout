@@ -3,6 +3,7 @@ import '@fontsource-variable/inter/index.css';
 import '../styles/global.css';
 
 import { Icon } from 'astro-icon/components';
+import AvatarMenu from '../components/AvatarMenu.svelte';
 import ChatDrawer from '../components/ChatDrawer.svelte';
 
 interface Props {
@@ -39,14 +40,10 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
                   <Icon name="lucide:bookmark" aria-hidden="true" />
                   Saved
                 </a>
-                <span class="who">{Astro.locals.user.username}</span>
-                <a class="btn btn-ghost" href="/auth/logout">
-                  <Icon name="lucide:log-out" aria-hidden="true" />
-                  Sign out
-                </a>
+                <AvatarMenu client:load username={Astro.locals.user.username} />
               </>
             ) : (
-              <a class="btn btn-ghost" href="/auth/login">
+              <a class="btn btn-primary" href="/auth/login">
                 <Icon name="lucide:log-in" aria-hidden="true" />
                 Sign in
               </a>
@@ -117,11 +114,6 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
   .site-nav .btn {
     padding: 0.35rem 0.85rem;
   }
-  .who {
-    color: var(--muted);
-    font-size: 0.85rem;
-    padding: 0 0.25rem;
-  }
   main {
     padding-top: var(--space-6);
     padding-bottom: 4rem;
@@ -135,8 +127,17 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
     padding-top: 1.1rem;
     padding-bottom: 2rem;
   }
-  @media (max-width: 40rem) {
-    .who {
+  @media (max-width: 26rem) {
+    .site-header-inner {
+      gap: 0.5rem;
+    }
+    .site-nav {
+      gap: 0.35rem;
+    }
+    .site-nav .btn {
+      padding: 0.35rem 0.6rem;
+    }
+    .brand-word {
       display: none;
     }
   }
