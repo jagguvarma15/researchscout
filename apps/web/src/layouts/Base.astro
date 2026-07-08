@@ -5,6 +5,8 @@ import '../styles/global.css';
 import { Icon } from 'astro-icon/components';
 import AvatarMenu from '../components/AvatarMenu.svelte';
 import ChatDrawer from '../components/ChatDrawer.svelte';
+import CommandPalette from '../components/CommandPalette.svelte';
+import ThemeToggle from '../components/ThemeToggle.svelte';
 
 interface Props {
   title?: string;
@@ -21,6 +23,16 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{pageTitle}</title>
+    <script is:inline>
+      // Theme before first paint: stored choice wins, otherwise the OS preference.
+      const stored = localStorage.getItem('rs-theme');
+      document.documentElement.dataset.theme =
+        stored === 'dark' || stored === 'light'
+          ? stored
+          : window.matchMedia('(prefers-color-scheme: dark)').matches
+            ? 'dark'
+            : 'light';
+    </script>
   </head>
   <body>
     <header class="site-header">
@@ -32,6 +44,16 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
           <span class="brand-word">ResearchScout</span>
         </a>
         <nav class="site-nav" aria-label="Site">
+          <button
+            class="btn btn-ghost btn-icon"
+            type="button"
+            data-open-palette
+            aria-label="Search (Cmd+K)"
+            title="Search (Cmd+K)"
+          >
+            <Icon name="lucide:search" aria-hidden="true" />
+          </button>
+          <ThemeToggle client:load />
           <a class="btn btn-ghost" href="/digests">Digests</a>
           {
             Astro.locals.user ? (
@@ -61,6 +83,7 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
       </div>
     </footer>
     <ChatDrawer client:load authenticated={Astro.locals.user !== null} />
+    <CommandPalette client:load authenticated={Astro.locals.user !== null} />
   </body>
 </html>
 
@@ -99,7 +122,7 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
     height: 1.9rem;
     border-radius: var(--radius-sm);
     background: var(--accent);
-    color: #fff;
+    color: var(--accent-contrast);
   }
   .brand-mark svg {
     width: 1.15rem;
@@ -113,6 +136,9 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
   }
   .site-nav .btn {
     padding: 0.35rem 0.85rem;
+  }
+  .site-nav .btn-icon {
+    padding: 0.45rem;
   }
   main {
     padding-top: var(--space-6);
