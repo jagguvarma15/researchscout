@@ -165,7 +165,7 @@
     transition: background-color 0.15s ease;
   }
   .remove:hover:not(:disabled) {
-    background: #e6eaef;
+    background: var(--line, #e6eaef);
     color: var(--ink, #17191c);
   }
   .remove:focus-visible {
@@ -188,7 +188,8 @@
     padding: 0.5rem 0.8rem;
     border: 1px solid var(--line, #e4e7eb);
     border-radius: 10px;
-    background: #fff;
+    background: var(--surface, #fff);
+    color: var(--ink, #17191c);
     font: inherit;
     font-size: 0.9rem;
   }
@@ -208,7 +209,7 @@
     border: none;
     border-radius: 999px;
     background: var(--accent, #0f62fe);
-    color: #fff;
+    color: var(--accent-contrast, #fff);
     font: inherit;
     font-size: 0.88rem;
     font-weight: 550;
