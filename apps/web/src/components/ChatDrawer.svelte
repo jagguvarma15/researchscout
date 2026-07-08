@@ -183,17 +183,18 @@
     height: 3.25rem;
     border: none;
     border-radius: 999px;
-    background: var(--accent, #0f62fe);
+    /* One of the two restrained gradient touches (with the brand mark). */
+    background: var(--accent-grad, var(--accent, #c2410c));
     color: var(--accent-contrast, #fff);
     cursor: pointer;
     box-shadow: 0 2px 8px rgb(23 25 28 / 0.18);
     transition: background-color 0.15s ease;
   }
   .fab:hover {
-    background: var(--accent-hover, #0043ce);
+    background: var(--accent-hover, #9a3412);
   }
   .fab:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   .drawer {
@@ -246,7 +247,7 @@
     color: var(--ink, #17191c);
   }
   .close:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   .gate {
@@ -260,8 +261,8 @@
     width: 2.75rem;
     height: 2.75rem;
     border-radius: 999px;
-    background: var(--accent-soft, #edf3ff);
-    color: var(--accent-ink, #0043ce);
+    background: var(--accent-soft, #fef3c7);
+    color: var(--accent-ink, #78350f);
   }
   .gate p {
     margin: 0.75rem 0 0;
@@ -272,7 +273,7 @@
     margin-top: 1rem;
     padding: 0.5rem 1.25rem;
     border-radius: 999px;
-    background: var(--accent, #0f62fe);
+    background: var(--accent, #c2410c);
     color: var(--accent-contrast, #fff);
     font-weight: 550;
     font-size: 0.9rem;
@@ -281,10 +282,10 @@
     transition: background-color 0.15s ease;
   }
   .signin:hover {
-    background: var(--accent-hover, #0043ce);
+    background: var(--accent-hover, #9a3412);
   }
   .signin:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   .messages {
@@ -308,7 +309,7 @@
     overflow-wrap: anywhere;
   }
   .msg.user p {
-    background: var(--accent, #0f62fe);
+    background: var(--accent, #c2410c);
     color: var(--accent-contrast, #fff);
     margin-left: 2rem;
     border-bottom-right-radius: 4px;
@@ -335,15 +336,15 @@
   .citations a {
     font-size: 0.75rem;
     font-weight: 500;
-    background: var(--accent-soft, #edf3ff);
+    background: var(--accent-soft, #fef3c7);
     border-radius: 999px;
     padding: 0.05rem 0.55rem;
     text-decoration: none;
-    color: var(--accent-ink, #0043ce);
+    color: var(--accent-ink, #78350f);
     transition: background-color 0.15s ease;
   }
   .citations a:hover {
-    background: var(--chip-hover, #dfe9ff);
+    background: var(--chip-hover, #fde68a);
   }
   .cursor {
     animation: blink 1s step-start infinite;
@@ -379,9 +380,9 @@
     color: var(--muted, #5d6570);
   }
   input:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 1px;
-    border-color: var(--accent, #0f62fe);
+    border-color: var(--accent, #c2410c);
   }
   form button {
     display: inline-flex;
@@ -392,16 +393,16 @@
     flex-shrink: 0;
     border: none;
     border-radius: 999px;
-    background: var(--accent, #0f62fe);
+    background: var(--accent, #c2410c);
     color: var(--accent-contrast, #fff);
     cursor: pointer;
     transition: background-color 0.15s ease;
   }
   form button:hover:not(:disabled) {
-    background: var(--accent-hover, #0043ce);
+    background: var(--accent-hover, #9a3412);
   }
   form button:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   form button:disabled {
