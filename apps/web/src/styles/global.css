@@ -3,6 +3,8 @@
    .badge, .input) used by every page and both islands. */
 
 :root {
+  color-scheme: light;
+
   /* Neutral scale on a soft beige base (per the ResearchScout.dc design round);
      surfaces stay white so content lifts gently off the page. */
   --bg: #faf7f1;
@@ -11,14 +13,17 @@
   --surface: #ffffff;
   --surface-2: #f4f0e8;
   --ink: #17191c;
-  --muted: #5d6570; /* 5.7:1 on the beige */
+  --muted: #5d6570; /* 5.5:1 on the beige bg, 5.2:1 on surface-2 */
   --line: #e6e1d5;
+  --line-strong: #d1d6dc; /* hover borders */
 
   /* Accent family. */
   --accent: #0f62fe;
   --accent-hover: #0043ce;
   --accent-soft: #edf3ff;
-  --accent-ink: #0043ce; /* accent-on-soft text, 7.2:1 on white */
+  --accent-ink: #0043ce; /* accent-on-soft text, 7.0:1 on the soft tint */
+  --accent-contrast: #ffffff; /* text on solid accent, 5.0:1 */
+  --chip-hover: #dfe9ff;
 
   /* Shape and depth. */
   --radius-sm: 10px;
@@ -41,6 +46,35 @@
   --space-5: clamp(1.25rem, 1.1rem + 0.7vw, 1.5rem);
   --space-6: clamp(1.6rem, 1.2rem + 1.7vw, 2.25rem);
   --gutter: clamp(1.25rem, 0.7rem + 2.8vw, 2.25rem);
+}
+
+/* Warm-dark counterpart of the beige theme. Applied by the inline pre-paint script
+   in Base.astro via <html data-theme="...">, toggled by the ThemeToggle island.
+   Contrast (WCAG, computed): ink 15.6:1 on bg / 13.1:1 on surface-2; muted 7.0:1 on
+   bg / 5.9:1 on surface-2; accent 7.4:1 on bg; accent-ink 8.6:1 on accent-soft;
+   accent-contrast (ink-dark) 7.4:1 on solid accent. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #191713;
+  --bg-translucent: rgb(25 23 19 / 0.88);
+  --pattern-line: rgb(255 255 255 / 0.05);
+  --surface: #211e19;
+  --surface-2: #2a2620;
+  --ink: #f2efe8;
+  --muted: #a8a294;
+  --line: #3a352c;
+  --line-strong: #4a4437;
+
+  --accent: #7aa5ff;
+  --accent-hover: #9dbdff;
+  --accent-soft: #232d45;
+  --accent-ink: #b9ccff;
+  --accent-contrast: #191713;
+  --chip-hover: #2e3a5c;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 12px rgb(0 0 0 / 0.4), 0 12px 32px rgb(0 0 0 / 0.5);
 }
 
 * {
@@ -138,7 +172,7 @@ svg[data-icon] {
 .btn-primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -154,7 +188,7 @@ svg[data-icon] {
 
 .btn-ghost:hover:not(:disabled) {
   background: var(--surface-2);
-  border-color: #d1d6dc;
+  border-color: var(--line-strong);
 }
 
 .btn-icon {
@@ -279,7 +313,7 @@ svg[data-icon] {
 }
 
 .digest-body a:hover {
-  background: #dfe9ff;
+  background: var(--chip-hover);
 }
 
 /* Motion guard --------------------------------------------------------------- */
