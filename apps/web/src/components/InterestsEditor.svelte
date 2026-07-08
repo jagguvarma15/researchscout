@@ -169,7 +169,7 @@
     color: var(--ink, #17191c);
   }
   .remove:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 1px;
   }
   .remove:disabled {
@@ -197,9 +197,9 @@
     color: var(--muted, #5d6570);
   }
   input:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 1px;
-    border-color: var(--accent, #0f62fe);
+    border-color: var(--accent, #c2410c);
   }
   form button {
     display: inline-flex;
@@ -208,7 +208,7 @@
     padding: 0.5rem 1rem;
     border: none;
     border-radius: 999px;
-    background: var(--accent, #0f62fe);
+    background: var(--accent, #c2410c);
     color: var(--accent-contrast, #fff);
     font: inherit;
     font-size: 0.88rem;
@@ -217,10 +217,10 @@
     transition: background-color 0.15s ease;
   }
   form button:hover:not(:disabled) {
-    background: var(--accent-hover, #0043ce);
+    background: var(--accent-hover, #9a3412);
   }
   form button:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   form button:disabled {
