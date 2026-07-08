@@ -184,7 +184,7 @@
     border: none;
     border-radius: 999px;
     background: var(--accent, #0f62fe);
-    color: #fff;
+    color: var(--accent-contrast, #fff);
     cursor: pointer;
     box-shadow: 0 2px 8px rgb(23 25 28 / 0.18);
     transition: background-color 0.15s ease;
@@ -205,7 +205,7 @@
     width: min(420px, 100vw);
     display: flex;
     flex-direction: column;
-    background: #fff;
+    background: var(--surface, #fff);
     border-left: 1px solid var(--line, #e4e7eb);
     box-shadow: -8px 0 24px rgb(23 25 28 / 0.06);
     transform: translateX(100%);
@@ -273,7 +273,7 @@
     padding: 0.5rem 1.25rem;
     border-radius: 999px;
     background: var(--accent, #0f62fe);
-    color: #fff;
+    color: var(--accent-contrast, #fff);
     font-weight: 550;
     font-size: 0.9rem;
     text-decoration: none;
@@ -309,7 +309,7 @@
   }
   .msg.user p {
     background: var(--accent, #0f62fe);
-    color: #fff;
+    color: var(--accent-contrast, #fff);
     margin-left: 2rem;
     border-bottom-right-radius: 4px;
   }
@@ -343,7 +343,7 @@
     transition: background-color 0.15s ease;
   }
   .citations a:hover {
-    background: #dfe9ff;
+    background: var(--chip-hover, #dfe9ff);
   }
   .cursor {
     animation: blink 1s step-start infinite;
@@ -370,7 +370,8 @@
     padding: 0.55rem 0.9rem;
     border: 1px solid var(--line, #e4e7eb);
     border-radius: 999px;
-    background: #fff;
+    background: var(--surface, #fff);
+    color: var(--ink, #17191c);
     font: inherit;
     font-size: 0.92rem;
   }
@@ -392,7 +393,7 @@
     border: none;
     border-radius: 999px;
     background: var(--accent, #0f62fe);
-    color: #fff;
+    color: var(--accent-contrast, #fff);
     cursor: pointer;
     transition: background-color 0.15s ease;
   }
