@@ -75,7 +75,7 @@
     border-color: var(--line-strong, #d1d6dc);
   }
   summary:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   .panel {
@@ -121,7 +121,7 @@
     border-color: var(--line-strong, #d1d6dc);
   }
   .actions button:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   .toast {
