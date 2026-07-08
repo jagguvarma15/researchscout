@@ -70,7 +70,7 @@
     transition: background-color 0.15s ease;
   }
   .avatar:hover {
-    background: #dfe9ff;
+    background: var(--chip-hover, #dfe9ff);
   }
   .avatar:focus-visible {
     outline: 2px solid var(--accent, #0f62fe);
@@ -87,10 +87,8 @@
     padding: 0.4rem;
     border: 1px solid var(--line, #e4e7eb);
     border-radius: 12px;
-    background: #fff;
-    box-shadow:
-      0 4px 12px rgb(23 25 28 / 0.08),
-      0 12px 32px rgb(23 25 28 / 0.1);
+    background: var(--surface, #fff);
+    box-shadow: var(--shadow-md, 0 12px 32px rgb(23 25 28 / 0.1));
   }
   .menu-user {
     padding: 0.35rem 0.65rem 0.45rem;
