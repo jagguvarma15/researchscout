@@ -53,7 +53,7 @@
     color: var(--ink, #17191c);
   }
   .toggle:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   @media (prefers-reduced-motion: reduce) {
