@@ -60,8 +60,8 @@
     height: 2.15rem;
     border: none;
     border-radius: 999px;
-    background: var(--accent-soft, #edf3ff);
-    color: var(--accent-ink, #0043ce);
+    background: var(--accent-soft, #fef3c7);
+    color: var(--accent-ink, #78350f);
     font: inherit;
     font-size: 0.8rem;
     font-weight: 650;
@@ -70,10 +70,10 @@
     transition: background-color 0.15s ease;
   }
   .avatar:hover {
-    background: var(--chip-hover, #dfe9ff);
+    background: var(--chip-hover, #fde68a);
   }
   .avatar:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   .menu {
@@ -108,7 +108,7 @@
     background: var(--surface-2, #f5f7fa);
   }
   .menu a:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: -2px;
   }
   @media (prefers-reduced-motion: reduce) {
