@@ -1,8 +1,9 @@
 ---
 import { Icon } from 'astro-icon/components';
+import CiteActions from '../../components/CiteActions.svelte';
 import SaveButton from '../../components/SaveButton.svelte';
 import Base from '../../layouts/Base.astro';
-import { fetchPaper, fetchSaved, formatDate } from '../../lib/api';
+import { fetchPaper, fetchPapers, fetchSaved, formatDate, type PaperSummary } from '../../lib/api';
 import { getAccessToken, SESSION_COOKIE } from '../../lib/auth';
 
 // Rest param, not a plain [id]: canonical ids like doi:10.1145/nnn.mmm contain slashes.
@@ -19,6 +20,30 @@ if (authenticated && paper !== null) {
   const token = sid ? await getAccessToken(sid) : null;
   if (token) saved = ((await fetchSaved(token)) ?? []).some((p) => p.id === paper.id);
 }
+
+// Related papers ride the hybrid search with the title as the query — no new backend.
+let related: PaperSummary[] = [];
+if (paper !== null) {
+  const hits = await fetchPapers({ q: paper.title });
+  related = (hits ?? []).filter((hit) => hit.id !== paper.id).slice(0, 4);
+}
+
+// BibTeX is rendered server-side so the citation stays readable without JavaScript.
+function bibtexFor(p: PaperSummary): string {
+  const key = p.id.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  const lines = [
+    `@article{${key},`,
+    `  title = {${p.title}},`,
+    `  author = {${p.authors.map((author) => author.name).join(' and ')}},`,
+    `  year = {${p.published_at.slice(0, 4)}},`,
+  ];
+  if (p.id.startsWith('arxiv:')) lines.push(`  eprint = {${p.id.slice('arxiv:'.length)}},`);
+  if (p.url) lines.push(`  url = {${p.url}},`);
+  lines.push('}');
+  return lines.join('\n');
+}
+
+const bibtex = paper === null ? '' : bibtexFor(paper);
 ---
 
 <Base title={paper?.title ?? 'Not found'}>
@@ -74,6 +99,26 @@ if (authenticated && paper !== null) {
             Back to the feed
           </a>
         </p>
+        <div class="cite-row">
+          <CiteActions client:load bibtex={bibtex} url={Astro.url.href} />
+        </div>
+        {related.length > 0 && (
+          <section class="related">
+            <h2 class="related-title">Related papers</h2>
+            <ul>
+              {related.map((hit) => (
+                <li>
+                  <a class="related-link" href={`/papers/${hit.id}`}>
+                    {hit.title}
+                  </a>
+                  {hit.score !== null && (
+                    <span class="badge badge-score">{hit.score.toFixed(3)}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </article>
     )
   }
@@ -137,5 +182,48 @@ if (authenticated && paper !== null) {
   }
   .links .back {
     margin-left: auto;
+  }
+  .cite-row {
+    margin-top: 0.75rem;
+  }
+  .related {
+    margin-top: var(--space-6);
+  }
+  .related-title {
+    margin: 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .related ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .related li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .related li:last-child {
+    border-bottom: none;
+  }
+  .related-link {
+    flex: 1;
+    min-width: 0;
+    font-weight: 550;
+    font-size: 0.95rem;
+    line-height: 1.4;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .related-link:hover {
+    color: var(--accent);
   }
 </style>
