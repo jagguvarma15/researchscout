@@ -15,7 +15,7 @@
   interface Entry {
     href: string;
     label: string;
-    kind: 'nav' | 'paper';
+    kind: 'nav' | 'paper' | 'search';
     score?: number | null;
   }
 
@@ -41,7 +41,21 @@
   const commands = $derived(
     NAV.filter((item) => (authenticated || !item.auth) && matches(item.label, query)),
   );
+  // With a query, a pinned first row hands the search to the feed page for the
+  // full result list; Enter with nothing highlighted lands there too.
+  const searchAll = $derived<Entry[]>(
+    query.trim()
+      ? [
+          {
+            href: `/?q=${encodeURIComponent(query.trim())}`,
+            label: `Search all papers for "${query.trim()}"`,
+            kind: 'search' as const,
+          },
+        ]
+      : [],
+  );
   const entries = $derived<Entry[]>([
+    ...searchAll,
     ...commands.map((item) => ({ href: item.href, label: item.label, kind: 'nav' as const })),
     ...papers.map((hit) => ({
       href: `/papers/${hit.id}`,
@@ -76,6 +90,7 @@
     // Debounced paper search: track the query, wait 250ms, keep only the newest reply.
     const q = query.trim();
     clearTimeout(timer);
+    selected = 0;
     if (!open || !q) {
       papers = [];
       return;
@@ -123,7 +138,9 @@
     } else if (event.key === 'Enter') {
       event.preventDefault();
       const entry = entries[selected];
+      const q = query.trim();
       if (entry) window.location.href = entry.href;
+      else if (q) window.location.href = `/?q=${encodeURIComponent(q)}`;
     }
   }
 </script>
@@ -171,6 +188,8 @@
             >
               {#if entry.kind === 'paper'}
                 <FileText size={14} aria-hidden="true" />
+              {:else if entry.kind === 'search'}
+                <Search size={14} aria-hidden="true" />
               {:else}
                 <CornerDownLeft size={14} aria-hidden="true" />
               {/if}
@@ -275,8 +294,8 @@
     flex-shrink: 0;
     padding: 0.05rem 0.5rem;
     border-radius: 999px;
-    background: var(--accent-soft, #edf3ff);
-    color: var(--accent-ink, #0043ce);
+    background: var(--accent-soft, #fef3c7);
+    color: var(--accent-ink, #78350f);
     font-size: 0.72rem;
     font-weight: 500;
     font-variant-numeric: tabular-nums;
