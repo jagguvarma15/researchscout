@@ -60,8 +60,8 @@
     height: 2.15rem;
     border: none;
     border-radius: 999px;
-    background: var(--accent-soft, #edf3ff);
-    color: var(--accent-ink, #0043ce);
+    background: var(--accent-soft, #fef3c7);
+    color: var(--accent-ink, #78350f);
     font: inherit;
     font-size: 0.8rem;
     font-weight: 650;
@@ -70,10 +70,10 @@
     transition: background-color 0.15s ease;
   }
   .avatar:hover {
-    background: #dfe9ff;
+    background: var(--chip-hover, #fde68a);
   }
   .avatar:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   .menu {
@@ -87,10 +87,8 @@
     padding: 0.4rem;
     border: 1px solid var(--line, #e4e7eb);
     border-radius: 12px;
-    background: #fff;
-    box-shadow:
-      0 4px 12px rgb(23 25 28 / 0.08),
-      0 12px 32px rgb(23 25 28 / 0.1);
+    background: var(--surface, #fff);
+    box-shadow: var(--shadow-md, 0 12px 32px rgb(23 25 28 / 0.1));
   }
   .menu-user {
     padding: 0.35rem 0.65rem 0.45rem;
@@ -110,7 +108,7 @@
     background: var(--surface-2, #f5f7fa);
   }
   .menu a:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: -2px;
   }
   @media (prefers-reduced-motion: reduce) {

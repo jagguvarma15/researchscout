@@ -46,37 +46,54 @@ function pageLink(target: number): string {
 ---
 
 <Base>
-  <form class="card searchbar" method="get" action="/">
-    <input
-      class="input search"
-      type="search"
-      name="q"
-      placeholder="Search papers semantically…"
-      aria-label="Search papers"
-      value={q}
-    />
-    <input
-      class="input filter"
-      type="text"
-      name="category"
-      placeholder="cs.LG"
-      aria-label="Category"
-      value={category}
-      size="8"
-    />
-    <input
-      class="input filter"
-      type="number"
-      name="days"
-      placeholder="days"
-      aria-label="Days back"
-      value={days}
-      min="1"
-      max="365"
-      size="5"
-    />
-    <button class="btn btn-primary" type="submit">Search</button>
-  </form>
+  {
+    (q || category || days) && (
+      <div class="active-search">
+        <p class="active-summary">
+          {q ? (
+            <>
+              Results for <strong>“{q}”</strong>
+            </>
+          ) : (
+            'Filtered feed'
+          )}
+          {items !== null && (
+            <span class="active-count">
+              {items.length} {items.length === 1 ? 'result' : 'results'}
+            </span>
+          )}
+        </p>
+        <form class="active-controls" method="get" action="/">
+          {q && <input type="hidden" name="q" value={q} />}
+          <input
+            class="input filter"
+            type="text"
+            name="category"
+            placeholder="cs.LG"
+            aria-label="Category"
+            value={category}
+            size="8"
+          />
+          <input
+            class="input filter"
+            type="number"
+            name="days"
+            placeholder="days"
+            aria-label="Days back"
+            value={days}
+            min="1"
+            max="365"
+            size="5"
+          />
+          <button class="btn btn-ghost" type="submit">Apply</button>
+          <a class="btn btn-ghost" href="/">
+            <Icon name="lucide:x" aria-hidden="true" />
+            Clear
+          </a>
+        </form>
+      </div>
+    )
+  }
 
   {
     authenticated && savedPapers.length > 0 && (
@@ -177,28 +194,44 @@ function pageLink(target: number): string {
 </Base>
 
 <style>
-  .searchbar {
+  /* Active-search bar: shown only when a query or filter is live — the navbar
+     palette owns search entry. */
+  .active-search {
     display: flex;
-    gap: 0.5rem;
-    max-width: 46rem;
-    padding: 0.6rem;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem 1rem;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--line);
     margin-bottom: var(--space-6);
   }
-  .search {
-    flex: 1;
-    min-width: 0;
-    border-color: transparent;
+  .active-summary {
+    margin: 0;
+    display: inline-flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.6rem;
     font-size: var(--text-md);
   }
-  .search:hover {
-    border-color: var(--line);
+  .active-count {
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  .active-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .active-controls .btn {
+    padding: 0.4rem 0.9rem;
   }
   .filter {
     width: 6.5rem;
-    padding: 0.55rem 0.6rem;
+    padding: 0.45rem 0.6rem;
     color: var(--muted);
     font-size: var(--text-xs);
-    border-color: transparent;
   }
   .filter:focus-visible {
     color: var(--ink);
@@ -328,12 +361,6 @@ function pageLink(target: number): string {
     margin-left: auto;
   }
   @media (max-width: 40rem) {
-    .searchbar {
-      flex-wrap: wrap;
-    }
-    .search {
-      flex-basis: 100%;
-    }
     .filter {
       flex: 1;
     }

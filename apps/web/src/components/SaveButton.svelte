@@ -73,7 +73,7 @@
     transform: scale(0.92);
   }
   .save:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   .save:disabled {
@@ -81,11 +81,11 @@
     cursor: default;
   }
   .save.saved {
-    color: var(--accent, #0f62fe);
+    color: var(--accent, #c2410c);
   }
   .save.saved:hover:not(:disabled) {
-    background: var(--accent-soft, #edf3ff);
-    color: var(--accent-hover, #0043ce);
+    background: var(--accent-soft, #fef3c7);
+    color: var(--accent-hover, #9a3412);
   }
   @media (prefers-reduced-motion: reduce) {
     .save {

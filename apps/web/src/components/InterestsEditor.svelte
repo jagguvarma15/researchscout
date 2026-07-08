@@ -165,11 +165,11 @@
     transition: background-color 0.15s ease;
   }
   .remove:hover:not(:disabled) {
-    background: #e6eaef;
+    background: var(--line, #e6eaef);
     color: var(--ink, #17191c);
   }
   .remove:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 1px;
   }
   .remove:disabled {
@@ -188,7 +188,8 @@
     padding: 0.5rem 0.8rem;
     border: 1px solid var(--line, #e4e7eb);
     border-radius: 10px;
-    background: #fff;
+    background: var(--surface, #fff);
+    color: var(--ink, #17191c);
     font: inherit;
     font-size: 0.9rem;
   }
@@ -196,9 +197,9 @@
     color: var(--muted, #5d6570);
   }
   input:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 1px;
-    border-color: var(--accent, #0f62fe);
+    border-color: var(--accent, #c2410c);
   }
   form button {
     display: inline-flex;
@@ -207,8 +208,8 @@
     padding: 0.5rem 1rem;
     border: none;
     border-radius: 999px;
-    background: var(--accent, #0f62fe);
-    color: #fff;
+    background: var(--accent, #c2410c);
+    color: var(--accent-contrast, #fff);
     font: inherit;
     font-size: 0.88rem;
     font-weight: 550;
@@ -216,10 +217,10 @@
     transition: background-color 0.15s ease;
   }
   form button:hover:not(:disabled) {
-    background: var(--accent-hover, #0043ce);
+    background: var(--accent-hover, #9a3412);
   }
   form button:focus-visible {
-    outline: 2px solid var(--accent, #0f62fe);
+    outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
   form button:disabled {
