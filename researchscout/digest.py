@@ -10,15 +10,14 @@ import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from researchscout.answer import _CITATION_RE
 from researchscout.llm.base import LLM
 from researchscout.obs.trace import trace_span
 from researchscout.schema import Paper
-from researchscout.store.models import SignalRow
 from researchscout.store.papers import list_papers
+from researchscout.store.signals import latest_value
 
 _SYSTEM_PROMPT = (
     "You are writing a weekly research digest for a reader deciding what to read. "
@@ -57,13 +56,7 @@ def week_slug(end: datetime) -> str:
 
 def _latest_citations(session: Session, paper_id: str) -> float:
     """The most recent cumulative citation count observed for a paper (0 when unobserved)."""
-    value = session.execute(
-        select(SignalRow.value)
-        .where(SignalRow.paper_id == paper_id, SignalRow.type == "citation")
-        .order_by(SignalRow.observed_at.desc())
-        .limit(1)
-    ).scalar_one_or_none()
-    return float(value) if value is not None else 0.0
+    return latest_value(session, paper_id, "citation")
 
 
 def rank_window(session: Session, *, days: int = 7, k: int = 10) -> list[RankedPaper]:

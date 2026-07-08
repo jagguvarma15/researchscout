@@ -31,6 +31,17 @@ def append_signal(session: Session, signal: Signal) -> None:
     session.flush()
 
 
+def latest_value(session: Session, paper_id: str, type: str) -> float:
+    """The most recent observed value for one paper+type (0 when unobserved)."""
+    value = session.execute(
+        select(SignalRow.value)
+        .where(SignalRow.paper_id == paper_id, SignalRow.type == type)
+        .order_by(SignalRow.observed_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+    return float(value) if value is not None else 0.0
+
+
 def series(
     session: Session, paper_id: str, type: str, since: datetime
 ) -> list[tuple[datetime, float]]:

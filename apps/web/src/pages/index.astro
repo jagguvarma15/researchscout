@@ -30,12 +30,13 @@ function formatDayHeading(iso: string): string {
 }
 
 const authenticated = Astro.locals.user !== null;
-let savedIds = new Set<string>();
+let savedPapers: PaperSummary[] = [];
 if (authenticated) {
   const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
   const token = sid ? await getAccessToken(sid) : null;
-  if (token) savedIds = new Set(((await fetchSaved(token)) ?? []).map((p) => p.id));
+  if (token) savedPapers = (await fetchSaved(token)) ?? [];
 }
+const savedIds = new Set(savedPapers.map((p) => p.id));
 
 function pageLink(target: number): string {
   const next = new URLSearchParams(Astro.url.searchParams);
@@ -76,6 +77,27 @@ function pageLink(target: number): string {
     />
     <button class="btn btn-primary" type="submit">Search</button>
   </form>
+
+  {
+    authenticated && savedPapers.length > 0 && (
+      <section class="reading">
+        <div class="reading-head">
+          <h2 class="day-heading">Reading list</h2>
+          <a class="reading-all" href="/saved">View all</a>
+        </div>
+        <ul class="reading-items">
+          {savedPapers.slice(0, 5).map((paper) => (
+            <li>
+              <a class="reading-title" href={`/papers/${paper.id}`}>
+                {paper.title}
+              </a>
+              <SaveButton client:visible paperId={paper.id} saved={true} {authenticated} />
+            </li>
+          ))}
+        </ul>
+      </section>
+    )
+  }
 
   {
     items === null && (
@@ -183,6 +205,58 @@ function pageLink(target: number): string {
   }
   .empty p {
     margin: 0;
+  }
+  .reading {
+    margin-bottom: var(--space-6);
+  }
+  .reading-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .reading-head .day-heading {
+    border-bottom: none;
+    padding-bottom: 0;
+    text-transform: uppercase;
+  }
+  .reading-all {
+    font-size: 0.8rem;
+    text-decoration: none;
+  }
+  .reading-all:hover {
+    text-decoration: underline;
+  }
+  .reading-items {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .reading-items li {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .reading-items li:last-child {
+    border-bottom: none;
+  }
+  .reading-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.92rem;
+    font-weight: 550;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .reading-title:hover {
+    color: var(--accent);
   }
   .day {
     margin-bottom: var(--space-6);
