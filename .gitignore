@@ -23,4 +23,3 @@ htmlcov/
 .DS_Store
 
 # Local-only deployment explainer (kept out of the repo on purpose)
-deploy/GUIDE.md
