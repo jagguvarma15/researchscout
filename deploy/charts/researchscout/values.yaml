@@ -54,9 +54,17 @@ oidc:
   demoUserEnabled: true
 
 llm:
-  baseUrl: http://host.k3d.internal:11435/v1
+  baseUrl: http://host.k3d.internal:11434/v1
   model: qwen2.5:3b-instruct
   apiKey: ollama
+  # Off-cluster Ollama surfaced as an in-cluster Service named `ollama` (see
+  # templates/ollama-endpoint.yaml), so baseUrl can be http://ollama:11434/v1 everywhere.
+  # nodeIP takes the node's private IP (prod), or a resolvable hostname such as
+  # host.k3d.internal (k3d), which renders an ExternalName Service instead.
+  external:
+    enabled: false
+    nodeIP: ""
+    port: 11434
 
 otel:
   enabled: false

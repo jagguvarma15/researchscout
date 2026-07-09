@@ -31,9 +31,16 @@ oidc:
 otel:
   enabled: true
 
+# Chat is served by the VM's own Ollama (installed by cloud-init as a host systemd
+# service), reached through the chart's `ollama` Service.
 llm:
-  baseUrl: https://api.openai.com/v1
-  model: gpt-4o-mini
+  baseUrl: http://ollama:11434/v1
+  model: qwen2.5:3b-instruct
+  external:
+    enabled: true
+    # PLACEHOLDER — replace with the VM's private IP on the 10.0.1.0/24 subnet before
+    # deploying (`hostname -I | awk '{print $1}'` on the VM, or the OCI console).
+    nodeIP: 10.0.1.2
 
 cron:
   ingest:

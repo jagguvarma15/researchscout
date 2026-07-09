@@ -1,0 +1,44 @@
+# The k8s twin of collector.yaml (compose). Same OTLP/gRPC intake, two differences:
+#   - Tempo is dropped to fit the 12GB VM; the traces pipeline terminates in `nop` so app
+#     SDKs still export cleanly (deleting the pipeline would fail every span batch and
+#     spam the logs that land in Loki). Local compose keeps full traces.
+#   - health_check backs the collector pod's liveness/readiness probes (:13133).
+# Prometheus scrapes app metrics off :8889; logs go to Loki over OTLP. bootstrap.sh feeds
+# this file to the opentelemetry-collector chart as its full config.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 96
+  batch: {}
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+exporters:
+  nop: {}
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  otlphttp/loki:
+    endpoint: http://loki:3100/otlp
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [nop]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/loki]

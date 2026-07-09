@@ -21,3 +21,20 @@ kafka:
 workers:
   embed:
     enabled: false
+
+# Same wiring as prod, through the chart's `ollama` Service: a hostname in nodeIP renders
+# an ExternalName Service, and host.k3d.internal resolves to the machine running Docker —
+# where the brew Ollama listens. The FQDN (not plain `ollama`) matters here: the host
+# Ollama binds loopback, which arms its DNS-rebinding Host check, and only hostnames
+# ending in .localhost/.local/.internal pass it. Prod binds 0.0.0.0 (no check) and keeps
+# the short name.
+llm:
+  baseUrl: http://ollama.default.svc.cluster.local:11434/v1
+  external:
+    enabled: true
+    nodeIP: host.k3d.internal
+
+# Prod parity for the k3d rehearsal. Without the observability stack installed
+# (LOCAL=1 bash deploy/scripts/bootstrap.sh) the exporters only log warnings.
+otel:
+  enabled: true
