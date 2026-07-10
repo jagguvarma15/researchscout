@@ -5,7 +5,7 @@ ALL_PROFILES := --profile core --profile events --profile obs --profile airtable
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup start start-all stop down clean seed digest check logs ps k3d-up k3d-down
+.PHONY: help setup start start-all start-obs stop down clean seed digest check logs ps k3d-up k3d-down
 
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-12s\033[0m %s\n", $$1, $$2}'
@@ -39,6 +39,16 @@ start: ## start the core stack (db, redis, keycloak, api, web) and migrate
 
 start-all: start ## core plus the Kafka event plane (~3.9GB — the 8GB machine's ceiling)
 	$(COMPOSE) --profile events up -d --build
+
+start-obs: start ## core plus grafana/prometheus/loki/tempo; turns telemetry export on
+	@grep -q '^RS_OTEL_ENABLED=true$$' .env || { \
+	  perl -pi -e 's/^RS_OTEL_ENABLED=.*$$/RS_OTEL_ENABLED=true/' .env; \
+	  echo "RS_OTEL_ENABLED=true written to .env (services export to the collector)"; }
+	$(COMPOSE) --profile core --profile obs up -d --build
+	@echo
+	@echo "  grafana     http://localhost:3000    (ResearchScout dashboard is pre-provisioned)"
+	@echo "  prometheus  http://localhost:9090"
+	@echo "  data appears ~60s after the first request (the SDK exports on a 60s cycle)"
 
 seed: ## ingest ~25 recent cs.LG papers and index them
 	uv run scout ingest --since $$(uv run python -c "from datetime import UTC, datetime, timedelta; print((datetime.now(UTC)-timedelta(days=7)).date())") --category cs.LG --max 25
