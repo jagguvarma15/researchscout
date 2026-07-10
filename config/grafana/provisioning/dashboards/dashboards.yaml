@@ -1,0 +1,9 @@
+# Load every .json in this directory as a dashboard; edits on disk show up
+# within 10s (updateIntervalSeconds default) without restarting Grafana.
+apiVersion: 1
+
+providers:
+  - name: researchscout
+    type: file
+    options:
+      path: /etc/grafana/provisioning/dashboards
