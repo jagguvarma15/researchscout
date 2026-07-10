@@ -151,6 +151,10 @@ Alertmanager off, 3d retention), Loki (single binary, filesystem storage, 7d ret
 and the collector (release `otel-collector`), and provisions Grafana's Prometheus + Loki
 datasources plus its ingress at `grafana.<domain>`. The chart's `otel.enabled` /
 `otel.endpoint` values (`values-prod.yaml`, `values-local.yaml`) feed the app env vars.
+Locally, `make start-obs` does all of this in one shot: it runs the compose obs profile,
+flips `RS_OTEL_ENABLED=true` in `.env`, and Grafana (http://localhost:3000, anonymous
+admin) comes up with datasources and a ResearchScout dashboard pre-provisioned from
+`config/grafana/provisioning/`.
 
 **Data flow.** App pods export OTLP/gRPC to `otel-collector:4317`. Metrics: collector
 re-exposes them on `:8889` in Prometheus format; Prometheus scrapes that target (wired via
