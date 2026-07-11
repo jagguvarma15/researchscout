@@ -23,6 +23,9 @@ ingress:
   className: traefik
   siteHost: scout.localtest.me
   authHost: auth.localtest.me
+  # Publishes the API on its own host — needed when the web runs off-cluster
+  # (e.g. Vercel) and must reach the API over the public internet.
+  apiHost: ""
   tls:
     enabled: false
     issuer: letsencrypt

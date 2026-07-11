@@ -1,5 +1,7 @@
-# Production shape for the single-node k3s VM. Replace example.com with your domain and keep
-# real secret values in the SOPS-encrypted deploy/secrets/secrets.prod.yaml, not here.
+# Production shape: the frontend runs on Vercel; this VM serves the API, Keycloak, and
+# everything behind them. Replace the placeholder hosts with your DuckDNS subdomain and
+# siteUrl with the Vercel production URL; keep real secret values in the SOPS-encrypted
+# deploy/secrets/secrets.prod.yaml, not here.
 image:
   pullPolicy: IfNotPresent
   api:
@@ -9,15 +11,21 @@ image:
   worker:
     repository: ghcr.io/jagguvarma15/researchscout-worker
 
-siteUrl: https://scout.example.com
-authUrl: https://auth.example.com
+# Drives the Keycloak realm's redirect URIs — must be the browser-facing site origin.
+siteUrl: https://researchscout.vercel.app
+authUrl: https://auth.researchscout.duckdns.org
 
 ingress:
-  siteHost: scout.example.com
-  authHost: auth.example.com
+  siteHost: scout.researchscout.duckdns.org
+  authHost: auth.researchscout.duckdns.org
+  apiHost: api.researchscout.duckdns.org
   tls:
     enabled: true
     issuer: letsencrypt
+
+# The web island lives on Vercel; nothing to run in-cluster.
+web:
+  replicas: 0
 
 postgres:
   storage: 10Gi
