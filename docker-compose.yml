@@ -69,7 +69,7 @@ services:
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080
       OIDC_CLIENT_ID: web-bff
       OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-dev-secret}
-      SESSION_REDIS_URL: redis://redis:6379
+      REDIS_URL: redis://redis:6379
     ports:
       - "4321:4321"
     depends_on:
