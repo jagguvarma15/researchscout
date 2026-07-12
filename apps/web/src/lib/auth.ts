@@ -13,7 +13,7 @@ const KEYCLOAK_INTERNAL_URL = process.env.KEYCLOAK_INTERNAL_URL ?? KEYCLOAK_PUBL
 const REALM = process.env.KEYCLOAK_REALM ?? 'researchscout';
 const CLIENT_ID = process.env.OIDC_CLIENT_ID ?? 'web-bff';
 const CLIENT_SECRET = process.env.OIDC_CLIENT_SECRET ?? 'dev-secret';
-const REDIS_URL = process.env.SESSION_REDIS_URL ?? 'redis://localhost:6379';
+const REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
 export const SITE_URL = process.env.SITE_URL ?? 'http://localhost:4321';
 export const SESSION_COOKIE = 'rs_session';

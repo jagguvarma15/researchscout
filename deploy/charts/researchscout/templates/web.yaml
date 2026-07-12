@@ -30,7 +30,7 @@ spec:
               value: web-bff
             - name: OIDC_CLIENT_SECRET
               value: {{ .Values.oidc.clientSecret | quote }}
-            - name: SESSION_REDIS_URL
+            - name: REDIS_URL
               value: redis://redis:6379
           ports:
             - containerPort: 4321

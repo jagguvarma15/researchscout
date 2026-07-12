@@ -22,5 +22,6 @@ swapping the cookie for a Bearer token. Blog pages stay public; the API decides 
 Env vars (defaults suit `docker compose --profile core up` with the app on the host):
 `KEYCLOAK_PUBLIC_URL` (browser-facing, default `http://localhost:8080`),
 `KEYCLOAK_INTERNAL_URL` (backchannel, defaults to public), `KEYCLOAK_REALM` (`researchscout`),
-`OIDC_CLIENT_ID` (`web-bff`), `OIDC_CLIENT_SECRET`, `SESSION_REDIS_URL`, `SITE_URL`.
+`OIDC_CLIENT_ID` (`web-bff`), `OIDC_CLIENT_SECRET`, `REDIS_URL` (session store — on
+Vercel this is exactly what the Upstash integration injects), `SITE_URL`.
 The dev realm ships a `demo` / `demo` user (see `config/keycloak/realm.json`).
