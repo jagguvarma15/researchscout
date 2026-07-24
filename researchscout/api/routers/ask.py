@@ -28,7 +28,9 @@ def ask(
 ) -> AskResponse:
     """Answer a question with a grounded, cited summary of recent papers."""
     try:
-        result = answer(session, embedder, llm, body.question, k=body.k, days=body.days)
+        result = answer(
+            session, embedder, llm, body.question, k=body.k, days=body.days, agentic=body.agentic
+        )
     except OpenAIError as exc:
         raise HTTPException(status_code=502, detail="LLM backend unavailable") from exc
     return AskResponse(
