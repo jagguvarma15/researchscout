@@ -65,6 +65,11 @@ class Settings(BaseSettings):
     rerank_enabled: bool = False
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     rerank_top_n: int = 40
+    # Emerging-topic clustering: the window to cluster over and the cosine-distance threshold that
+    # decides how tight a cluster is (lower = tighter, more topics). The scheduler rebuilds daily.
+    cluster_window_days: int = 30
+    cluster_distance_threshold: float = 0.5
+    scheduler_topics_interval_sec: int = 86400
 
 
 def get_settings() -> Settings:
