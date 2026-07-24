@@ -1,5 +1,5 @@
 # researchscout
-ResearchScout ingests new AI/ML papers and their surrounding signals (citations, code adoption, social buzz), then scores, clusters, and summarizes them to separate breakthrough from noise - so you know what's worth reading right now.
+ResearchScout ingests new AI/ML papers and their surrounding signals (citations, trending attention, code adoption), then scores, clusters, and summarizes them to separate breakthrough from noise - so you know what's worth reading right now.
 
 ## Quickstart
 
@@ -16,7 +16,10 @@ make seed     # ~25 real arXiv papers, embedded and searchable
 
 Then open http://localhost:4321: browse and search the feed, sign in as `demo` / `demo`, and
 ask the chat drawer about the papers — answers stream with citations. Star papers (`/saved`),
-run `make digest` and visit `/digests` for the weekly summary. `make start-all` adds the Kafka
+run `make digest` and visit `/digests` for the weekly summary. `/topics` clusters recent papers
+into emerging themes ranked by momentum, and signed-in readers get a personalized `/for-you` feed
+from their interests. `scout serve scheduler` (or the `scheduler` compose profile) keeps ingest,
+signals, embeddings, digests, and topics refreshing on their own. `make start-all` adds the Kafka
 event plane (`scout jobs emit-ingest` then `make logs` to watch papers flow through the
 workers). `make stop` shuts everything down; `make clean` also wipes the data; plain `make`
 lists every target.
@@ -52,6 +55,7 @@ docker compose --profile core up --build   # containerized: db + api on :8000
 ```
 
 Endpoints: `GET /healthz`, `GET /v1/papers` (recency feed; `?q=` switches to semantic ranking),
-`GET /v1/papers/{id}`, and `POST /v1/ask` (grounded, cited answer). The LLM defaults to local
+`GET /v1/papers/{id}`, `GET /v1/topics` (emerging topics), `GET /v1/me/feed` (personalized,
+authenticated), and `POST /v1/ask` (grounded, cited answer). The LLM defaults to local
 Ollama; point `RS_LLM_BASE_URL` / `RS_LLM_MODEL` / `RS_LLM_API_KEY` at any OpenAI-compatible
 provider to swap it.
