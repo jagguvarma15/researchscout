@@ -1,8 +1,4 @@
-"""The ``scout`` command-line interface.
-
-Commands that aren't implemented yet are stubs that print which PR will implement them, so the full
-command surface is already visible from ``scout --help``. Each later PR fills in its command.
-"""
+"""The ``scout`` command-line interface — the same core the HTTP API serves, from the terminal."""
 
 from __future__ import annotations
 
@@ -34,14 +30,6 @@ app.add_typer(topics_app, name="topics")
 app.add_typer(serve_app, name="serve")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(worker_app, name="worker")
-
-
-def _todo(command: str, pr: str) -> None:
-    typer.secho(
-        f"`scout {command}` is not implemented yet — arrives in {pr}.",
-        fg=typer.colors.YELLOW,
-    )
-    raise typer.Exit(code=1)
 
 
 @app.command()
