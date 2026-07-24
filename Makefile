@@ -5,7 +5,7 @@ ALL_PROFILES := --profile core --profile events --profile obs --profile airtable
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup start start-all start-obs stop down clean seed digest check logs ps k3d-up k3d-down
+.PHONY: help setup start start-all start-obs stop down clean seed digest check logs ps
 
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-12s\033[0m %s\n", $$1, $$2}'
@@ -82,9 +82,3 @@ logs: ## tail logs from running services
 
 ps: ## show running services
 	$(COMPOSE) $(ALL_PROFILES) ps
-
-k3d-up: ## run the whole stack on a disposable k3d cluster
-	bash deploy/k3d/up.sh
-
-k3d-down: ## delete the k3d cluster
-	bash deploy/k3d/down.sh
