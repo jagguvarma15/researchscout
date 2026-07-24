@@ -122,6 +122,32 @@ export async function fetchDigest(slug: string): Promise<DigestDetail | null> {
   }
 }
 
+export interface TopicPaper {
+  paper_id: string;
+  title: string;
+  score: number;
+}
+
+export interface TopicDetail {
+  id: number;
+  label: string;
+  summary: string | null;
+  score: number;
+  size: number;
+  papers: TopicPaper[];
+}
+
+export async function fetchTopics(): Promise<TopicDetail[] | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/topics`);
+    if (!response.ok) return null;
+    const body = (await response.json()) as { items: TopicDetail[] };
+    return body.items;
+  } catch {
+    return null;
+  }
+}
+
 // Digest bodies are plain LLM text: escape everything, then turn [scheme:id] citations into
 // paper links and blank lines into paragraph breaks. Only ids actually in the digest get
 // linked — an id the model invented stays as escaped plain text instead of a dead link.
