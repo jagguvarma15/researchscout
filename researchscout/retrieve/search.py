@@ -15,6 +15,10 @@ The algorithm, in order:
    series (citations, trending rank, code stars). With no signals the boost is 0, so ranking falls
    back to recency; with only static citations it reduces to ``1 + log1p(citations)`` — the prior
    behaviour, recovered as a special case.
+5. **Optional cross-encoder rerank** — when ``RS_RERANK_ENABLED`` is set, the top first-stage
+   candidates are re-scored by a cross encoder that reads the query and paper together; its
+   relevance replaces the RRF term while the recency-and-breakthrough prior is kept. Off by
+   default, so the four steps above are the standard path.
 
 If the query yields no tsquery lexemes (stopwords only) or the lexical leg errors, retrieval
 degrades gracefully to vector-only.
@@ -33,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
+from researchscout.rerank import Candidate, get_reranker, rerank
 from researchscout.schema import Paper
 from researchscout.score import breakthrough
 from researchscout.store.lexical import lexical_search
@@ -75,8 +80,9 @@ def retrieve(
     categories: list[str] | None = None,
     half_life_days: float = _DEFAULT_HALF_LIFE_DAYS,
 ) -> list[ScoredPaper]:
-    """Up to ``k`` in-window papers, ranked by RRF(vector, lexical) x recency x authority."""
-    window_days = days if days is not None else get_settings().freshness_days
+    """Up to ``k`` in-window papers, ranked by RRF x recency x breakthrough, optionally reranked."""
+    settings = get_settings()
+    window_days = days if days is not None else settings.freshness_days
     where = _filters(window_days, categories)
 
     query_vector = embedder.embed_query(query)
@@ -93,15 +99,28 @@ def retrieve(
             fused[paper_id] = fused.get(paper_id, 0.0) + 1.0 / (_RRF_K + rank)
 
     distances = dict(vector_hits)
-    scored: list[ScoredPaper] = []
+    candidates: list[Candidate] = []
+    lookup: dict[str, tuple[Paper, float]] = {}
     for paper_id, rrf_score in fused.items():
         paper = get_paper(session, paper_id)
         if paper is None:
             continue
-        boost = breakthrough(session, paper_id).total
-        score = rrf_score * _recency_weight(paper.published_at, half_life_days) * (1.0 + boost)
+        prior = _recency_weight(paper.published_at, half_life_days) * (
+            1.0 + breakthrough(session, paper_id).total
+        )
+        candidates.append(
+            Candidate(
+                key=paper_id,
+                text=f"{paper.title}\n\n{paper.abstract}",
+                prior=prior,
+                first_stage=rrf_score * prior,
+            )
+        )
         # Lexical-only hits have no measured cosine distance; report the maximum.
-        scored.append(ScoredPaper(paper=paper, score=score, distance=distances.get(paper_id, 1.0)))
+        lookup[paper_id] = (paper, distances.get(paper_id, 1.0))
 
-    scored.sort(key=lambda item: item.score, reverse=True)
-    return scored[:k]
+    ranked = rerank(query, candidates, get_reranker(), top_n=max(settings.rerank_top_n, k))
+    return [
+        ScoredPaper(paper=lookup[key][0], score=score, distance=lookup[key][1])
+        for key, score in ranked
+    ][:k]
