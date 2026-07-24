@@ -1,5 +1,6 @@
-# Source registry — enabling/disabling a source is config, not code.
-# This is a stub for PR 01; it becomes load-bearing in PR 02 (Source interface + registry).
+# Source registry — enabling/disabling a source is config, not code. The scheduler runs every
+# source marked enabled for its kind (content sources ingest papers; signal sources attach
+# observations to papers already stored).
 sources:
   arxiv:
     enabled: true
@@ -8,5 +9,15 @@ sources:
     categories: [cs.LG, cs.AI, cs.CL]
   semantic_scholar:
     enabled: true
+    kind: signal
+    cadence: daily
+  hf_trending:
+    enabled: true
+    kind: signal
+    cadence: daily
+  code_adoption:
+    # Off by default: GitHub search is rate-limited without a token. Set GITHUB_TOKEN (or `token`
+    # here) and flip this to true to record repository stars as a code-adoption signal.
+    enabled: false
     kind: signal
     cadence: daily
