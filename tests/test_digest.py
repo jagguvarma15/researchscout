@@ -1,3 +1,4 @@
+import math
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -38,12 +39,14 @@ def test_week_slug_is_iso_week() -> None:
     assert week_slug(datetime(2026, 7, 6, tzinfo=UTC)) == "2026-w28"
 
 
-def test_citations_outrank_freshness(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_breakthrough_outranks_freshness(monkeypatch: pytest.MonkeyPatch) -> None:
     fresh = _paper("arxiv:2401.00001", age_days=0.5)
     cited = _paper("arxiv:2401.00002", age_days=4.0)
     monkeypatch.setattr(digest_mod, "list_papers", lambda *a, **k: [fresh, cited])
     citations = {"arxiv:2401.00001": 0.0, "arxiv:2401.00002": 250.0}
+    boosts = {"arxiv:2401.00001": 0.0, "arxiv:2401.00002": math.log1p(250.0)}
     monkeypatch.setattr(digest_mod, "_latest_citations", lambda s, pid: citations[pid])
+    monkeypatch.setattr(digest_mod, "_breakthrough_boost", lambda s, pid: boosts[pid])
 
     ranked = rank_window(None, days=7, k=2)
     assert [r.paper.id for r in ranked] == ["arxiv:2401.00002", "arxiv:2401.00001"]
@@ -54,6 +57,7 @@ def test_build_digest_post_checks_citations(monkeypatch: pytest.MonkeyPatch) -> 
     papers = [_paper("arxiv:2401.00001", age_days=1)]
     monkeypatch.setattr(digest_mod, "list_papers", lambda *a, **k: papers)
     monkeypatch.setattr(digest_mod, "_latest_citations", lambda *a: 0.0)
+    monkeypatch.setattr(digest_mod, "_breakthrough_boost", lambda *a: 0.0)
     llm = FakeLLM("Big week [arxiv:2401.00001], also fake [arxiv:9999.99999].")
 
     digest = build_digest(None, llm, days=7, k=5)
