@@ -1,8 +1,8 @@
-"""Append-only signal time series: append observations, read a series, compute velocity.
+"""Append-only signal time series: append observations and read them back per paper.
 
 Signals are never updated in place — each observation is a timestamped row, so deltas over time give
-velocity (and, later at Stage 3, acceleration / ignition). This module provides the substrate and
-the first derivative only.
+velocity and acceleration. This module stores and reads the series; the breakthrough scorer
+(:mod:`researchscout.score`) turns them into a momentum-aware number.
 """
 
 from __future__ import annotations
@@ -56,6 +56,21 @@ def series(
         .order_by(SignalRow.observed_at)
     ).all()
     return [(observed_at, value) for observed_at, value in rows]
+
+
+def all_series(
+    session: Session, paper_id: str, since: datetime
+) -> dict[str, list[tuple[datetime, float]]]:
+    """A paper's signal series since a time, grouped by type, oldest-first (one query)."""
+    rows = session.execute(
+        select(SignalRow.type, SignalRow.observed_at, SignalRow.value)
+        .where(SignalRow.paper_id == paper_id, SignalRow.observed_at >= since)
+        .order_by(SignalRow.type, SignalRow.observed_at)
+    ).all()
+    grouped: dict[str, list[tuple[datetime, float]]] = {}
+    for type_name, observed_at, value in rows:
+        grouped.setdefault(type_name, []).append((observed_at, value))
+    return grouped
 
 
 def velocity(session: Session, paper_id: str, type: str, window: timedelta) -> float:
