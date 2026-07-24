@@ -1,3 +1,4 @@
+import math
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -9,6 +10,7 @@ import researchscout.retrieve.search as search_mod
 from researchscout.embed.base import Embedder
 from researchscout.retrieve.search import retrieve
 from researchscout.schema import Author, Paper
+from researchscout.score import Breakthrough
 
 
 class StubEmbedder(Embedder):
@@ -47,8 +49,11 @@ def _setup(
     monkeypatch.setattr(search_mod, "vector_search", lambda *a, **k: vector)
     monkeypatch.setattr(search_mod, "lexical_search", lambda *a, **k: lexical)
     monkeypatch.setattr(search_mod, "get_paper", lambda s, pid: _paper(pid))
+    cites = citations or {}
     monkeypatch.setattr(
-        search_mod, "latest_value", lambda s, pid, t: (citations or {}).get(pid, 0.0)
+        search_mod,
+        "breakthrough",
+        lambda s, pid: Breakthrough(total=math.log1p(cites.get(pid, 0.0)), contributions={}),
     )
 
 
