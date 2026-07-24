@@ -65,6 +65,24 @@ def _post_check(text: str, used: list[ScoredPaper]) -> Answer:
     return Answer(text=text, cited=cited, hallucinated=hallucinated, used=used)
 
 
+def _retrieve_for(
+    session: Session,
+    embedder: Embedder,
+    llm: LLM,
+    question: str,
+    *,
+    k: int,
+    days: int | None,
+    agentic: bool,
+) -> list[ScoredPaper]:
+    """Agentic multi-hop retrieval when asked, otherwise the single-shot hybrid search."""
+    if agentic:
+        from researchscout.agentic import agentic_retrieve
+
+        return agentic_retrieve(session, embedder, llm, question, k=k, days=days)
+    return retrieve(session, embedder, question, k=k, days=days)
+
+
 def answer_stream(
     session: Session,
     embedder: Embedder,
@@ -73,14 +91,17 @@ def answer_stream(
     *,
     k: int = 8,
     days: int | None = None,
+    agentic: bool = False,
 ) -> Iterator[StreamMeta | StreamDelta | Answer]:
     """Streaming variant of :func:`answer`: meta first, then deltas, then the final Answer.
 
     The final :class:`Answer` carries the citation post-check over the accumulated text — the
     same guarantee as the non-streaming path, it just arrives after the last delta.
     """
-    with trace_span("ask", question=question, k=k, days=days, streaming=True) as span:
-        used = retrieve(session, embedder, question, k=k, days=days)
+    with trace_span(
+        "ask", question=question, k=k, days=days, streaming=True, agentic=agentic
+    ) as span:
+        used = _retrieve_for(session, embedder, llm, question, k=k, days=days, agentic=agentic)
         span["retrieved"] = len(used)
         yield StreamMeta(retrieved=len(used), used=used)
         if not used:
@@ -110,10 +131,11 @@ def answer(
     *,
     k: int = 8,
     days: int | None = None,
+    agentic: bool = False,
 ) -> Answer:
     """Retrieve recent papers and synthesize a grounded, cited answer."""
-    with trace_span("ask", question=question, k=k, days=days) as span:
-        used = retrieve(session, embedder, question, k=k, days=days)
+    with trace_span("ask", question=question, k=k, days=days, agentic=agentic) as span:
+        used = _retrieve_for(session, embedder, llm, question, k=k, days=days, agentic=agentic)
         span["retrieved"] = len(used)
         if not used:
             return Answer(
