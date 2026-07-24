@@ -93,6 +93,28 @@ class DigestList(BaseModel):
     items: list[DigestSummary]
 
 
+class TopicPaper(BaseModel):
+    paper_id: str
+    title: str
+    score: float
+
+
+class TopicSummary(BaseModel):
+    id: int
+    label: str
+    summary: str | None
+    score: float
+    size: int
+
+
+class TopicDetail(TopicSummary):
+    papers: list[TopicPaper]
+
+
+class TopicList(BaseModel):
+    items: list[TopicDetail]
+
+
 class InterestList(BaseModel):
     interests: list[str]
 
