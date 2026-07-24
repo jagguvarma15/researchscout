@@ -16,6 +16,7 @@ from researchscout.answer import _CITATION_RE
 from researchscout.llm.base import LLM
 from researchscout.obs.trace import trace_span
 from researchscout.schema import Paper
+from researchscout.score import breakthrough
 from researchscout.store.papers import list_papers
 from researchscout.store.signals import latest_value
 
@@ -59,14 +60,20 @@ def _latest_citations(session: Session, paper_id: str) -> float:
     return latest_value(session, paper_id, "citation")
 
 
+def _breakthrough_boost(session: Session, paper_id: str) -> float:
+    """The paper's momentum-aware ranking boost (a seam so tests can stub the score)."""
+    return breakthrough(session, paper_id).total
+
+
 def rank_window(session: Session, *, days: int = 7, k: int = 10) -> list[RankedPaper]:
-    """Top ``k`` papers of the window: recency-decayed, citation-boosted."""
+    """Top ``k`` papers of the window: recency-decayed, breakthrough-boosted."""
     now = datetime.now(UTC)
     ranked: list[RankedPaper] = []
     for paper in list_papers(session, days=days, limit=_CANDIDATE_POOL):
         citations = _latest_citations(session, paper.id)
+        boost = _breakthrough_boost(session, paper.id)
         age_days = max((now - paper.published_at).total_seconds() / 86400.0, 0.0)
-        score = math.exp(-age_days / _HALF_LIFE_DAYS) * (1.0 + math.log1p(citations))
+        score = math.exp(-age_days / _HALF_LIFE_DAYS) * (1.0 + boost)
         ranked.append(RankedPaper(paper=paper, score=score, citations=citations))
     ranked.sort(key=lambda item: item.score, reverse=True)
     return ranked[:k]
