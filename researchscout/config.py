@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     score_window_days: int = 30
     score_velocity_weight: float = 2.0
     score_acceleration_weight: float = 1.0
+    # Optional cross-encoder reranking of the top retrieval candidates (see researchscout.rerank).
+    rerank_enabled: bool = False
+    rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    rerank_top_n: int = 40
 
 
 def get_settings() -> Settings:
