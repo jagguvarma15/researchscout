@@ -168,6 +168,41 @@ def serve_api(
     uvicorn.run("researchscout.api.main:app", host=host, port=port, reload=reload)
 
 
+@serve_app.command("scheduler")
+def serve_scheduler(
+    once: Annotated[
+        bool, typer.Option("--once", help="Run one full pass and exit (for cron / a CronJob).")
+    ] = False,
+) -> None:
+    """Run the refresh loop: ingest sources, embed papers, refresh signals, rebuild the digest."""
+    import logging
+    import signal as signalmod
+    import threading
+    from contextlib import suppress
+
+    from researchscout.config import get_settings
+    from researchscout.scheduler import Scheduler, build_tasks
+
+    logging.basicConfig(level=logging.INFO)
+    settings = get_settings()
+    scheduler = Scheduler(build_tasks(settings), tick_sec=settings.scheduler_tick_sec)
+
+    if once:
+        scheduler.run_pass()
+        return
+
+    stop = threading.Event()
+    for sig in (signalmod.SIGINT, signalmod.SIGTERM):
+        with suppress(ValueError):  # not the main thread — fall back to KeyboardInterrupt
+            signalmod.signal(sig, lambda *_: stop.set())
+    typer.secho("scheduler running; Ctrl-C to stop", fg=typer.colors.GREEN)
+    try:
+        scheduler.run_forever(stop.is_set)
+    except KeyboardInterrupt:
+        pass
+    typer.secho("scheduler stopped", fg=typer.colors.YELLOW)
+
+
 @app.command()
 def digest(
     days: Annotated[
