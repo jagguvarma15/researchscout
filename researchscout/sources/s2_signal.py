@@ -2,8 +2,8 @@
 
 Matches papers by their arXiv id (a clean external-id lookup, no fuzzy matching), asks Semantic
 Scholar for citation counts, and emits Signal observations. Citations lag by months, so this is a
-baseline signal that also exercises the signal pipeline; faster proxies (HF trending in PR 10, and
-later GitHub stars / Bluesky) carry the real ignition signal.
+baseline signal; the faster proxies — HF trending and GitHub code stars — carry the real ignition
+signal, with social sources still deferred.
 """
 
 from __future__ import annotations
