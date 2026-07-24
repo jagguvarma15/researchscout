@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     scheduler_signals_interval_sec: int = 21600
     scheduler_digest_interval_sec: int = 86400
     scheduler_tick_sec: int = 30
+    # Breakthrough scoring: how the signal series becomes a ranking boost. The window bounds how
+    # far back momentum is measured; the weights set how much velocity and acceleration count
+    # relative to the raw level.
+    score_window_days: int = 30
+    score_velocity_weight: float = 2.0
+    score_acceleration_weight: float = 1.0
 
 
 def get_settings() -> Settings:
