@@ -1,6 +1,7 @@
 # Profiles group services into RAM-budgeted subsets for the 8GB dev machine:
 #   docker compose --profile core up        # db + api + web + keycloak + redis
 #   docker compose --profile events up      # kafka + ingest/embed workers (+ db)
+#   docker compose --profile scheduler up   # background refresh loop (ingest/embed/signals/digest)
 #   docker compose --profile obs up         # otel-collector + tempo + loki + prometheus + grafana
 # Run core plus at most one extra profile at a time; `db` has no profile so
 # `docker compose up -d db` keeps working on its own.
@@ -148,6 +149,24 @@ services:
         condition: service_healthy
       kafka:
         condition: service_started
+
+  # Opt-in profile: the background refresh loop. Reaches host Ollama for the digest LLM and,
+  # when the events profile is also up, publishes digests.published to Kafka (best-effort otherwise).
+  scheduler:
+    build:
+      context: .
+      dockerfile: deploy/docker/worker.Dockerfile
+    profiles: ["scheduler"]
+    command: ["scout", "serve", "scheduler"]
+    environment:
+      RS_DATABASE_URL: postgresql+psycopg://researchscout:researchscout@db:5432/researchscout
+      RS_LLM_BASE_URL: ${RS_LLM_BASE_URL_DOCKER:-http://host.docker.internal:11434/v1}
+      RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
+      RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
+      RS_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    depends_on:
+      db:
+        condition: service_healthy
 
   # Opt-in profile: needs real Airtable credentials in the environment or .env.
   airtable-sync:
