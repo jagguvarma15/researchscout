@@ -1,5 +1,5 @@
 # Web frontend image. Build with apps/web as the context:
-#   docker build -f deploy/docker/web.Dockerfile apps/web
+#   docker build -f docker/web.Dockerfile apps/web
 FROM node:22-alpine AS build
 WORKDIR /app
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
