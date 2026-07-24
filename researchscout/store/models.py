@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -84,6 +84,18 @@ class DigestRow(Base):
     body: Mapped[str] = mapped_column(Text)
     items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TopicRow(Base):
+    __tablename__ = "topics"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    score: Mapped[float] = mapped_column(Float)
+    size: Mapped[int] = mapped_column(Integer)
+    papers: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SavedPaperRow(Base):
