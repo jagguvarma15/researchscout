@@ -1,6 +1,6 @@
 # Event-plane worker image (ingest/embed — pick the worker via the compose command).
 # Build from the repo root:
-#   docker build -f deploy/docker/worker.Dockerfile .
+#   docker build -f docker/worker.Dockerfile .
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
