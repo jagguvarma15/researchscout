@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # standard env vars (LANGSMITH_TRACING / LANGSMITH_API_KEY).
     otel_enabled: bool = False
     otlp_endpoint: str = "http://localhost:4317"
+    # Background refresh loop (`scout serve scheduler`), opt-in via the compose `scheduler`
+    # profile. Intervals are in seconds; the ingest/signals look-back window is in days.
+    scheduler_ingest_window_days: int = 2
+    scheduler_ingest_interval_sec: int = 3600
+    scheduler_index_interval_sec: int = 900
+    scheduler_signals_interval_sec: int = 21600
+    scheduler_digest_interval_sec: int = 86400
+    scheduler_tick_sec: int = 30
 
 
 def get_settings() -> Settings:
