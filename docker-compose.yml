@@ -9,7 +9,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: deploy/docker/api.Dockerfile
+      dockerfile: docker/api.Dockerfile
     profiles: ["core"]
     environment:
       RS_DATABASE_URL: postgresql+psycopg://researchscout:researchscout@db:5432/researchscout
@@ -61,7 +61,7 @@ services:
   web:
     build:
       context: apps/web
-      dockerfile: ../../deploy/docker/web.Dockerfile
+      dockerfile: ../../docker/web.Dockerfile
     profiles: ["core"]
     environment:
       API_URL: http://api:8000
@@ -123,7 +123,7 @@ services:
   ingest-worker:
     build:
       context: .
-      dockerfile: deploy/docker/worker.Dockerfile
+      dockerfile: docker/worker.Dockerfile
     profiles: ["events"]
     command: ["scout", "worker", "ingest"]
     environment:
@@ -138,7 +138,7 @@ services:
   embed-worker:
     build:
       context: .
-      dockerfile: deploy/docker/worker.Dockerfile
+      dockerfile: docker/worker.Dockerfile
     profiles: ["events"]
     command: ["scout", "worker", "embed"]
     environment:
@@ -172,7 +172,7 @@ services:
   airtable-sync:
     build:
       context: .
-      dockerfile: deploy/docker/worker.Dockerfile
+      dockerfile: docker/worker.Dockerfile
     profiles: ["airtable"]
     command: ["scout", "worker", "airtable"]
     environment:
