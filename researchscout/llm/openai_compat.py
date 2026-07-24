@@ -1,8 +1,8 @@
 """LLM backed by an OpenAI-compatible endpoint.
 
-Points at local Ollama by default (``http://localhost:11434/v1``). At Stage 5 the same interface
-targets a self-hosted vLLM server — only ``base_url`` changes, no code changes. The client is
-created lazily, so importing this module doesn't require a running server.
+Points at local Ollama by default (``http://localhost:11434/v1``). Any OpenAI-compatible server
+(a hosted provider, a self-hosted vLLM) works by changing ``base_url`` alone — no code changes. The
+client is created lazily, so importing this module doesn't require a running server.
 """
 
 from __future__ import annotations
