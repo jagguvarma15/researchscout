@@ -51,6 +51,7 @@ class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     k: int = Field(default=8, ge=1, le=50)
     days: int | None = Field(default=None, ge=1, le=365)
+    agentic: bool = False
 
 
 class UsedPaper(BaseModel):
