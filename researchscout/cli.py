@@ -126,17 +126,23 @@ def ask(
     question: Annotated[str, typer.Argument(help="Your question / topic.")],
     days: Annotated[int | None, typer.Option(help="Freshness window in days.")] = None,
     k: Annotated[int, typer.Option("-k", help="Papers to ground the answer on.")] = 8,
+    agentic: Annotated[
+        bool | None,
+        typer.Option(help="Decompose the question and follow references (multi-hop)."),
+    ] = None,
 ) -> None:
     """Answer a question with a grounded, cited summary of recent papers."""
     from researchscout.answer import answer
+    from researchscout.config import get_settings
     from researchscout.embed.local import LocalEmbedder
     from researchscout.llm.openai_compat import OpenAICompatLLM
     from researchscout.store.db import session_scope
 
+    use_agentic = agentic if agentic is not None else get_settings().agentic_ask
     embedder = LocalEmbedder()
     llm = OpenAICompatLLM()
     with session_scope() as session:
-        result = answer(session, embedder, llm, question, k=k, days=days)
+        result = answer(session, embedder, llm, question, k=k, days=days, agentic=use_agentic)
 
     typer.echo(result.text)
     if result.cited:
