@@ -423,3 +423,22 @@ def signals_show(
         typer.echo(
             f"  {row.observed_at:%Y-%m-%d %H:%M}  {row.type:<16} {row.source:<14} {row.value}"
         )
+
+
+@signals_app.command("score")
+def signals_score(
+    paper_id: Annotated[str, typer.Argument(help="Canonical paper id.")],
+) -> None:
+    """Show a paper's breakthrough score and its per-signal contributions."""
+    from researchscout.score import breakthrough
+    from researchscout.store.db import session_scope
+
+    with session_scope() as session:
+        result = breakthrough(session, paper_id)
+
+    typer.secho(f"breakthrough {result.total:.3f}  {paper_id}", fg=typer.colors.GREEN)
+    if not result.contributions:
+        typer.secho("  no signals observed yet", fg=typer.colors.YELLOW)
+        return
+    for name, value in sorted(result.contributions.items(), key=lambda kv: kv[1], reverse=True):
+        typer.echo(f"  {name:<18} {value:+.3f}")
