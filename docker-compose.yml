@@ -155,7 +155,7 @@ services:
   scheduler:
     build:
       context: .
-      dockerfile: deploy/docker/worker.Dockerfile
+      dockerfile: docker/worker.Dockerfile
     profiles: ["scheduler"]
     command: ["scout", "serve", "scheduler"]
     environment:
