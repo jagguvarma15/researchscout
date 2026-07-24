@@ -23,12 +23,14 @@ app = typer.Typer(
 sources_app = typer.Typer(help="Inspect and test content/signal sources.", no_args_is_help=True)
 db_app = typer.Typer(help="Database setup and migrations.", no_args_is_help=True)
 signals_app = typer.Typer(help="Inspect the signal time series.", no_args_is_help=True)
+topics_app = typer.Typer(help="Build and inspect emerging topics.", no_args_is_help=True)
 serve_app = typer.Typer(help="Run ResearchScout services.", no_args_is_help=True)
 jobs_app = typer.Typer(help="Emit event-plane jobs.", no_args_is_help=True)
 worker_app = typer.Typer(help="Run event-plane workers.", no_args_is_help=True)
 app.add_typer(sources_app, name="sources")
 app.add_typer(db_app, name="db")
 app.add_typer(signals_app, name="signals")
+app.add_typer(topics_app, name="topics")
 app.add_typer(serve_app, name="serve")
 app.add_typer(jobs_app, name="jobs")
 app.add_typer(worker_app, name="worker")
@@ -442,3 +444,31 @@ def signals_score(
         return
     for name, value in sorted(result.contributions.items(), key=lambda kv: kv[1], reverse=True):
         typer.echo(f"  {name:<18} {value:+.3f}")
+
+
+@topics_app.command("build")
+def topics_build(
+    days: Annotated[
+        int | None, typer.Option(help="Window in days (default from settings).")
+    ] = None,
+) -> None:
+    """Cluster recent papers into emerging topics and store them (needs the LLM up)."""
+    from researchscout.cluster import build_topics
+    from researchscout.config import get_settings
+    from researchscout.embed.local import LocalEmbedder
+    from researchscout.llm.openai_compat import OpenAICompatLLM
+    from researchscout.store.db import session_scope
+    from researchscout.store.topics import replace_topics
+
+    settings = get_settings()
+    window = days if days is not None else settings.cluster_window_days
+    embedder = LocalEmbedder()
+    llm = OpenAICompatLLM()
+    with session_scope() as session:
+        topics = build_topics(
+            session, embedder, llm, days=window, threshold=settings.cluster_distance_threshold
+        )
+        replace_topics(session, topics)
+    typer.secho(f"built {len(topics)} topic(s)", fg=typer.colors.GREEN)
+    for topic in topics:
+        typer.echo(f"  {topic.score:7.3f}  {topic.size:>3}  {topic.label}")
