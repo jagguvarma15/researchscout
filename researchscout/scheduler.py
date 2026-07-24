@@ -152,6 +152,24 @@ def _digest(settings: Settings) -> None:
     logger.info("digest %s: %d papers, %d cited", result.slug, len(result.items), len(result.cited))
 
 
+def _topics(settings: Settings) -> None:
+    from researchscout.cluster import build_topics
+    from researchscout.llm.openai_compat import OpenAICompatLLM
+    from researchscout.store.db import session_scope
+    from researchscout.store.topics import replace_topics
+
+    with session_scope() as session:
+        topics = build_topics(
+            session,
+            _embedder(),
+            OpenAICompatLLM(),
+            days=settings.cluster_window_days,
+            threshold=settings.cluster_distance_threshold,
+        )
+        replace_topics(session, topics)
+    logger.info("built %d topic(s)", len(topics))
+
+
 def build_tasks(settings: Settings) -> list[Task]:
     """Construct the scheduler's tasks with intervals drawn from ``settings``.
 
@@ -165,4 +183,5 @@ def build_tasks(settings: Settings) -> list[Task]:
         Task("index", settings.scheduler_index_interval_sec, _index),
         Task("signals", settings.scheduler_signals_interval_sec, ingest_signals),
         Task("digest", settings.scheduler_digest_interval_sec, partial(_digest, settings)),
+        Task("topics", settings.scheduler_topics_interval_sec, partial(_topics, settings)),
     ]
