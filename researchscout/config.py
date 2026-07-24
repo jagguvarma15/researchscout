@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     cluster_window_days: int = 30
     cluster_distance_threshold: float = 0.5
     scheduler_topics_interval_sec: int = 86400
+    # Agentic ask: decompose the question into sub-questions and follow one hop of references.
+    agentic_ask: bool = False
 
 
 def get_settings() -> Settings:
