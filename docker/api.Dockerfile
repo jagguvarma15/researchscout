@@ -1,5 +1,5 @@
 # API service image. Build from the repo root:
-#   docker build -f deploy/docker/api.Dockerfile .
+#   docker build -f docker/api.Dockerfile .
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
