@@ -1,0 +1,103 @@
+---
+import { Icon } from 'astro-icon/components';
+import Base from '../layouts/Base.astro';
+import { fetchForYou, type PaperSummary } from '../lib/api';
+import { getAccessToken, SESSION_COOKIE } from '../lib/auth';
+
+const authenticated = Astro.locals.user !== null;
+let items: PaperSummary[] | null = null;
+if (authenticated) {
+  const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
+  const token = sid ? await getAccessToken(sid) : null;
+  if (token) items = await fetchForYou(token);
+}
+---
+
+<Base title="For you">
+  <h1 class="page-title">For you</h1>
+  <p class="lede">Recent papers ranked by your research interests.</p>
+
+  {
+    !authenticated && (
+      <div class="card empty">
+        <Icon name="lucide:lock" aria-hidden="true" />
+        <p>
+          <a href="/auth/login?returnTo=/for-you">Sign in</a> to get a personalized feed.
+        </p>
+      </div>
+    )
+  }
+  {
+    authenticated && items === null && (
+      <div class="card empty">
+        <Icon name="lucide:cloud-off" aria-hidden="true" />
+        <p>The API is unreachable — try again in a moment.</p>
+      </div>
+    )
+  }
+  {
+    authenticated && items !== null && items.length === 0 && (
+      <div class="card empty">
+        <Icon name="lucide:sparkles" aria-hidden="true" />
+        <p>
+          Add research interests in your <a href="/profile">profile</a> to see personalized picks.
+        </p>
+      </div>
+    )
+  }
+  {
+    authenticated && items !== null && items.length > 0 && (
+      <ul class="feed">
+        {items.map((paper) => (
+          <li class="row">
+            <a class="title" href={`/papers/${paper.id}`}>
+              {paper.title}
+            </a>
+            <p class="meta">
+              {paper.authors
+                .slice(0, 3)
+                .map((author) => author.name)
+                .join(', ')}
+            </p>
+          </li>
+        ))}
+      </ul>
+    )
+  }
+</Base>
+
+<style>
+  .lede {
+    color: var(--muted);
+    margin-top: -0.25rem;
+  }
+  .empty p {
+    margin: 0;
+  }
+  .feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .row {
+    padding: 1.1rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .row:last-child {
+    border-bottom: none;
+  }
+  .title {
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .title:hover {
+    color: var(--accent);
+  }
+  .meta {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0.35rem 0 0;
+  }
+</style>
