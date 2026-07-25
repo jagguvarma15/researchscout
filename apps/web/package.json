@@ -32,6 +32,7 @@
   "pnpm": {
     "overrides": {
       "path-to-regexp@6.1.0": "6.3.0",
+      "postcss": "^8.5.18",
       "svgo": "^4.0.2"
     }
   }
