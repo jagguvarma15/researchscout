@@ -19,6 +19,9 @@ def session(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
 
     import researchscout.store.db as db_mod
 
+    if db_mod._engine is not None:
+        # Else every test leaks a pool against the container's connection cap.
+        db_mod._engine.dispose()
     db_mod._engine = None
     db_mod._session_factory = None
 
@@ -33,7 +36,11 @@ def session(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
         s.execute(
             text(
                 "TRUNCATE papers, paper_external_ids, raw_items, ingest_state, "
-                "paper_embeddings, signals RESTART IDENTITY CASCADE"
+                "paper_embeddings, signals, digests, topics, saved_papers, user_interests "
+                "RESTART IDENTITY CASCADE"
             )
         )
+        # Commit before yielding: code under test opens its own session, and an uncommitted
+        # TRUNCATE holds ACCESS EXCLUSIVE on these tables, so that session would block forever.
+        s.commit()
         yield s
