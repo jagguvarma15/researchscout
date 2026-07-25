@@ -17,6 +17,18 @@ jobs:
       - run: uv run mypy researchscout
       - run: uv run pytest -m "not integration"
 
+  integration:
+    runs-on: ubuntu-latest
+    # The suite talks to a real Postgres over locks; cap it so a deadlock fails
+    # fast instead of running out the default six-hour budget.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      # testcontainers starts pgvector on the runner's Docker daemon.
+      - run: uv run pytest -m integration
+
   web:
     runs-on: ubuntu-latest
     defaults:
