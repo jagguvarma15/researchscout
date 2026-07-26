@@ -3,15 +3,8 @@ import { Icon } from 'astro-icon/components';
 import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchSaved, formatDate, type PaperSummary } from '../lib/api';
-import { getAccessToken, SESSION_COOKIE } from '../lib/auth';
 
-const authenticated = Astro.locals.user !== null;
-let items: PaperSummary[] | null = null;
-if (authenticated) {
-  const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
-  const token = sid ? await getAccessToken(sid) : null;
-  if (token) items = await fetchSaved(token);
-}
+const items = await fetchSaved();
 
 // Same timeline grouping as the feed: one group per publication day, newest first.
 const groups: { date: string; papers: PaperSummary[] }[] = [];
@@ -33,17 +26,7 @@ function formatDayHeading(iso: string): string {
   <h1 class="page-title">Saved papers</h1>
 
   {
-    !authenticated && (
-      <div class="card empty">
-        <Icon name="lucide:lock" aria-hidden="true" />
-        <p>
-          <a href="/auth/login?returnTo=/saved">Sign in</a> to keep a reading list.
-        </p>
-      </div>
-    )
-  }
-  {
-    authenticated && items === null && (
+    items === null && (
       <div class="card empty">
         <Icon name="lucide:cloud-off" aria-hidden="true" />
         <p>The API is unreachable — try again in a moment.</p>
@@ -51,7 +34,7 @@ function formatDayHeading(iso: string): string {
     )
   }
   {
-    authenticated && items !== null && items.length === 0 && (
+    items !== null && items.length === 0 && (
       <div class="card empty">
         <Icon name="lucide:bookmark-plus" aria-hidden="true" />
         <p>
@@ -62,8 +45,7 @@ function formatDayHeading(iso: string): string {
   }
 
   {
-    authenticated &&
-      items !== null &&
+    items !== null &&
       groups.map((group) => (
         <section class="day">
           <h2 class="day-heading">{formatDayHeading(group.date)}</h2>
@@ -74,7 +56,7 @@ function formatDayHeading(iso: string): string {
                   <a class="title" href={`/papers/${paper.id}`}>
                     {paper.title}
                   </a>
-                  <SaveButton client:visible paperId={paper.id} saved={true} {authenticated} />
+                  <SaveButton client:visible paperId={paper.id} saved={true} />
                 </div>
                 <p class="meta">
                   {paper.authors
