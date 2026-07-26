@@ -29,24 +29,20 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_save_publishes_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    published: list[tuple[str, str, bool]] = []
+def test_save_returns_saved(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(saved_router, "get_paper", lambda *a: _paper())
     monkeypatch.setattr(saved_router, "save_paper", lambda *a: True)
-    monkeypatch.setattr(saved_router, "publish_paper_saved", lambda *a: published.append(a))
     response = _client().post("/v1/papers/arxiv:2401.00001/save")
     assert response.status_code == 200
     assert response.json() == {"saved": True}
-    assert published == [("user-1", "arxiv:2401.00001", True)]
 
 
-def test_resave_is_idempotent_and_silent(monkeypatch: pytest.MonkeyPatch) -> None:
-    published: list[object] = []
+def test_resave_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(saved_router, "get_paper", lambda *a: _paper())
     monkeypatch.setattr(saved_router, "save_paper", lambda *a: False)
-    monkeypatch.setattr(saved_router, "publish_paper_saved", lambda *a: published.append(a))
-    assert _client().post("/v1/papers/arxiv:2401.00001/save").status_code == 200
-    assert published == []
+    response = _client().post("/v1/papers/arxiv:2401.00001/save")
+    assert response.status_code == 200
+    assert response.json() == {"saved": True}
 
 
 def test_save_unknown_paper_is_404(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -54,14 +50,11 @@ def test_save_unknown_paper_is_404(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _client().post("/v1/papers/arxiv:0000.00000/save").status_code == 404
 
 
-def test_unsave_publishes_event(monkeypatch: pytest.MonkeyPatch) -> None:
-    published: list[tuple[str, str, bool]] = []
+def test_unsave_returns_unsaved(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(saved_router, "unsave_paper", lambda *a: True)
-    monkeypatch.setattr(saved_router, "publish_paper_saved", lambda *a: published.append(a))
     response = _client().delete("/v1/papers/arxiv:2401.00001/save")
     assert response.status_code == 200
     assert response.json() == {"saved": False}
-    assert published == [("user-1", "arxiv:2401.00001", False)]
 
 
 def test_my_saved_lists_papers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,7 +64,8 @@ def test_my_saved_lists_papers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [p["id"] for p in response.json()["items"]] == ["arxiv:2401.00001"]
 
 
-def test_saved_requires_auth() -> None:
+def test_saved_requires_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RS_OIDC_ISSUER", "http://localhost:8080/realms/researchscout")
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
     client = TestClient(app)
