@@ -1,23 +1,14 @@
 <script lang="ts">
-  // Bookmark toggle for the reading list. Goes through the authenticated proxy; signed-out
-  // visitors are sent to login instead of seeing a dead button.
+  // Bookmark toggle for the reading list, through the same-origin proxy.
 
   import { Bookmark, BookmarkCheck } from 'lucide-svelte';
 
-  let {
-    paperId,
-    saved: initial,
-    authenticated,
-  }: { paperId: string; saved: boolean; authenticated: boolean } = $props();
+  let { paperId, saved: initial }: { paperId: string; saved: boolean } = $props();
 
   let saved = $state(initial);
   let busy = $state(false);
 
   async function toggle() {
-    if (!authenticated) {
-      window.location.href = `/auth/login?returnTo=${encodeURIComponent(window.location.pathname)}`;
-      return;
-    }
     if (busy) return;
     busy = true;
     try {
