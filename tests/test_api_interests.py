@@ -14,7 +14,8 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_interests_require_auth() -> None:
+def test_interests_require_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RS_OIDC_ISSUER", "http://localhost:8080/realms/researchscout")
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
     client = TestClient(app)
