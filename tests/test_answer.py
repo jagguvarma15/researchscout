@@ -6,9 +6,9 @@ import pytest
 import researchscout.answer as answer_mod
 from researchscout.answer import answer
 from researchscout.llm.base import LLM
-from researchscout.obs.trace import trace_span
 from researchscout.retrieve.search import ScoredPaper
 from researchscout.schema import Author, Paper
+from researchscout.trace import trace_span
 
 
 class FakeLLM(LLM):
