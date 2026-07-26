@@ -3,26 +3,25 @@ ResearchScout ingests new AI/ML papers and their surrounding signals (citations,
 
 ## Quickstart
 
-Needs Docker, [uv](https://docs.astral.sh/uv/), and pnpm. Chat needs an LLM: the defaults
-target local [Ollama](https://ollama.com) (`brew install ollama`, run `ollama serve`, then
-`ollama pull qwen2.5:3b-instruct` — one-time ~2.3GB), or point `RS_LLM_*` in `.env` at any
-OpenAI-compatible provider.
+Everything runs as plain host processes — no Docker. Needs Homebrew Postgres with pgvector
+(`brew install postgresql@17 pgvector`), [uv](https://docs.astral.sh/uv/), and pnpm. Chat needs
+an LLM: the defaults target local [Ollama](https://ollama.com) (`brew install ollama`, run
+`ollama serve`, then `ollama pull qwen2.5:3b-instruct` — one-time ~2.3GB), or point `RS_LLM_*`
+in `.env` at any OpenAI-compatible provider.
 
 ```bash
-make setup    # deps + .env
-make start    # db, redis, keycloak, api, web — prints the URLs when ready
+make setup    # deps, .env, and a repo-local Postgres cluster in .local/
+make start    # postgres, api, web — prints the URLs when ready
 make seed     # ~25 real arXiv papers, embedded and searchable
 ```
 
-Then open http://localhost:4321: browse and search the feed, sign in as `demo` / `demo`, and
-ask the chat drawer about the papers — answers stream with citations. Star papers (`/saved`),
-run `make digest` and visit `/digests` for the weekly summary. `/topics` clusters recent papers
-into emerging themes ranked by momentum, and signed-in readers get a personalized `/for-you` feed
-from their interests. `scout serve scheduler` (or the `scheduler` compose profile) keeps ingest,
-signals, embeddings, digests, and topics refreshing on their own. `make start-all` adds the Kafka
-event plane (`scout jobs emit-ingest` then `make logs` to watch papers flow through the
-workers). `make stop` shuts everything down; `make clean` also wipes the data; plain `make`
-lists every target.
+Then open http://localhost:4321: browse and search the feed — no sign-in, the app runs as a
+built-in local user — and ask the chat drawer about the papers; answers stream with citations.
+Star papers (`/saved`), run `make digest` and visit `/digests` for the weekly summary. `/topics`
+clusters recent papers into emerging themes ranked by momentum, and `/for-you` personalizes the
+feed from your interests. `make scheduler` keeps ingest, signals, embeddings, digests, and
+topics refreshing on their own. `make stop` shuts everything down; `make clean` also wipes the
+data; plain `make` lists every target.
 
 ## Development
 
@@ -50,12 +49,12 @@ The `api` extra adds a FastAPI service over the same core the CLI uses (the dev 
 includes it, so `uv sync` is enough for development):
 
 ```bash
-uv run scout serve api                     # http://127.0.0.1:8000, OpenAPI docs at /docs
-docker compose --profile core up --build   # containerized: db + api on :8000
+uv run scout serve api    # http://127.0.0.1:8000, OpenAPI docs at /docs
 ```
 
 Endpoints: `GET /healthz`, `GET /v1/papers` (recency feed; `?q=` switches to semantic ranking),
-`GET /v1/papers/{id}`, `GET /v1/topics` (emerging topics), `GET /v1/me/feed` (personalized,
-authenticated), and `POST /v1/ask` (grounded, cited answer). The LLM defaults to local
-Ollama; point `RS_LLM_BASE_URL` / `RS_LLM_MODEL` / `RS_LLM_API_KEY` at any OpenAI-compatible
-provider to swap it.
+`GET /v1/papers/{id}`, `GET /v1/topics` (emerging topics), `GET /v1/me/feed` (personalized),
+and `POST /v1/ask` (grounded, cited answer). With `RS_OIDC_ISSUER` unset (the default) the API
+runs in local no-auth mode as a built-in user; set an issuer to require OIDC Bearer tokens.
+The LLM defaults to local Ollama; point `RS_LLM_BASE_URL` / `RS_LLM_MODEL` / `RS_LLM_API_KEY`
+at any OpenAI-compatible provider to swap it.
