@@ -1,8 +1,10 @@
-"""Bearer-token validation against Keycloak (stateless OIDC resource server).
+"""Caller identity: a built-in local user, or Bearer-token validation against any OIDC issuer.
 
-The API never talks to Keycloak per request: signatures are checked against its JWKS (fetched
-once and cached by ``PyJWKClient``), so a token is either valid locally or rejected. Identity is
-the token's ``sub`` claim — there is no local user table.
+With ``RS_OIDC_ISSUER`` unset (the default) the API trusts a single built-in local user — the
+right posture for a single-person, local-only install. Setting an issuer turns the API into a
+stateless OIDC resource server: signatures are checked against the issuer's JWKS (fetched once
+and cached by ``PyJWKClient``), so a token is either valid locally or rejected. Identity is the
+token's ``sub`` claim — there is no local user table.
 """
 
 from __future__ import annotations
@@ -27,6 +29,9 @@ class User:
     username: str
 
 
+_LOCAL_USER = User(sub="local", username="local")
+
+
 @lru_cache(maxsize=1)
 def _jwk_client() -> PyJWKClient:
     settings = get_settings()
@@ -35,12 +40,19 @@ def _jwk_client() -> PyJWKClient:
 
 
 def require_user(request: Request) -> User:
-    """FastAPI dependency: validate the Bearer token and return the caller's identity."""
+    """FastAPI dependency: return the caller's identity.
+
+    Local mode (no issuer configured) short-circuits to the built-in user; any Authorization
+    header is ignored. With an issuer, the Bearer token is validated as before.
+    """
+    settings = get_settings()
+    if not settings.oidc_issuer:
+        return _LOCAL_USER
+
     scheme, _, token = request.headers.get("authorization", "").partition(" ")
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="missing bearer token", headers=_BEARER)
 
-    settings = get_settings()
     try:
         key = _jwk_client().get_signing_key_from_jwt(token).key
         claims: dict[str, Any] = jwt.decode(
