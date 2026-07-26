@@ -1,6 +1,6 @@
 <script lang="ts">
   // Research-interests editor: chips with remove buttons plus an add field. Every
-  // change is saved wholesale through the authenticated proxy (PUT /api/me/interests).
+  // change is saved wholesale through the same-origin proxy (PUT /api/me/interests).
 
   import { Plus, X } from 'lucide-svelte';
 
