@@ -1,51 +1,28 @@
 ---
-import { Icon } from 'astro-icon/components';
 import InterestsEditor from '../components/InterestsEditor.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchInterests } from '../lib/api';
-import { getAccessToken, SESSION_COOKIE } from '../lib/auth';
 
 const user = Astro.locals.user;
-let interests: string[] | null = null;
-if (user) {
-  const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
-  const token = sid ? await getAccessToken(sid) : null;
-  if (token) interests = await fetchInterests(token);
-}
+const interests = await fetchInterests();
 ---
 
 <Base title="Profile">
   <h1 class="page-title">Profile</h1>
 
-  {
-    user === null ? (
-      <div class="card empty">
-        <Icon name="lucide:lock" aria-hidden="true" />
-        <p>
-          <a href="/auth/login?returnTo=/profile">Sign in</a> to manage your profile.
-        </p>
-      </div>
-    ) : (
-      <>
-        <p class="who">
-          Signed in as <strong>{user.username}</strong>.
-        </p>
-        <section class="interests">
-          <h2>Research interests</h2>
-          <p class="blurb">
-            Topics you care about — up to 20, each a short phrase. Changes save as you go.
-          </p>
-          <InterestsEditor client:load initial={interests} />
-        </section>
-      </>
-    )
-  }
+  <p class="who">
+    Browsing as <strong>{user.username}</strong>.
+  </p>
+  <section class="interests">
+    <h2>Research interests</h2>
+    <p class="blurb">
+      Topics you care about — up to 20, each a short phrase. Changes save as you go.
+    </p>
+    <InterestsEditor client:load initial={interests} />
+  </section>
 </Base>
 
 <style>
-  .empty p {
-    margin: 0;
-  }
   .who {
     margin: 0;
     color: var(--muted);
