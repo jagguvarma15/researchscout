@@ -1,4 +1,4 @@
-"""Per-user research interests. Identity is the Keycloak ``sub`` claim — no local user table."""
+"""Per-user research interests. Identity is the caller's ``sub`` claim — no local user table."""
 
 from __future__ import annotations
 
