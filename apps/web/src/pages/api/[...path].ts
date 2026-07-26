@@ -1,14 +1,13 @@
-// Same-origin proxy to the API. The browser only ever talks to this route with its session
-// cookie; the cookie is swapped for a Bearer token here, so tokens never leave the server.
+// Same-origin proxy to the API. The API runs in local no-auth mode, so no credentials are
+// attached; the proxy still shields the API origin from the browser.
 
 import type { APIRoute } from 'astro';
 
-import { getAccessToken, SESSION_COOKIE, SITE_URL } from '../../lib/auth';
-
 const API_URL = process.env.API_URL ?? 'http://localhost:8000';
+const SITE_URL = process.env.SITE_URL ?? 'http://localhost:4321';
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-export const ALL: APIRoute = async ({ params, request, cookies, url }) => {
+export const ALL: APIRoute = async ({ params, request, url }) => {
   if (MUTATING.has(request.method)) {
     const origin = request.headers.get('origin');
     const fetchSite = request.headers.get('sec-fetch-site');
@@ -21,11 +20,6 @@ export const ALL: APIRoute = async ({ params, request, cookies, url }) => {
   for (const name of ['accept', 'content-type']) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
-  }
-  const sid = cookies.get(SESSION_COOKIE)?.value;
-  if (sid) {
-    const token = await getAccessToken(sid);
-    if (token) headers.set('authorization', `Bearer ${token}`);
   }
 
   const response = await fetch(`${API_URL}/v1/${params.path}${url.search}`, {
