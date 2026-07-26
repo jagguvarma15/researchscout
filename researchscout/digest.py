@@ -14,11 +14,11 @@ from sqlalchemy.orm import Session
 
 from researchscout.answer import _CITATION_RE
 from researchscout.llm.base import LLM
-from researchscout.obs.trace import trace_span
 from researchscout.schema import Paper
 from researchscout.score import breakthrough
 from researchscout.store.papers import list_papers
 from researchscout.store.signals import latest_value
+from researchscout.trace import trace_span
 
 _SYSTEM_PROMPT = (
     "You are writing a weekly research digest for a reader deciding what to read. "
