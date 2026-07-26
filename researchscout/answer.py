@@ -14,8 +14,8 @@ from sqlalchemy.orm import Session
 
 from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
-from researchscout.obs.trace import trace_span
 from researchscout.retrieve.search import ScoredPaper, retrieve
+from researchscout.trace import trace_span
 
 _SYSTEM_PROMPT = (
     "You are a research assistant. Answer ONLY from the papers provided below. "
