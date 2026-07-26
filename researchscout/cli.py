@@ -21,15 +21,11 @@ db_app = typer.Typer(help="Database setup and migrations.", no_args_is_help=True
 signals_app = typer.Typer(help="Inspect the signal time series.", no_args_is_help=True)
 topics_app = typer.Typer(help="Build and inspect emerging topics.", no_args_is_help=True)
 serve_app = typer.Typer(help="Run ResearchScout services.", no_args_is_help=True)
-jobs_app = typer.Typer(help="Emit event-plane jobs.", no_args_is_help=True)
-worker_app = typer.Typer(help="Run event-plane workers.", no_args_is_help=True)
 app.add_typer(sources_app, name="sources")
 app.add_typer(db_app, name="db")
 app.add_typer(signals_app, name="signals")
 app.add_typer(topics_app, name="topics")
 app.add_typer(serve_app, name="serve")
-app.add_typer(jobs_app, name="jobs")
-app.add_typer(worker_app, name="worker")
 
 
 @app.command()
@@ -209,7 +205,6 @@ def digest(
     """Build and publish this week's digest (LLM summary over the window's top papers)."""
     from researchscout.config import get_settings
     from researchscout.digest import build_digest
-    from researchscout.events.publish import publish_digest_published
     from researchscout.llm.openai_compat import OpenAICompatLLM
     from researchscout.store.db import session_scope
     from researchscout.store.digests import upsert_digest
@@ -224,106 +219,10 @@ def digest(
             typer.secho(f"No papers in the last {window}d — no digest.", fg=typer.colors.YELLOW)
             raise typer.Exit(code=1)
         upsert_digest(session, result)
-    publish_digest_published(result.slug, result.title, result.period_start, result.period_end)
     typer.secho(
         f"published {result.slug}: {len(result.items)} papers, {len(result.cited)} cited",
         fg=typer.colors.GREEN,
     )
-
-
-@jobs_app.command("emit-watchlist")
-def jobs_emit_watchlist(
-    since_days: Annotated[int, typer.Option(help="Ingest window per job, in days.")] = 1,
-) -> None:
-    """Emit one ingest job per enabled Airtable watchlist row (the scheduler entrypoint)."""
-    from datetime import UTC, timedelta
-
-    from pyairtable import Api
-
-    from researchscout.config import get_settings
-    from researchscout.events.kafka import ensure_topics, producer
-    from researchscout.events.schemas import TOPIC_INGEST_JOBS, TOPIC_PAPERS_NEW
-    from researchscout.ingest.watchlist import jobs_from_rows
-
-    settings = get_settings()
-    if not settings.airtable_api_key or not settings.airtable_base_id:
-        typer.secho(
-            "RS_AIRTABLE_API_KEY and RS_AIRTABLE_BASE_ID are required.", fg=typer.colors.RED
-        )
-        raise typer.Exit(code=1)
-    table = Api(settings.airtable_api_key).table(
-        settings.airtable_base_id, settings.airtable_watchlist_table
-    )
-    since = datetime.now(UTC) - timedelta(days=since_days)
-    jobs = jobs_from_rows(table.all(), since=since)
-    if not jobs:
-        typer.secho("Watchlist has no enabled rows.", fg=typer.colors.YELLOW)
-        return
-    ensure_topics([TOPIC_INGEST_JOBS, TOPIC_PAPERS_NEW])
-    client = producer()
-    for job in jobs:
-        client.produce(
-            TOPIC_INGEST_JOBS, key=job.source.encode(), value=job.model_dump_json().encode()
-        )
-    client.flush()
-    typer.secho(f"emitted {len(jobs)} watchlist job(s)", fg=typer.colors.GREEN)
-
-
-@jobs_app.command("emit-ingest")
-def jobs_emit_ingest(
-    since: Annotated[datetime, typer.Option(help="Ingest items submitted on/after this date.")],
-    source: Annotated[str, typer.Option(help="Source name.")] = "arxiv",
-    category: Annotated[str | None, typer.Option(help="Category override, e.g. cs.LG.")] = None,
-    max_items: Annotated[int | None, typer.Option("--max", help="Max items to ingest.")] = None,
-) -> None:
-    """Publish an ingest job to the event plane (requires the `kafka` extra)."""
-    from researchscout.events.kafka import ensure_topics, producer
-    from researchscout.events.schemas import TOPIC_INGEST_JOBS, TOPIC_PAPERS_NEW, IngestJob
-
-    job = IngestJob(
-        source=source,
-        since=since,
-        max_items=max_items,
-        categories=[category] if category else None,
-    )
-    ensure_topics([TOPIC_INGEST_JOBS, TOPIC_PAPERS_NEW])
-    client = producer()
-    client.produce(TOPIC_INGEST_JOBS, key=source.encode(), value=job.model_dump_json().encode())
-    client.flush()
-    typer.secho(f"emitted ingest job for {source} since {since:%Y-%m-%d}", fg=typer.colors.GREEN)
-
-
-@worker_app.command("ingest")
-def worker_ingest() -> None:
-    """Consume ingest jobs and store papers, publishing new ones to papers.new."""
-    import logging
-
-    from researchscout.workers.ingest_worker import run
-
-    logging.basicConfig(level=logging.INFO)
-    run()
-
-
-@worker_app.command("embed")
-def worker_embed() -> None:
-    """Consume papers.new and index embeddings."""
-    import logging
-
-    from researchscout.workers.embed_worker import run
-
-    logging.basicConfig(level=logging.INFO)
-    run()
-
-
-@worker_app.command("airtable")
-def worker_airtable() -> None:
-    """Consume papers.saved and mirror reading lists into Airtable."""
-    import logging
-
-    from researchscout.workers.airtable_sync import run
-
-    logging.basicConfig(level=logging.INFO)
-    run()
 
 
 @sources_app.command("list")
