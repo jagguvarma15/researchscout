@@ -74,6 +74,7 @@ def test_chat_streams_meta_tokens_done(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_chat_requires_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RS_OIDC_ISSUER", "http://localhost:8080/realms/researchscout")
     monkeypatch.setattr(chat_router, "check_rate_limit", lambda *a, **k: None)
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
