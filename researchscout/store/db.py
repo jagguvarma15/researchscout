@@ -9,7 +9,6 @@ from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from researchscout.config import get_settings
-from researchscout.obs.otel import instrument_engine
 
 
 class Base(DeclarativeBase):
@@ -25,7 +24,6 @@ def engine() -> Engine:
     global _engine
     if _engine is None:
         _engine = create_engine(get_settings().database_url)
-        instrument_engine(_engine)
     return _engine
 
 
