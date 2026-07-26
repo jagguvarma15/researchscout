@@ -3,7 +3,6 @@ import { Icon } from 'astro-icon/components';
 import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE, type PaperSummary } from '../lib/api';
-import { getAccessToken, SESSION_COOKIE } from '../lib/auth';
 
 const params = Astro.url.searchParams;
 const q = params.get('q') ?? '';
@@ -29,13 +28,7 @@ function formatDayHeading(iso: string): string {
     .toUpperCase();
 }
 
-const authenticated = Astro.locals.user !== null;
-let savedPapers: PaperSummary[] = [];
-if (authenticated) {
-  const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
-  const token = sid ? await getAccessToken(sid) : null;
-  if (token) savedPapers = (await fetchSaved(token)) ?? [];
-}
+const savedPapers: PaperSummary[] = (await fetchSaved()) ?? [];
 const savedIds = new Set(savedPapers.map((p) => p.id));
 
 function pageLink(target: number): string {
@@ -96,7 +89,7 @@ function pageLink(target: number): string {
   }
 
   {
-    authenticated && savedPapers.length > 0 && (
+    savedPapers.length > 0 && (
       <section class="reading">
         <div class="reading-head">
           <h2 class="day-heading">Reading list</h2>
@@ -108,7 +101,7 @@ function pageLink(target: number): string {
               <a class="reading-title" href={`/papers/${paper.id}`}>
                 {paper.title}
               </a>
-              <SaveButton client:visible paperId={paper.id} saved={true} {authenticated} />
+              <SaveButton client:visible paperId={paper.id} saved={true} />
             </li>
           ))}
         </ul>
@@ -145,12 +138,7 @@ function pageLink(target: number): string {
                   <a class="title" href={`/papers/${paper.id}`}>
                     {paper.title}
                   </a>
-                  <SaveButton
-                    client:visible
-                    paperId={paper.id}
-                    saved={savedIds.has(paper.id)}
-                    {authenticated}
-                  />
+                  <SaveButton client:visible paperId={paper.id} saved={savedIds.has(paper.id)} />
                 </div>
                 <p class="meta">
                   {paper.authors
