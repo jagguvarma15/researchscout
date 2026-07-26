@@ -1,16 +1,9 @@
 ---
 import { Icon } from 'astro-icon/components';
 import Base from '../layouts/Base.astro';
-import { fetchForYou, type PaperSummary } from '../lib/api';
-import { getAccessToken, SESSION_COOKIE } from '../lib/auth';
+import { fetchForYou } from '../lib/api';
 
-const authenticated = Astro.locals.user !== null;
-let items: PaperSummary[] | null = null;
-if (authenticated) {
-  const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
-  const token = sid ? await getAccessToken(sid) : null;
-  if (token) items = await fetchForYou(token);
-}
+const items = await fetchForYou();
 ---
 
 <Base title="For you">
@@ -18,17 +11,7 @@ if (authenticated) {
   <p class="lede">Recent papers ranked by your research interests.</p>
 
   {
-    !authenticated && (
-      <div class="card empty">
-        <Icon name="lucide:lock" aria-hidden="true" />
-        <p>
-          <a href="/auth/login?returnTo=/for-you">Sign in</a> to get a personalized feed.
-        </p>
-      </div>
-    )
-  }
-  {
-    authenticated && items === null && (
+    items === null && (
       <div class="card empty">
         <Icon name="lucide:cloud-off" aria-hidden="true" />
         <p>The API is unreachable — try again in a moment.</p>
@@ -36,7 +19,7 @@ if (authenticated) {
     )
   }
   {
-    authenticated && items !== null && items.length === 0 && (
+    items !== null && items.length === 0 && (
       <div class="card empty">
         <Icon name="lucide:sparkles" aria-hidden="true" />
         <p>
@@ -46,7 +29,7 @@ if (authenticated) {
     )
   }
   {
-    authenticated && items !== null && items.length > 0 && (
+    items !== null && items.length > 0 && (
       <ul class="feed">
         {items.map((paper) => (
           <li class="row">
