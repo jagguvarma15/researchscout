@@ -1,54 +1,84 @@
-# One-command lifecycle for the local stack. `make` alone lists the targets.
+# Host-process lifecycle for the local stack: Postgres (repo-local data dir), the API, and the
+# web app all run as plain processes — no containers. `make` alone lists the targets.
 SHELL := /bin/bash
-COMPOSE := docker compose
-ALL_PROFILES := --profile core --profile events --profile obs --profile airtable
+
+PG_VER  ?= 17
+PG_BIN  := $(shell brew --prefix postgresql@$(PG_VER) 2>/dev/null)/bin
+LOCAL   := $(CURDIR)/.local
+PGDATA  := $(LOCAL)/pgdata
+LOG     := $(LOCAL)/log
+RUN     := $(LOCAL)/run
+DB_USER := researchscout
+DB_NAME := researchscout
 
 .DEFAULT_GOAL := help
-
-.PHONY: help setup start start-all start-obs stop down clean seed digest check logs ps
+.PHONY: help setup start stop status logs seed digest scheduler check clean
 
 help: ## list targets
-	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-12s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-10s\033[0m %s\n", $$1, $$2}'
 
-setup: ## install toolchains, dependencies, and local config
-	@command -v docker >/dev/null || { echo "docker is required: https://docs.docker.com/desktop/"; exit 1; }
-	@command -v uv >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/"; exit 1; }
+setup: ## install toolchains, dependencies, and the local Postgres cluster
+	@command -v brew >/dev/null || { echo "Homebrew is required: https://brew.sh"; exit 1; }
+	@command -v uv   >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/"; exit 1; }
 	@command -v pnpm >/dev/null || { echo "pnpm is required: npm install -g pnpm"; exit 1; }
+	@[ -x "$(PG_BIN)/initdb" ] || { echo "postgresql@$(PG_VER) is required: brew install postgresql@$(PG_VER) pgvector"; exit 1; }
+	@[ -f "$$(brew --prefix)/share/postgresql@$(PG_VER)/extension/vector.control" ] || \
+	  { echo "pgvector is required: brew install pgvector"; exit 1; }
 	@command -v ollama >/dev/null || echo "note: no ollama — chat needs it (brew install ollama; ollama pull qwen2.5:3b-instruct) or a cloud key in .env"
 	uv sync
 	cd apps/web && pnpm install
+	@mkdir -p $(LOG) $(RUN)
+	@[ -d $(PGDATA) ] || { $(PG_BIN)/initdb -D $(PGDATA) -U $(DB_USER) --auth=trust --encoding=UTF8 >/dev/null && echo "initialized $(PGDATA)"; }
 	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
 	@echo "setup complete — next: make start"
 
-start: ## start the core stack (db, redis, keycloak, api, web) and migrate
-	$(COMPOSE) --profile core up -d --build
-	@echo "waiting for postgres..."
-	@until $(COMPOSE) exec -T db pg_isready -U researchscout >/dev/null 2>&1; do sleep 2; done
+start: ## start postgres, migrate, then the API and web app in the background
+	@mkdir -p $(LOG) $(RUN)
+	@if $(PG_BIN)/pg_ctl -D $(PGDATA) status >/dev/null 2>&1; then \
+	  echo "postgres: already running"; \
+	elif lsof -ti :5432 >/dev/null 2>&1; then \
+	  echo "error: another Postgres owns port 5432 — stop it or point RS_DATABASE_URL elsewhere"; exit 1; \
+	else \
+	  $(PG_BIN)/pg_ctl -D $(PGDATA) -l $(LOG)/postgres.log start >/dev/null; \
+	fi
+	@until $(PG_BIN)/pg_isready -h localhost -p 5432 -q; do sleep 1; done
+	@$(PG_BIN)/psql -h localhost -U $(DB_USER) -d postgres -tAc \
+	  "SELECT 1 FROM pg_database WHERE datname='$(DB_NAME)'" | grep -q 1 || \
+	  $(PG_BIN)/createdb -h localhost -U $(DB_USER) $(DB_NAME)
 	uv run scout db upgrade
-	@echo "waiting for keycloak (first boot takes ~30s)..."
-	@for i in $$(seq 1 40); do \
-	  code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/realms/researchscout/.well-known/openid-configuration); \
-	  [ "$$code" = "200" ] && break; sleep 3; done; \
-	  [ "$$code" = "200" ] || { echo "keycloak did not come up — check: make logs"; exit 1; }
+	@if [ -f $(RUN)/api.pid ] && kill -0 $$(cat $(RUN)/api.pid) 2>/dev/null; then \
+	  echo "api: already running"; \
+	else \
+	  nohup uv run scout serve api >> $(LOG)/api.log 2>&1 & echo $$! > $(RUN)/api.pid; \
+	fi
+	@for i in $$(seq 1 60); do curl -sf http://127.0.0.1:8000/healthz >/dev/null && break; sleep 1; done; \
+	  curl -sf http://127.0.0.1:8000/healthz >/dev/null || { echo "api did not come up — check: make logs"; exit 1; }
+	@if [ -f $(RUN)/web.pid ] && kill -0 $$(cat $(RUN)/web.pid) 2>/dev/null; then \
+	  echo "web: already running"; \
+	else \
+	  cd apps/web && { nohup ./node_modules/.bin/astro dev >> $(LOG)/web.log 2>&1 & echo $$! > $(RUN)/web.pid; }; \
+	fi
 	@echo
-	@echo "  web       http://localhost:4321          (sign in: demo / demo)"
+	@echo "  web       http://localhost:4321   (no sign-in — you are the local user)"
 	@echo "  api docs  http://localhost:8000/docs"
-	@echo "  keycloak  http://localhost:8080           (admin / admin)"
 	@echo
-	@echo "  next: make seed   (then chat needs ollama serve + qwen2.5:3b-instruct, or a cloud key in .env)"
+	@echo "  next: make seed   (chat needs 'ollama serve' + qwen2.5:3b-instruct, or a cloud key in .env)"
 
-start-all: start ## core plus the Kafka event plane (~3.9GB — the 8GB machine's ceiling)
-	$(COMPOSE) --profile events up -d --build
+stop: ## stop the web app, API, and postgres
+	-@[ -f $(RUN)/web.pid ] && kill $$(cat $(RUN)/web.pid) 2>/dev/null; rm -f $(RUN)/web.pid
+	-@[ -f $(RUN)/api.pid ] && kill $$(cat $(RUN)/api.pid) 2>/dev/null; rm -f $(RUN)/api.pid
+	-@lsof -ti :4321 2>/dev/null | xargs kill -9 2>/dev/null; true
+	-@lsof -ti :8000 2>/dev/null | xargs kill -9 2>/dev/null; true
+	-@$(PG_BIN)/pg_ctl -D $(PGDATA) status >/dev/null 2>&1 && $(PG_BIN)/pg_ctl -D $(PGDATA) stop >/dev/null
+	@echo "stopped"
 
-start-obs: start ## core plus grafana/prometheus/loki/tempo; turns telemetry export on
-	@grep -q '^RS_OTEL_ENABLED=true$$' .env || { \
-	  perl -pi -e 's/^RS_OTEL_ENABLED=.*$$/RS_OTEL_ENABLED=true/' .env; \
-	  echo "RS_OTEL_ENABLED=true written to .env (services export to the collector)"; }
-	$(COMPOSE) --profile core --profile obs up -d --build
-	@echo
-	@echo "  grafana     http://localhost:3000    (ResearchScout dashboard is pre-provisioned)"
-	@echo "  prometheus  http://localhost:9090"
-	@echo "  data appears ~60s after the first request (the SDK exports on a 60s cycle)"
+status: ## show what is running
+	@$(PG_BIN)/pg_ctl -D $(PGDATA) status >/dev/null 2>&1 && echo "postgres: up on :5432" || echo "postgres: stopped"
+	@lsof -ti :8000 >/dev/null 2>&1 && echo "api: up on :8000" || echo "api: stopped"
+	@lsof -ti :4321 >/dev/null 2>&1 && echo "web: up on :4321" || echo "web: stopped"
+
+logs: ## tail the local service logs
+	tail -f $(LOG)/*.log
 
 seed: ## ingest ~25 recent cs.LG papers and index them
 	uv run scout ingest --since $$(uv run python -c "from datetime import UTC, datetime, timedelta; print((datetime.now(UTC)-timedelta(days=7)).date())") --category cs.LG --max 25
@@ -57,18 +87,8 @@ seed: ## ingest ~25 recent cs.LG papers and index them
 digest: ## build and publish this week's digest (needs the LLM up)
 	uv run scout digest
 
-stop: ## stop all containers and kill stray host dev processes
-	-$(COMPOSE) $(ALL_PROFILES) stop
-	-@lsof -ti :8000 2>/dev/null | xargs kill -9 2>/dev/null; true
-	-@lsof -ti :4321 2>/dev/null | xargs kill -9 2>/dev/null; true
-	@echo "stopped"
-
-down: ## remove containers (volumes/data are kept)
-	$(COMPOSE) $(ALL_PROFILES) down
-
-clean: ## remove containers AND volumes — deletes all Postgres/Kafka data
-	@echo "removing containers and volumes (all local data)..."
-	$(COMPOSE) $(ALL_PROFILES) down -v
+scheduler: ## run the refresh loop in the foreground (Ctrl-C to stop)
+	uv run scout serve scheduler
 
 check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run ruff check researchscout tests
@@ -77,8 +97,7 @@ check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run pytest -m "not integration"
 	cd apps/web && pnpm astro check && pnpm build
 
-logs: ## tail logs from running services
-	$(COMPOSE) $(ALL_PROFILES) logs -f --tail 50
-
-ps: ## show running services
-	$(COMPOSE) $(ALL_PROFILES) ps
+clean: ## stop everything and delete .local (all Postgres data, logs, pids)
+	@$(MAKE) stop
+	rm -rf $(LOCAL)
+	@echo "removed $(LOCAL)"
