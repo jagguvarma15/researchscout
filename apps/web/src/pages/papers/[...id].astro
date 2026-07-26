@@ -4,7 +4,6 @@ import CiteActions from '../../components/CiteActions.svelte';
 import SaveButton from '../../components/SaveButton.svelte';
 import Base from '../../layouts/Base.astro';
 import { fetchPaper, fetchPapers, fetchSaved, formatDate, type PaperSummary } from '../../lib/api';
-import { getAccessToken, SESSION_COOKIE } from '../../lib/auth';
 
 // Rest param, not a plain [id]: canonical ids like doi:10.1145/nnn.mmm contain slashes.
 const id = Astro.params.id ?? '';
@@ -13,12 +12,9 @@ if (paper === null) {
   Astro.response.status = 404;
 }
 
-const authenticated = Astro.locals.user !== null;
 let saved = false;
-if (authenticated && paper !== null) {
-  const sid = Astro.cookies.get(SESSION_COOKIE)?.value;
-  const token = sid ? await getAccessToken(sid) : null;
-  if (token) saved = ((await fetchSaved(token)) ?? []).some((p) => p.id === paper.id);
+if (paper !== null) {
+  saved = ((await fetchSaved()) ?? []).some((p) => p.id === paper.id);
 }
 
 // Related papers ride the hybrid search with the title as the query — no new backend.
@@ -62,7 +58,7 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
       <article>
         <div class="head">
           <h1>{paper.title}</h1>
-          <SaveButton client:load paperId={paper.id} {saved} {authenticated} />
+          <SaveButton client:load paperId={paper.id} {saved} />
         </div>
         <p class="meta">
           {formatDate(paper.published_at)}
