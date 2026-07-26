@@ -82,3 +82,36 @@ def test_papers_stay_public(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(papers_router, "list_papers", lambda *a, **k: [])
     assert _client(monkeypatch).get("/v1/papers").status_code == 200
+
+
+def _local_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setenv("RS_OIDC_ISSUER", "")
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: None
+    app.dependency_overrides[get_embedder] = lambda: None
+    app.dependency_overrides[get_llm] = lambda: None
+    return TestClient(app)
+
+
+def test_local_mode_needs_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    import researchscout.api.routers.ask as ask_router
+
+    empty = Answer(text="No recent papers match this question.", cited=[], hallucinated=[], used=[])
+    monkeypatch.setattr(ask_router, "answer", lambda *a, **k: empty)
+    assert _ask(_local_client(monkeypatch), None) == 200
+
+
+def test_local_mode_ignores_bad_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    import researchscout.api.routers.ask as ask_router
+
+    empty = Answer(text="No recent papers match this question.", cited=[], hallucinated=[], used=[])
+    monkeypatch.setattr(ask_router, "answer", lambda *a, **k: empty)
+    assert _ask(_local_client(monkeypatch), "not-a-jwt") == 200
+
+
+def test_local_mode_identity_is_local(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi import Request
+
+    monkeypatch.setenv("RS_OIDC_ISSUER", "")
+    user = auth_mod.require_user(Request({"type": "http", "headers": []}))
+    assert (user.sub, user.username) == ("local", "local")
