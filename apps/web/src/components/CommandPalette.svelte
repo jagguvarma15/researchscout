@@ -2,7 +2,7 @@
   // Command palette: Cmd+K / Ctrl+K (or the header search button, matched via its
   // data-open-palette attribute) opens a modal combining static nav commands with
   // live paper results from the hybrid search, debounced through the same-origin
-  // proxy. Public endpoint — works signed out.
+  // proxy.
 
   import { CornerDownLeft, FileText, Search } from 'lucide-svelte';
 
@@ -19,14 +19,11 @@
     score?: number | null;
   }
 
-  let { authenticated }: { authenticated: boolean } = $props();
-
-  const NAV: { href: string; label: string; auth: boolean }[] = [
-    { href: '/', label: 'Home', auth: false },
-    { href: '/digests', label: 'Digests', auth: false },
-    { href: '/saved', label: 'Saved', auth: true },
-    { href: '/profile', label: 'Profile', auth: true },
-    { href: '/auth/logout', label: 'Sign out', auth: true },
+  const NAV: { href: string; label: string }[] = [
+    { href: '/', label: 'Home' },
+    { href: '/digests', label: 'Digests' },
+    { href: '/saved', label: 'Saved' },
+    { href: '/profile', label: 'Profile' },
   ];
 
   let open = $state(false);
@@ -38,9 +35,7 @@
   let timer: ReturnType<typeof setTimeout> | undefined;
   let requestSeq = 0;
 
-  const commands = $derived(
-    NAV.filter((item) => (authenticated || !item.auth) && matches(item.label, query)),
-  );
+  const commands = $derived(NAV.filter((item) => matches(item.label, query)));
   // With a query, a pinned first row hands the search to the feed page for the
   // full result list; Enter with nothing highlighted lands there too.
   const searchAll = $derived<Entry[]>(
