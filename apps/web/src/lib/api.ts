@@ -49,11 +49,9 @@ export async function fetchPapers(params: FeedParams): Promise<PaperSummary[] | 
   }
 }
 
-export async function fetchSaved(accessToken: string): Promise<PaperSummary[] | null> {
+export async function fetchSaved(): Promise<PaperSummary[] | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/me/saved`, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
+    const response = await fetch(`${API_URL}/v1/me/saved`);
     if (!response.ok) return null;
     const body = (await response.json()) as { items: PaperSummary[] };
     return body.items;
@@ -62,11 +60,9 @@ export async function fetchSaved(accessToken: string): Promise<PaperSummary[] | 
   }
 }
 
-export async function fetchForYou(accessToken: string): Promise<PaperSummary[] | null> {
+export async function fetchForYou(): Promise<PaperSummary[] | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/me/feed`, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
+    const response = await fetch(`${API_URL}/v1/me/feed`);
     if (!response.ok) return null;
     const body = (await response.json()) as { items: PaperSummary[] };
     return body.items;
@@ -75,11 +71,9 @@ export async function fetchForYou(accessToken: string): Promise<PaperSummary[] |
   }
 }
 
-export async function fetchInterests(accessToken: string): Promise<string[] | null> {
+export async function fetchInterests(): Promise<string[] | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/me/interests`, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
+    const response = await fetch(`${API_URL}/v1/me/interests`);
     if (!response.ok) return null;
     const body = (await response.json()) as { interests: string[] };
     return body.interests;
