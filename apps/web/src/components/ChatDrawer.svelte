@@ -1,8 +1,8 @@
 <script lang="ts">
   // The chat side panel: a single island, closed by default. Talks to the API through the
-  // authenticated same-origin proxy (/api/chat) and renders the SSE stream token by token.
+  // same-origin proxy (/api/chat) and renders the SSE stream token by token.
 
-  import { Lock, MessageCircle, Send, X } from 'lucide-svelte';
+  import { MessageCircle, Send, X } from 'lucide-svelte';
 
   interface UsedPaper {
     id: string;
@@ -17,8 +17,6 @@
     used?: UsedPaper[];
     error?: boolean;
   }
-
-  let { authenticated }: { authenticated: boolean } = $props();
 
   let open = $state(false);
   let input = $state('');
@@ -68,11 +66,6 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ question }),
       });
-      if (response.status === 401) {
-        current.text = 'Your session expired — sign in again to keep chatting.';
-        current.error = true;
-        return;
-      }
       if (response.status === 429) {
         const wait = response.headers.get('Retry-After');
         current.text = `Slow down a little — try again in ${wait ?? 'a few'} seconds.`;
@@ -128,46 +121,38 @@
     </button>
   </header>
 
-  {#if !authenticated}
-    <div class="gate">
-      <span class="gate-mark"><Lock size={20} aria-hidden="true" /></span>
-      <p>Chat is for signed-in readers.</p>
-      <a class="signin" href="/auth/login">Sign in to ask</a>
-    </div>
-  {:else}
-    <div class="messages" bind:this={scroller}>
-      {#if messages.length === 0}
-        <p class="hint">
-          Ask anything about the papers on the radar — answers cite what they rely on.
-        </p>
-      {/if}
-      {#each messages as message}
-        <div class="msg {message.role}" class:error={message.error}>
-          <p>{message.text}{#if message.role === 'assistant' && busy && message === messages[messages.length - 1]}<span class="cursor">▍</span>{/if}</p>
-          {#if message.cited && message.cited.length > 0}
-            <p class="citations">
-              {#each message.used ?? [] as paper}
-                {#if message.cited.includes(paper.id)}
-                  <a href={`/papers/${paper.id}`} title={paper.title}>{paper.id}</a>
-                {/if}
-              {/each}
-            </p>
-          {/if}
-        </div>
-      {/each}
-    </div>
-    <form onsubmit={send}>
-      <input
-        type="text"
-        placeholder="What's new in reinforcement learning?"
-        bind:value={input}
-        disabled={busy}
-      />
-      <button type="submit" disabled={busy || !input.trim()} aria-label="Send">
-        <Send size={17} aria-hidden="true" />
-      </button>
-    </form>
-  {/if}
+  <div class="messages" bind:this={scroller}>
+    {#if messages.length === 0}
+      <p class="hint">
+        Ask anything about the papers on the radar — answers cite what they rely on.
+      </p>
+    {/if}
+    {#each messages as message}
+      <div class="msg {message.role}" class:error={message.error}>
+        <p>{message.text}{#if message.role === 'assistant' && busy && message === messages[messages.length - 1]}<span class="cursor">▍</span>{/if}</p>
+        {#if message.cited && message.cited.length > 0}
+          <p class="citations">
+            {#each message.used ?? [] as paper}
+              {#if message.cited.includes(paper.id)}
+                <a href={`/papers/${paper.id}`} title={paper.title}>{paper.id}</a>
+              {/if}
+            {/each}
+          </p>
+        {/if}
+      </div>
+    {/each}
+  </div>
+  <form onsubmit={send}>
+    <input
+      type="text"
+      placeholder="What's new in reinforcement learning?"
+      bind:value={input}
+      disabled={busy}
+    />
+    <button type="submit" disabled={busy || !input.trim()} aria-label="Send">
+      <Send size={17} aria-hidden="true" />
+    </button>
+  </form>
 </aside>
 
 <style>
@@ -247,44 +232,6 @@
     color: var(--ink, #17191c);
   }
   .close:focus-visible {
-    outline: 2px solid var(--accent, #c2410c);
-    outline-offset: 2px;
-  }
-  .gate {
-    padding: 2.5rem 1.25rem;
-    text-align: center;
-  }
-  .gate-mark {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: 999px;
-    background: var(--accent-soft, #fef3c7);
-    color: var(--accent-ink, #78350f);
-  }
-  .gate p {
-    margin: 0.75rem 0 0;
-    color: var(--muted, #5d6570);
-  }
-  .signin {
-    display: inline-block;
-    margin-top: 1rem;
-    padding: 0.5rem 1.25rem;
-    border-radius: 999px;
-    background: var(--accent, #c2410c);
-    color: var(--accent-contrast, #fff);
-    font-weight: 550;
-    font-size: 0.9rem;
-    text-decoration: none;
-    box-shadow: 0 1px 2px rgb(23 25 28 / 0.1);
-    transition: background-color 0.15s ease;
-  }
-  .signin:hover {
-    background: var(--accent-hover, #9a3412);
-  }
-  .signin:focus-visible {
     outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
