@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from researchscout.api.auth import User, require_user
 from researchscout.api.deps import get_session
 from researchscout.api.schemas import PaperList, PaperSummary
-from researchscout.events.publish import publish_paper_saved
 from researchscout.store.papers import get_paper
 from researchscout.store.saved import list_saved, save_paper, unsave_paper
 
@@ -26,9 +25,7 @@ def save(
     """Add a paper to the caller's reading list (idempotent)."""
     if get_paper(session, paper_id) is None:
         raise HTTPException(status_code=404, detail=f"unknown paper id: {paper_id}")
-    created = save_paper(session, user.sub, paper_id)
-    if created:
-        publish_paper_saved(user.sub, paper_id, True)
+    save_paper(session, user.sub, paper_id)
     return {"saved": True}
 
 
@@ -39,9 +36,7 @@ def unsave(
     session: Annotated[Session, Depends(get_session)],
 ) -> dict[str, bool]:
     """Remove a paper from the caller's reading list (idempotent)."""
-    removed = unsave_paper(session, user.sub, paper_id)
-    if removed:
-        publish_paper_saved(user.sub, paper_id, False)
+    unsave_paper(session, user.sub, paper_id)
     return {"saved": False}
 
 
