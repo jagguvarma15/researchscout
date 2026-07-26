@@ -24,22 +24,6 @@ api = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.9",
-    "redis>=5",
-]
-kafka = [
-    "confluent-kafka>=2.5",
-]
-airtable = [
-    "pyairtable>=2.3",
-]
-obs = [
-    "opentelemetry-sdk>=1.30",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.30",
-    "opentelemetry-instrumentation-fastapi>=0.50b0",
-    "opentelemetry-instrumentation-sqlalchemy>=0.50b0",
-    "opentelemetry-instrumentation-httpx>=0.50b0",
-    "opentelemetry-instrumentation-confluent-kafka>=0.50b0",
-    "langsmith>=0.3",
 ]
 
 [project.scripts]
@@ -56,16 +40,6 @@ dev = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.9",
-    "redis>=5",
-    "confluent-kafka>=2.5",
-    "pyairtable>=2.3",
-    "opentelemetry-sdk>=1.30",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.30",
-    "opentelemetry-instrumentation-fastapi>=0.50b0",
-    "opentelemetry-instrumentation-sqlalchemy>=0.50b0",
-    "opentelemetry-instrumentation-httpx>=0.50b0",
-    "opentelemetry-instrumentation-confluent-kafka>=0.50b0",
-    "langsmith>=0.3",
 ]
 
 [build-system]
@@ -93,8 +67,6 @@ module = [
     "alembic",
     "alembic.*",
     "uvicorn",
-    "confluent_kafka",
-    "confluent_kafka.*",
     "sentence_transformers",
     "sentence_transformers.*",
     "pgvector",
