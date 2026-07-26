@@ -1,6 +1,6 @@
 <script lang="ts">
   // Header account menu: an initials avatar that opens a small dropdown with the
-  // profile and sign-out links. Closes on click-outside and Escape.
+  // profile link. Closes on click-outside and Escape.
 
   let { username }: { username: string } = $props();
 
@@ -42,7 +42,6 @@
     <div class="menu" role="menu" aria-label="Account">
       <span class="menu-user" role="presentation">{username}</span>
       <a role="menuitem" href="/profile">Profile settings</a>
-      <a role="menuitem" href="/auth/logout">Sign out</a>
     </div>
   {/if}
 </div>
