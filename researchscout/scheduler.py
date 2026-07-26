@@ -135,7 +135,6 @@ def _index() -> None:
 
 def _digest(settings: Settings) -> None:
     from researchscout.digest import build_digest
-    from researchscout.events.publish import publish_digest_published
     from researchscout.llm.openai_compat import OpenAICompatLLM
     from researchscout.store.db import session_scope
     from researchscout.store.digests import upsert_digest
@@ -148,7 +147,6 @@ def _digest(settings: Settings) -> None:
             logger.info("digest: window empty, nothing to publish")
             return
         upsert_digest(session, result)
-    publish_digest_published(result.slug, result.title, result.period_start, result.period_end)
     logger.info("digest %s: %d papers, %d cited", result.slug, len(result.items), len(result.cited))
 
 
