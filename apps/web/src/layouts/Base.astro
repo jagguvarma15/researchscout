@@ -63,16 +63,7 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
             <Icon name="lucide:bookmark" aria-hidden="true" />
             Reading list
           </a>
-          {
-            Astro.locals.user ? (
-              <AvatarMenu client:load username={Astro.locals.user.username} />
-            ) : (
-              <a class="btn btn-primary" href="/auth/login">
-                <Icon name="lucide:log-in" aria-hidden="true" />
-                Sign in
-              </a>
-            )
-          }
+          <AvatarMenu client:load username={Astro.locals.user.username} />
         </nav>
       </div>
     </header>
@@ -84,8 +75,8 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
         Papers from arXiv and friends, scored by freshness and signals.
       </div>
     </footer>
-    <ChatDrawer client:load authenticated={Astro.locals.user !== null} />
-    <CommandPalette client:load authenticated={Astro.locals.user !== null} />
+    <ChatDrawer client:load />
+    <CommandPalette client:load />
   </body>
 </html>
 
