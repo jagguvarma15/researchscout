@@ -16,6 +16,9 @@
     <author>
       <name>Alan Turing</name>
     </author>
+    <arxiv:comment>14 pages, 3 figures, accepted at NeurIPS 2024</arxiv:comment>
+    <arxiv:journal_ref>Advances in Neural Information Processing Systems 37 (2024)</arxiv:journal_ref>
+    <arxiv:doi>10.1000/Example.2024</arxiv:doi>
     <link href="http://arxiv.org/abs/2401.12345v2" rel="alternate" type="text/html"/>
     <link title="pdf" href="http://arxiv.org/pdf/2401.12345v2" rel="related" type="application/pdf"/>
     <arxiv:primary_category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
