@@ -12,9 +12,14 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from researchscout.schema import Paper, Signal
+from researchscout.schema import Paper, Signal, SignalType
 from researchscout.sources.base import Source
-from researchscout.store.papers import find_by_external_id, link_external_ids, upsert_paper
+from researchscout.store.papers import (
+    find_by_external_id,
+    link_external_ids,
+    set_citation_count,
+    upsert_paper,
+)
 from researchscout.store.raw import append_raw
 from researchscout.store.signals import append_signal
 from researchscout.store.state import save_state
@@ -61,11 +66,18 @@ def run_ingest(
             obj = source.normalize(raw)
             if isinstance(obj, Signal):
                 append_signal(session, obj)
+                if obj.type is SignalType.citation:
+                    set_citation_count(session, obj.paper_id, int(obj.value))
                 summary.signals += 1
                 continue
             existing = _resolve_existing(session, obj)
             if existing is not None:
                 link_external_ids(session, existing, obj.external_ids)
+                if existing == obj.id:
+                    # Same canonical paper seen again: refresh its fields from the source so a
+                    # re-ingest can backfill metadata. A different id is a cross-source match
+                    # and stays link-only.
+                    upsert_paper(session, obj)
                 summary.collapsed += 1
             else:
                 upsert_paper(session, obj)
