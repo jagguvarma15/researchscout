@@ -17,11 +17,31 @@ make seed     # ~25 real arXiv papers, embedded and searchable
 
 Then open http://localhost:4321: browse and search the feed — no sign-in, the app runs as a
 built-in local user — and ask the chat drawer about the papers; answers stream with citations.
-Star papers (`/saved`), run `make digest` and visit `/digests` for the weekly summary. `/topics`
-clusters recent papers into emerging themes ranked by momentum, and `/for-you` personalizes the
-feed from your interests. `make scheduler` keeps ingest, signals, embeddings, digests, and
-topics refreshing on their own. `make stop` shuts everything down; `make clean` also wipes the
-data; plain `make` lists every target.
+The Filters button opens a sidebar for extracting papers by subject (tech = computer science
+broadly vs everything else on arXiv, or specific groups and categories), date (window or
+year/month), popularity (most cited, most active), authors, and venues; results are plain URLs
+you can share or bookmark. Read on a card or paper page opens the PDF in-app; math in titles
+and abstracts renders properly. Star papers (`/saved`), run `make digest` and visit `/digests`
+for the weekly summary. `/topics` clusters recent papers into emerging themes ranked by
+momentum, and `/for-you` personalizes the feed from your interests. `make scheduler` keeps
+ingest, signals, embeddings, digests, and topics refreshing on their own. `make stop` shuts
+everything down; `make clean` also wipes the data; plain `make` lists every target.
+
+## Deep backfill
+
+`config/sources.yaml` registers every arXiv group. The seed pulls one small slice; to fill the
+radar, backfill per group with the resumable cursor (arXiv caps paging depth per query, so keep
+runs group-sized), then embed and pull citation signals:
+
+```bash
+uv run scout ingest --since 2026-01-01 --category 'cs.*' --resume    # repeat per group; rerun on interruption
+uv run scout index                                                   # embeddings; hours on CPU, run overnight
+uv run scout ingest --source semantic_scholar                        # citations -> citation counts
+```
+
+One-time step for rows ingested before the metadata capture landed: re-ingest their original
+window once so venue, comment, and the primary category populate (same-id re-ingest refreshes
+in place). Ingest paces itself with `RS_ARXIV_PAGE_DELAY_SEC` (default 3 seconds between pages).
 
 ## Development
 
@@ -58,3 +78,21 @@ and `POST /v1/ask` (grounded, cited answer). With `RS_OIDC_ISSUER` unset (the de
 runs in local no-auth mode as a built-in user; set an issuer to require OIDC Bearer tokens.
 The LLM defaults to local Ollama; point `RS_LLM_BASE_URL` / `RS_LLM_MODEL` / `RS_LLM_API_KEY`
 at any OpenAI-compatible provider to swap it.
+
+`GET /v1/papers` filter and sort parameters (all combinable; they also apply under `?q=`):
+
+| Param | Meaning |
+|---|---|
+| `days` | window in days (mutually exclusive with `year`) |
+| `year`, `month` | calendar window; `month` requires `year` |
+| `category` | arXiv category, repeatable (`category=cs.LG&category=math.CO`) |
+| `kind` | `tech` (cs, stat, eess) or `non_tech` (everything else) |
+| `group` | taxonomy group key, repeatable (`cs`, `stat`, `eess`, `math`, `physics`, `q-bio`, `q-fin`, `econ`) |
+| `author`, `venue` | case-insensitive contains match |
+| `min_citations` | latest citation count at least N |
+| `sort` | `newest` (default), `citations`, or `activity` |
+| `limit`, `offset` | pagination; the response carries `total` (null under `q`) |
+
+```bash
+curl 'http://127.0.0.1:8000/v1/papers?kind=tech&year=2026&sort=citations&limit=5'
+```
