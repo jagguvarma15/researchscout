@@ -42,13 +42,17 @@ class Paper(BaseModel):
     abstract: str
     authors: list[Author] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
+    primary_category: str | None = None
     venue: str | None = None
+    comment: str | None = None
     published_at: datetime
     updated_at: datetime | None = None
     source: str
     url: str | None = None
     pdf_url: str | None = None
     full_text: str | None = None
+    # Materialized from citation signals by the store; sources never set it.
+    citation_count: int = 0
 
 
 class Signal(BaseModel):
