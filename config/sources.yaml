@@ -6,7 +6,15 @@ sources:
     enabled: true
     kind: content
     cadence: daily
-    categories: [cs.LG, cs.AI, cs.CL]
+    # All arXiv groups: tech (cs/stat/eess) plus every non-tech archive, so the tech vs
+    # non-tech facet has real data. Trim this list to cut ingest volume; deep backfills
+    # should run per group (`scout ingest --category cs.* --resume`).
+    categories:
+      [
+        cs.*, stat.*, eess.*, math.*, econ.*, q-bio.*, q-fin.*,
+        astro-ph.*, cond-mat.*, physics.*, nlin.*,
+        gr-qc, hep-ex, hep-lat, hep-ph, hep-th, math-ph, nucl-ex, nucl-th, quant-ph,
+      ]
   semantic_scholar:
     enabled: true
     kind: signal
