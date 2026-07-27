@@ -7,6 +7,7 @@ pagination offset), and normalizes each entry into a canonical ``Paper``. ``fetc
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -86,8 +87,14 @@ def _entry_payload(entry: Any) -> dict[str, Any]:
         "id": entry.get("id"),
         "title": entry.get("title"),
         "summary": entry.get("summary"),
+        # Per-author affiliations are not recoverable here: feedparser flattens
+        # arxiv:affiliation onto the entry, losing the author association.
         "authors": [a.get("name") for a in entry.get("authors", []) if a.get("name")],
         "categories": [t.get("term") for t in entry.get("tags", []) if t.get("term")],
+        "primary_category": (entry.get("arxiv_primary_category") or {}).get("term"),
+        "comment": entry.get("arxiv_comment"),
+        "journal_ref": entry.get("arxiv_journal_ref"),
+        "doi": entry.get("arxiv_doi"),
         "published": entry.get("published"),
         "updated": entry.get("updated"),
         "links": [
@@ -118,6 +125,12 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
+def _collapse_paragraphs(text: str) -> str:
+    """Collapse whitespace per paragraph, preserving blank-line breaks. LaTeX stays verbatim."""
+    paragraphs = re.split(r"\n\s*\n", text)
+    return "\n\n".join(" ".join(p.split()) for p in paragraphs if p.strip())
+
+
 def _pdf_url(links: list[dict[str, Any]]) -> str | None:
     for link in links:
         if link.get("title") == "pdf" or link.get("type") == "application/pdf":
@@ -132,14 +145,20 @@ def _normalize_payload(payload: dict[str, Any]) -> Paper:
         raise ValueError("arXiv entry is missing an id")
     bare_id = normalize_arxiv_id(raw_id)
     external_ids = {"arxiv": bare_id}
+    doi = payload.get("doi")
+    if doi:
+        external_ids["doi"] = doi.strip().lower()
 
     title = " ".join((payload.get("title") or "").split())
-    abstract = " ".join((payload.get("summary") or "").split())
+    abstract = _collapse_paragraphs(payload.get("summary") or "")
     authors = [Author(name=name) for name in payload.get("authors", [])]
 
     published = _parse_dt(payload.get("published"))
     if published is None:
         raise ValueError(f"arXiv entry {bare_id} is missing a published date")
+
+    categories = list(payload.get("categories", []))
+    primary = payload.get("primary_category") or (categories[0] if categories else None)
 
     return Paper(
         id=canonical_id(external_ids, title, authors),
@@ -147,7 +166,10 @@ def _normalize_payload(payload: dict[str, Any]) -> Paper:
         title=title,
         abstract=abstract,
         authors=authors,
-        categories=list(payload.get("categories", [])),
+        categories=categories,
+        primary_category=primary,
+        venue=payload.get("journal_ref"),
+        comment=payload.get("comment"),
         published_at=published,
         updated_at=_parse_dt(payload.get("updated")),
         source="arxiv",
