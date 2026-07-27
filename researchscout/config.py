@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     llm_api_key: str = "ollama"
     freshness_days: int = 30
     sources_config_path: Path = Path("config/sources.yaml")
+    # arXiv asks for about 3 seconds between API requests; 0 disables the pause (tests).
+    arxiv_page_delay_sec: float = 3.0
     # Empty (the default) runs the API in local no-auth mode with a built-in user; set any
     # OIDC issuer to require Bearer tokens instead.
     oidc_issuer: str = ""
