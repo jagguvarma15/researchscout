@@ -1,9 +1,11 @@
 ---
 import { Icon } from 'astro-icon/components';
+import FilterSidebar from '../components/FilterSidebar.svelte';
 import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE, type PaperSummary } from '../lib/api';
 import { renderMathHTML } from '../lib/math';
+import { groupLabel } from '../lib/taxonomy';
 
 const params = Astro.url.searchParams;
 const q = params.get('q') ?? '';
@@ -19,9 +21,56 @@ const category = params.getAll('category');
 const group = params.getAll('group');
 const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
 
-const filtered = Boolean(
-  q || days || year || kind || author || venue || minCitations || category.length || group.length,
-);
+// Per-chip removal links: the same URL minus one param (or one value of a repeated param).
+function withoutParams(names: [string, string?][]): string {
+  const next = new URLSearchParams(Astro.url.searchParams);
+  for (const [name, value] of names) {
+    if (value === undefined) {
+      next.delete(name);
+    } else {
+      const rest = next.getAll(name).filter((v) => v !== value);
+      next.delete(name);
+      for (const v of rest) next.append(name, v);
+    }
+  }
+  next.delete('page');
+  const s = next.toString();
+  return s ? `/?${s}` : '/';
+}
+
+interface Chip {
+  label: string;
+  href: string;
+}
+const chips: Chip[] = [];
+if (q) chips.push({ label: `“${q}”`, href: withoutParams([['q']]) });
+if (kind) {
+  chips.push({ label: kind === 'tech' ? 'Tech' : 'Non-tech', href: withoutParams([['kind']]) });
+}
+for (const g of group) chips.push({ label: groupLabel(g), href: withoutParams([['group', g]]) });
+for (const c of category) chips.push({ label: c, href: withoutParams([['category', c]]) });
+if (days) chips.push({ label: `Last ${days} days`, href: withoutParams([['days']]) });
+if (year) {
+  chips.push({
+    label: month ? `${year}-${month.padStart(2, '0')}` : year,
+    href: withoutParams([['year'], ['month']]),
+  });
+}
+if (author) chips.push({ label: `author: ${author}`, href: withoutParams([['author']]) });
+if (venue) chips.push({ label: `venue: ${venue}`, href: withoutParams([['venue']]) });
+if (minCitations) {
+  chips.push({
+    label: `min ${minCitations} citations`,
+    href: withoutParams([['min_citations']]),
+  });
+}
+if (sort && sort !== 'newest') {
+  chips.push({
+    label: sort === 'citations' ? 'Most cited' : 'Most active',
+    href: withoutParams([['sort']]),
+  });
+}
+const activeCount = chips.length - (q ? 1 : 0);
 
 const result = await fetchPapers({
   q,
@@ -105,51 +154,36 @@ function pageLink(target: number): string {
 ---
 
 <Base>
-  {
-    filtered && (
-      <div class="active-search">
-        <p class="active-summary">
-          {q ? (
-            <>
-              Results for <strong>“{q}”</strong>
-            </>
-          ) : (
-            'Filtered feed'
-          )}
-          {items !== null && (
-            <span class="active-count">
-              {total ?? items.length} {(total ?? items.length) === 1 ? 'result' : 'results'}
-            </span>
-          )}
+  <div class="toolbar">
+    <button class="btn btn-ghost" type="button" data-open-filters aria-haspopup="dialog">
+      <Icon name="lucide:sliders-horizontal" aria-hidden="true" />
+      Filters
+      {activeCount > 0 && <span class="filter-count">{activeCount}</span>}
+    </button>
+    {
+      q && (
+        <p class="toolbar-summary">
+          Results for <strong>“{q}”</strong>
         </p>
-        <form class="active-controls" method="get" action="/">
-          {q && <input type="hidden" name="q" value={q} />}
-          <input
-            class="input filter"
-            type="text"
-            name="category"
-            placeholder="cs.LG"
-            aria-label="Category"
-            value={category[0] ?? ''}
-            size="8"
-          />
-          <input
-            class="input filter"
-            type="number"
-            name="days"
-            placeholder="days"
-            aria-label="Days back"
-            value={days}
-            min="1"
-            max="365"
-            size="5"
-          />
-          <button class="btn btn-ghost" type="submit">Apply</button>
-          <a class="btn btn-ghost" href="/">
+      )
+    }
+    {
+      items !== null && (
+        <span class="toolbar-total">
+          {total ?? items.length} paper{(total ?? items.length) === 1 ? '' : 's'}
+        </span>
+      )
+    }
+  </div>
+  {
+    chips.length > 0 && (
+      <div class="chips">
+        {chips.map((chip) => (
+          <a class="chip" href={chip.href}>
+            {chip.label}
             <Icon name="lucide:x" aria-hidden="true" />
-            Clear
           </a>
-        </form>
+        ))}
       </div>
     )
   }
@@ -295,50 +329,86 @@ function pageLink(target: number): string {
       </nav>
     )
   }
+
+  <FilterSidebar
+    client:load
+    initial={{
+      kind,
+      groups: group,
+      categories: category,
+      days,
+      year,
+      month,
+      sort,
+      minCitations,
+      author,
+      venue,
+    }}
+  />
 </Base>
 
 <style>
-  /* Active-search bar: shown only when a query or filter is live — the navbar
-     palette owns search entry. */
-  .active-search {
+  /* Feed toolbar: the sidebar trigger and the live result count, always visible. */
+  .toolbar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    justify-content: space-between;
     gap: 0.5rem 1rem;
     padding-bottom: var(--space-3);
     border-bottom: 1px solid var(--line);
-    margin-bottom: var(--space-6);
+    margin-bottom: var(--space-4);
   }
-  .active-summary {
-    margin: 0;
+  .toolbar .btn {
+    padding: 0.4rem 0.9rem;
+  }
+  .filter-count {
     display: inline-flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: 0.6rem;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.25rem;
+    height: 1.25rem;
+    padding: 0 0.3rem;
+    border-radius: var(--radius-full);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 0.72rem;
+    font-weight: 650;
+  }
+  .toolbar-summary {
+    margin: 0;
     font-size: var(--text-md);
   }
-  .active-count {
+  .toolbar-total {
+    margin-left: auto;
     color: var(--muted);
     font-size: var(--text-sm);
   }
-  .active-controls {
+  .chips {
     display: flex;
     flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: var(--space-5);
+  }
+  .chip {
+    display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-  }
-  .active-controls .btn {
-    padding: 0.4rem 0.9rem;
-  }
-  .filter {
-    width: 6.5rem;
-    padding: 0.45rem 0.6rem;
-    color: var(--muted);
-    font-size: var(--text-xs);
-  }
-  .filter:focus-visible {
+    gap: 0.3rem;
+    padding: 0.2rem 0.65rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-full);
+    background: var(--surface);
     color: var(--ink);
+    font-size: 0.8rem;
+    text-decoration: none;
+  }
+  .chip:hover {
+    border-color: var(--line-strong);
+    background: var(--surface-2);
+  }
+  .chip :global(svg) {
+    width: 0.8rem;
+    height: 0.8rem;
+    color: var(--muted);
   }
   .empty p {
     margin: 0;
