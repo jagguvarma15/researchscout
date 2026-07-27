@@ -19,7 +19,10 @@ class PaperSummary(BaseModel):
     abstract: str
     authors: list[Author]
     categories: list[str]
+    primary_category: str | None
     venue: str | None
+    comment: str | None
+    citation_count: int = 0
     published_at: datetime
     source: str
     url: str | None
@@ -34,7 +37,10 @@ class PaperSummary(BaseModel):
             abstract=paper.abstract,
             authors=paper.authors,
             categories=paper.categories,
+            primary_category=paper.primary_category,
             venue=paper.venue,
+            comment=paper.comment,
+            citation_count=paper.citation_count,
             published_at=paper.published_at,
             source=paper.source,
             url=paper.url,
@@ -45,6 +51,10 @@ class PaperSummary(BaseModel):
 
 class PaperList(BaseModel):
     items: list[PaperSummary]
+    # total is the unpaginated facet count; None under q, where search returns at most k.
+    total: int | None = None
+    limit: int = 20
+    offset: int = 0
 
 
 class AskRequest(BaseModel):
