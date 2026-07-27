@@ -2,6 +2,7 @@
 import { Icon } from 'astro-icon/components';
 import Base from '../layouts/Base.astro';
 import { fetchForYou } from '../lib/api';
+import { renderMathHTML } from '../lib/math';
 
 const items = await fetchForYou();
 ---
@@ -33,9 +34,7 @@ const items = await fetchForYou();
       <ul class="feed">
         {items.map((paper) => (
           <li class="row">
-            <a class="title" href={`/papers/${paper.id}`}>
-              {paper.title}
-            </a>
+            <a class="title" href={`/papers/${paper.id}`} set:html={renderMathHTML(paper.title)} />
             <p class="meta">
               {paper.authors
                 .slice(0, 3)
