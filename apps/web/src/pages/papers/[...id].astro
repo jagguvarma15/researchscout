@@ -4,6 +4,7 @@ import CiteActions from '../../components/CiteActions.svelte';
 import SaveButton from '../../components/SaveButton.svelte';
 import Base from '../../layouts/Base.astro';
 import { fetchPaper, fetchPapers, fetchSaved, formatDate, type PaperSummary } from '../../lib/api';
+import { renderMathHTML, stripMath } from '../../lib/math';
 
 // Rest param, not a plain [id]: canonical ids like doi:10.1145/nnn.mmm contain slashes.
 const id = Astro.params.id ?? '';
@@ -50,7 +51,7 @@ function bibtexFor(p: PaperSummary): string {
 const bibtex = paper === null ? '' : bibtexFor(paper);
 ---
 
-<Base title={paper?.title ?? 'Not found'}>
+<Base title={paper ? stripMath(paper.title) : 'Not found'}>
   {
     paper === null ? (
       <div class="card empty">
@@ -65,7 +66,7 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
     ) : (
       <article>
         <div class="head">
-          <h1>{paper.title}</h1>
+          <h1 set:html={renderMathHTML(paper.title)} />
           <SaveButton client:load paperId={paper.id} {saved} />
         </div>
         <p class="meta">
@@ -89,7 +90,7 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
             .join(', ')}
         </p>
         {paper.comment && <p class="comment">{paper.comment}</p>}
-        <p class="abstract">{paper.abstract}</p>
+        <p class="abstract" set:html={renderMathHTML(paper.abstract)} />
         <p class="links">
           {paper.url && (
             <a class="btn btn-ghost" href={paper.url} rel="noopener">
@@ -117,9 +118,11 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
             <ul>
               {related.map((hit) => (
                 <li>
-                  <a class="related-link" href={`/papers/${hit.id}`}>
-                    {hit.title}
-                  </a>
+                  <a
+                    class="related-link"
+                    href={`/papers/${hit.id}`}
+                    set:html={renderMathHTML(hit.title)}
+                  />
                   {hit.score !== null && (
                     <span class="badge badge-score">{hit.score.toFixed(3)}</span>
                   )}
