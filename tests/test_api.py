@@ -12,6 +12,7 @@ from researchscout.api.deps import get_embedder, get_llm, get_session
 from researchscout.api.main import create_app
 from researchscout.retrieve.search import ScoredPaper
 from researchscout.schema import Author, Paper
+from researchscout.store.facets import PaperFacets
 
 
 def _paper(pid: str = "arxiv:2401.00001", title: str = "T") -> Paper:
@@ -43,11 +44,13 @@ def test_healthz() -> None:
 
 def test_papers_lists_recent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(papers_router, "list_papers", lambda *a, **k: [_paper()])
+    monkeypatch.setattr(papers_router, "count_papers", lambda *a, **k: 1)
     response = _client().get("/v1/papers")
     assert response.status_code == 200
-    items = response.json()["items"]
-    assert [item["id"] for item in items] == ["arxiv:2401.00001"]
-    assert items[0]["score"] is None
+    body = response.json()
+    assert [item["id"] for item in body["items"]] == ["arxiv:2401.00001"]
+    assert body["items"][0]["score"] is None
+    assert body["total"] == 1
 
 
 def test_papers_query_ranks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -62,9 +65,72 @@ def test_papers_query_ranks(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(papers_router, "retrieve", fake_retrieve)
     response = _client().get("/v1/papers", params={"q": "state space models", "limit": 5})
     assert response.status_code == 200
-    assert response.json()["items"][0]["score"] == 0.9
+    body = response.json()
+    assert body["items"][0]["score"] == 0.9
+    assert body["total"] is None  # search has no unpaginated count
     assert seen["q"] == "state space models"
     assert seen["k"] == 5
+
+
+def test_papers_forwards_facets_and_sort(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_list(session: object, **kwargs: object) -> list:
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(papers_router, "list_papers", fake_list)
+    monkeypatch.setattr(papers_router, "count_papers", lambda *a, **k: 0)
+    response = _client().get(
+        "/v1/papers",
+        params=[
+            ("kind", "tech"),
+            ("group", "cs"),
+            ("group", "stat"),
+            ("category", "cs.LG"),
+            ("category", "math.CO"),
+            ("year", "2024"),
+            ("month", "1"),
+            ("author", "lovelace"),
+            ("venue", "neurips"),
+            ("min_citations", "5"),
+            ("sort", "citations"),
+        ],
+    )
+    assert response.status_code == 200
+    facets = seen["facets"]
+    assert isinstance(facets, PaperFacets)
+    assert facets.kind == "tech"
+    assert facets.groups == ["cs", "stat"]
+    assert facets.categories == ["cs.LG", "math.CO"]
+    assert (facets.year, facets.month) == (2024, 1)
+    assert facets.author == "lovelace"
+    assert facets.venue == "neurips"
+    assert facets.min_citations == 5
+    assert seen["sort"] == "citations"
+
+
+def test_papers_query_forwards_facets(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_retrieve(session: object, embedder: object, q: str, **kwargs: object) -> list:
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(papers_router, "retrieve", fake_retrieve)
+    response = _client().get("/v1/papers", params={"q": "ssm", "kind": "non_tech"})
+    assert response.status_code == 200
+    facets = seen["facets"]
+    assert isinstance(facets, PaperFacets)
+    assert facets.kind == "non_tech"
+
+
+def test_month_without_year_is_422() -> None:
+    assert _client().get("/v1/papers", params={"month": 3}).status_code == 422
+
+
+def test_days_with_year_is_422() -> None:
+    assert _client().get("/v1/papers", params={"days": 7, "year": 2024}).status_code == 422
 
 
 def test_paper_detail_404(monkeypatch: pytest.MonkeyPatch) -> None:
