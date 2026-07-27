@@ -2,6 +2,7 @@
 import { Icon } from 'astro-icon/components';
 import Base from '../../layouts/Base.astro';
 import { fetchDigest, formatDate, renderDigestBody } from '../../lib/api';
+import { renderMathHTML } from '../../lib/math';
 
 const slug = Astro.params.slug ?? '';
 const digest = await fetchDigest(slug);
@@ -39,7 +40,7 @@ if (digest === null) {
         <ol class="ranked">
           {digest.items.map((item) => (
             <li>
-              <a href={`/papers/${item.paper_id}`}>{item.title}</a>
+              <a href={`/papers/${item.paper_id}`} set:html={renderMathHTML(item.title)} />
               <span class="scores">
                 <span class="badge badge-score">score {item.score.toFixed(3)}</span>
                 {item.citations > 0 && <span class="badge">{item.citations} citations</span>}
