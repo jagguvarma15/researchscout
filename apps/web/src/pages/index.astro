@@ -3,6 +3,7 @@ import { Icon } from 'astro-icon/components';
 import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE, type PaperSummary } from '../lib/api';
+import { renderMathHTML } from '../lib/math';
 
 const params = Astro.url.searchParams;
 const q = params.get('q') ?? '';
@@ -163,9 +164,11 @@ function pageLink(target: number): string {
         <ul class="reading-items">
           {savedPapers.slice(0, 5).map((paper) => (
             <li>
-              <a class="reading-title" href={`/papers/${paper.id}`}>
-                {paper.title}
-              </a>
+              <a
+                class="reading-title"
+                href={`/papers/${paper.id}`}
+                set:html={renderMathHTML(paper.title)}
+              />
               <SaveButton client:visible paperId={paper.id} saved={true} />
             </li>
           ))}
@@ -203,9 +206,11 @@ function pageLink(target: number): string {
               return (
                 <li class="row">
                   <div class="row-head">
-                    <a class="title" href={`/papers/${paper.id}`}>
-                      {paper.title}
-                    </a>
+                    <a
+                      class="title"
+                      href={`/papers/${paper.id}`}
+                      set:html={renderMathHTML(paper.title)}
+                    />
                     <SaveButton client:visible paperId={paper.id} saved={savedIds.has(paper.id)} />
                   </div>
                   <p class="meta">
@@ -243,7 +248,7 @@ function pageLink(target: number): string {
                       </span>
                     )}
                   </p>
-                  <p class="abstract">{paper.abstract}</p>
+                  <p class="abstract" set:html={renderMathHTML(paper.abstract)} />
                 </li>
               );
             })}
