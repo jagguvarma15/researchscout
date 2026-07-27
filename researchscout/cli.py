@@ -38,8 +38,16 @@ def version() -> None:
 def ingest(
     since: Annotated[datetime, typer.Option(help="Ingest items submitted on/after this date.")],
     source: Annotated[str, typer.Option(help="Source name.")] = "arxiv",
-    category: Annotated[str | None, typer.Option(help="Category override, e.g. cs.LG.")] = None,
+    category: Annotated[
+        list[str] | None,
+        typer.Option(
+            help="Category filter; repeat for several, e.g. --category cs.LG --category math.CO."
+        ),
+    ] = None,
     max_items: Annotated[int | None, typer.Option("--max", help="Max items to ingest.")] = None,
+    resume: Annotated[
+        bool, typer.Option("--resume", help="Continue from the saved cursor for the same window.")
+    ] = False,
 ) -> None:
     """Fetch a source, normalize, dedup, and store (idempotent, replayable)."""
     import httpx
@@ -55,12 +63,12 @@ def ingest(
         typer.secho(str(exc), fg=typer.colors.RED)
         raise typer.Exit(code=1) from exc
 
-    if category is not None and isinstance(src, ArxivSource):
-        src.categories = [category]
+    if category and isinstance(src, ArxivSource):
+        src.categories = list(category)
 
     try:
         with session_scope() as session:
-            summary = run_ingest(session, src, since, max_items=max_items)
+            summary = run_ingest(session, src, since, max_items=max_items, resume=resume)
     except httpx.HTTPStatusError as exc:
         code = exc.response.status_code
         hint = " (rate limited — wait and retry)" if code == 429 else ""
