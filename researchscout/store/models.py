@@ -20,8 +20,12 @@ class PaperRow(Base):
     title: Mapped[str] = mapped_column(Text)
     abstract: Mapped[str] = mapped_column(Text)
     authors: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    # author_names is a generated column (migration 0009) left unmapped, like search_tsv.
     categories: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    primary_category: Mapped[str | None] = mapped_column(Text, nullable=True)
     venue: Mapped[str | None] = mapped_column(Text, nullable=True)
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    citation_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     source: Mapped[str] = mapped_column(String)
