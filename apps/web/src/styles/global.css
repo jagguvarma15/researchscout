@@ -289,6 +289,14 @@ svg[data-icon] {
   color: var(--muted);
 }
 
+/* Server-rendered KaTeX spans (renderMathHTML) appear inside scoped markup, so they are
+   themed globally: track the surrounding text size and inherit --ink in both themes. */
+
+.katex {
+  font-size: 1em;
+  color: inherit;
+}
+
 /* Digest reading typography: the body is server-rendered HTML (renderDigestBody),
    so it is styled here globally rather than from a scoped page block. */
 
