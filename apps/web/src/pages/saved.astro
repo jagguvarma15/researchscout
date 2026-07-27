@@ -3,6 +3,7 @@ import { Icon } from 'astro-icon/components';
 import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchSaved, formatDate, type PaperSummary } from '../lib/api';
+import { renderMathHTML } from '../lib/math';
 
 const items = await fetchSaved();
 
@@ -53,9 +54,11 @@ function formatDayHeading(iso: string): string {
             {group.papers.map((paper) => (
               <li class="row">
                 <div class="row-head">
-                  <a class="title" href={`/papers/${paper.id}`}>
-                    {paper.title}
-                  </a>
+                  <a
+                    class="title"
+                    href={`/papers/${paper.id}`}
+                    set:html={renderMathHTML(paper.title)}
+                  />
                   <SaveButton client:visible paperId={paper.id} saved={true} />
                 </div>
                 <p class="meta">
