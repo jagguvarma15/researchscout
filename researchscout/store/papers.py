@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import cast, select
+from sqlalchemy import cast, select, update
 from sqlalchemy.dialects.postgresql import ARRAY, TEXT, insert
 from sqlalchemy.orm import Session
 
@@ -13,14 +13,21 @@ from researchscout.store.models import ExternalIdRow, PaperRow
 
 
 def upsert_paper(session: Session, paper: Paper) -> str:
-    """Insert or update a paper by canonical id (never duplicates); returns the id."""
+    """Insert or update a paper by canonical id (never duplicates); returns the id.
+
+    ``citation_count`` is deliberately absent: it is materialized from signals via
+    :func:`set_citation_count`, and a content re-ingest must never reset it. Any future
+    enriched-after-ingest column needs the same exclusion.
+    """
     values = {
         "id": paper.id,
         "title": paper.title,
         "abstract": paper.abstract,
         "authors": [author.model_dump() for author in paper.authors],
         "categories": list(paper.categories),
+        "primary_category": paper.primary_category,
         "venue": paper.venue,
+        "comment": paper.comment,
         "published_at": paper.published_at,
         "updated_at": paper.updated_at,
         "source": paper.source,
@@ -36,6 +43,11 @@ def upsert_paper(session: Session, paper: Paper) -> str:
     session.execute(stmt)
     link_external_ids(session, paper.id, paper.external_ids)
     return paper.id
+
+
+def set_citation_count(session: Session, paper_id: str, count: int) -> None:
+    """Materialize the latest citation count onto the paper row (signals stay source of truth)."""
+    session.execute(update(PaperRow).where(PaperRow.id == paper_id).values(citation_count=count))
 
 
 def link_external_ids(session: Session, paper_id: str, external_ids: dict[str, str]) -> None:
@@ -93,11 +105,14 @@ def get_paper(session: Session, paper_id: str) -> Paper | None:
         abstract=row.abstract,
         authors=[Author(**author) for author in row.authors],
         categories=list(row.categories),
+        primary_category=row.primary_category,
         venue=row.venue,
+        comment=row.comment,
         published_at=row.published_at,
         updated_at=row.updated_at,
         source=row.source,
         url=row.url,
         pdf_url=row.pdf_url,
         full_text=row.full_text,
+        citation_count=row.citation_count,
     )
