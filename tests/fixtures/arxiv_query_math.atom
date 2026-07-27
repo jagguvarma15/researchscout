@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:arxiv="http://arxiv.org/schemas/atom">
+  <title type="html">ArXiv Query</title>
+  <id>http://arxiv.org/api/query</id>
+  <entry>
+    <id>http://arxiv.org/abs/2402.00001v1</id>
+    <updated>2024-02-02T09:00:00Z</updated>
+    <published>2024-02-02T09:00:00Z</published>
+    <title>X$^3$-Attention: Fast $O(n \log n)$ Kernels for $n \geq 10^6$</title>
+    <summary>  We study kernels with complexity $O(n \log n)$ and error
+   bounded by $\epsilon \geq 0$.
+
+  Our second contribution is a bound of the form $x_i^2 \leq
+    \sum_j w_j$ over all inputs.</summary>
+    <author>
+      <name>Emmy Noether</name>
+    </author>
+    <link href="http://arxiv.org/abs/2402.00001v1" rel="alternate" type="text/html"/>
+    <link title="pdf" href="http://arxiv.org/pdf/2402.00001v1" rel="related" type="application/pdf"/>
+    <arxiv:primary_category term="math.OC" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="math.OC" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+  </entry>
+</feed>
