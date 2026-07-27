@@ -8,6 +8,8 @@ pagination offset), and normalizes each entry into a canonical ``Paper``. ``fetc
 from __future__ import annotations
 
 import re
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -15,6 +17,7 @@ from urllib.parse import urlparse
 import feedparser
 import httpx
 
+from researchscout.config import get_settings
 from researchscout.schema import Author, Paper, canonical_id, normalize_arxiv_id
 from researchscout.sources.base import HealthStatus, RawItem, Source, register, source_config
 
@@ -32,10 +35,16 @@ class ArxivSource(Source):
     name = "arxiv"
     kind = "content"
 
-    def __init__(self, categories: list[str] | None = None, page_size: int = 100) -> None:
+    def __init__(
+        self,
+        categories: list[str] | None = None,
+        page_size: int = 100,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         cfg_categories = source_config(self.name).get("categories")
         self.categories: list[str] = categories or cfg_categories or list(_DEFAULT_CATEGORIES)
         self.page_size = page_size
+        self._sleep = sleep
 
     def _search_query(self, since: datetime) -> str:
         cats = " OR ".join(f"cat:{c}" for c in self.categories)
@@ -45,6 +54,11 @@ class ArxivSource(Source):
 
     def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
         start = int(cursor) if cursor else 0
+        if start > 0:
+            # arXiv asks for a pause between requests; the first page never waits.
+            delay = get_settings().arxiv_page_delay_sec
+            if delay > 0:
+                self._sleep(delay)
         params = {
             "search_query": self._search_query(since),
             "start": str(start),
