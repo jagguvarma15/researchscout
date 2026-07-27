@@ -21,8 +21,16 @@ if (paper !== null) {
 let related: PaperSummary[] = [];
 if (paper !== null) {
   const hits = await fetchPapers({ q: paper.title });
-  related = (hits ?? []).filter((hit) => hit.id !== paper.id).slice(0, 4);
+  related = (hits?.items ?? []).filter((hit) => hit.id !== paper.id).slice(0, 4);
 }
+
+const orderedCategories =
+  paper === null
+    ? []
+    : [
+        ...(paper.primary_category ? [paper.primary_category] : []),
+        ...paper.categories.filter((cat) => cat !== paper.primary_category),
+      ];
 
 // BibTeX is rendered server-side so the citation stays readable without JavaScript.
 function bibtexFor(p: PaperSummary): string {
@@ -63,10 +71,14 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
         <p class="meta">
           {formatDate(paper.published_at)}
           {paper.venue && ` · ${paper.venue}`}
+          {paper.citation_count > 0 &&
+            ` · ${paper.citation_count} citation${paper.citation_count === 1 ? '' : 's'}`}
           {' · '}
           <code>{paper.id}</code>
-          {paper.categories.map((cat) => (
-            <span class="badge">{cat}</span>
+          {orderedCategories.map((cat, index) => (
+            <span class={index === 0 && paper.primary_category ? 'badge badge-primary' : 'badge'}>
+              {cat}
+            </span>
           ))}
         </p>
         <p class="authors">
@@ -76,6 +88,7 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
             )
             .join(', ')}
         </p>
+        {paper.comment && <p class="comment">{paper.comment}</p>}
         <p class="abstract">{paper.abstract}</p>
         <p class="links">
           {paper.url && (
@@ -155,6 +168,17 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
   .meta .badge {
     margin-left: 0.5rem;
     vertical-align: 0.1em;
+  }
+  .badge-primary {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  .comment {
+    max-width: 70ch;
+    margin: 0.35rem 0 0;
+    color: var(--muted);
+    font-size: 0.85rem;
+    font-style: italic;
   }
   .authors {
     max-width: 70ch;
