@@ -6,6 +6,8 @@
 
   import { CornerDownLeft, FileText, Search } from 'lucide-svelte';
 
+  import { stripMath } from '../lib/math-text';
+
   interface PaperHit {
     id: string;
     title: string;
@@ -97,7 +99,11 @@
         if (!response.ok || seq !== requestSeq) return;
         const body = (await response.json()) as { items: PaperHit[] };
         if (seq === requestSeq) {
-          papers = body.items.map(({ id, title, score }) => ({ id, title, score }));
+          papers = body.items.map(({ id, title, score }) => ({
+            id,
+            title: stripMath(title),
+            score,
+          }));
           selected = 0;
         }
       } catch {
