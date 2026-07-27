@@ -22,7 +22,7 @@ from researchscout.store.papers import (
 )
 from researchscout.store.raw import append_raw
 from researchscout.store.signals import append_signal
-from researchscout.store.state import save_state
+from researchscout.store.state import get_state, save_state
 
 
 @dataclass
@@ -50,10 +50,20 @@ def run_ingest(
     since: datetime,
     *,
     max_items: int | None = None,
+    resume: bool = False,
 ) -> IngestSummary:
-    """Fetch a source page by page, normalize, dedup, and store; return a run summary."""
+    """Fetch a source page by page, normalize, dedup, and store; return a run summary.
+
+    With ``resume``, continue from the persisted cursor — but only when the saved window
+    matches ``since``: a cursor is an offset into one specific query, so a different window
+    starts fresh at the beginning.
+    """
     summary = IngestSummary(source=source.name)
     cursor: str | None = None
+    if resume:
+        saved_cursor, last_since = get_state(session, source.name)
+        if saved_cursor is not None and last_since == since:
+            cursor = saved_cursor
     while True:
         items, next_cursor = source.fetch(since, cursor)
         for raw in items:
