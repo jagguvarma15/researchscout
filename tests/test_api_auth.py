@@ -81,6 +81,7 @@ def test_papers_stay_public(monkeypatch: pytest.MonkeyPatch) -> None:
     import researchscout.api.routers.papers as papers_router
 
     monkeypatch.setattr(papers_router, "list_papers", lambda *a, **k: [])
+    monkeypatch.setattr(papers_router, "count_papers", lambda *a, **k: 0)
     assert _client(monkeypatch).get("/v1/papers").status_code == 200
 
 
