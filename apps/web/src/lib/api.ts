@@ -12,7 +12,10 @@ export interface PaperSummary {
   abstract: string;
   authors: Author[];
   categories: string[];
+  primary_category: string | null;
   venue: string | null;
+  comment: string | null;
+  citation_count: number;
   published_at: string;
   source: string;
   url: string | null;
@@ -23,27 +26,48 @@ export interface PaperSummary {
 export interface FeedParams {
   q?: string;
   days?: string;
-  category?: string;
+  year?: string;
+  month?: string;
+  category?: string[];
+  kind?: string;
+  group?: string[];
+  author?: string;
+  venue?: string;
+  minCitations?: string;
+  sort?: string;
   page?: number;
+}
+
+export interface PaperPage {
+  items: PaperSummary[];
+  total: number | null;
 }
 
 export const PAGE_SIZE = 20;
 
 const API_URL = process.env.API_URL ?? 'http://localhost:8000';
 
-export async function fetchPapers(params: FeedParams): Promise<PaperSummary[] | null> {
+export async function fetchPapers(params: FeedParams): Promise<PaperPage | null> {
   const search = new URLSearchParams({ limit: String(PAGE_SIZE) });
   if (params.q) search.set('q', params.q);
   if (params.days) search.set('days', params.days);
-  if (params.category) search.set('category', params.category);
+  if (params.year) search.set('year', params.year);
+  if (params.month) search.set('month', params.month);
+  if (params.kind) search.set('kind', params.kind);
+  if (params.author) search.set('author', params.author);
+  if (params.venue) search.set('venue', params.venue);
+  if (params.minCitations) search.set('min_citations', params.minCitations);
+  if (params.sort && params.sort !== 'newest') search.set('sort', params.sort);
+  for (const value of params.category ?? []) search.append('category', value);
+  for (const value of params.group ?? []) search.append('group', value);
   if (!params.q && params.page && params.page > 1) {
     search.set('offset', String((params.page - 1) * PAGE_SIZE));
   }
   try {
     const response = await fetch(`${API_URL}/v1/papers?${search}`);
     if (!response.ok) return null;
-    const body = (await response.json()) as { items: PaperSummary[] };
-    return body.items;
+    const body = (await response.json()) as { items: PaperSummary[]; total: number | null };
+    return { items: body.items, total: body.total };
   } catch {
     return null;
   }
