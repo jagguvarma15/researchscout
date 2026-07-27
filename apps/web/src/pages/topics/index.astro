@@ -2,6 +2,7 @@
 import { Icon } from 'astro-icon/components';
 import Base from '../../layouts/Base.astro';
 import { fetchTopics } from '../../lib/api';
+import { renderMathHTML } from '../../lib/math';
 
 const topics = await fetchTopics();
 ---
@@ -48,7 +49,7 @@ const topics = await fetchTopics();
             <ul class="papers">
               {topic.papers.map((paper) => (
                 <li>
-                  <a href={`/papers/${paper.paper_id}`}>{paper.title}</a>
+                  <a href={`/papers/${paper.paper_id}`} set:html={renderMathHTML(paper.title)} />
                 </li>
               ))}
             </ul>
