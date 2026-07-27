@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import cast, select, update
-from sqlalchemy.dialects.postgresql import ARRAY, TEXT, insert
+from sqlalchemy import Select, func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from researchscout.config import get_settings
 from researchscout.schema import Author, Paper
-from researchscout.store.models import ExternalIdRow, PaperRow
+from researchscout.store.facets import PaperFacets, SortKey, facets_where
+from researchscout.store.models import ExternalIdRow, PaperRow, SignalRow
 
 
 def upsert_paper(session: Session, paper: Paper) -> str:
@@ -70,24 +73,55 @@ def find_by_external_id(session: Session, scheme: str, value: str) -> str | None
     ).scalar_one_or_none()
 
 
+def _apply_sort(stmt: Select[tuple[PaperRow]], sort: SortKey) -> Select[tuple[PaperRow]]:
+    if sort == "citations":
+        return stmt.order_by(PaperRow.citation_count.desc(), PaperRow.published_at.desc())
+    if sort == "activity":
+        window_start = datetime.now(UTC) - timedelta(days=get_settings().freshness_days)
+        activity = (
+            select(SignalRow.paper_id, func.count().label("n"))
+            .where(SignalRow.observed_at >= window_start)
+            .group_by(SignalRow.paper_id)
+            .subquery()
+        )
+        return stmt.outerjoin(activity, activity.c.paper_id == PaperRow.id).order_by(
+            func.coalesce(activity.c.n, 0).desc(), PaperRow.published_at.desc()
+        )
+    return stmt.order_by(PaperRow.published_at.desc(), PaperRow.id)
+
+
 def list_papers(
     session: Session,
     *,
+    facets: PaperFacets | None = None,
+    sort: SortKey = "newest",
     days: int | None = None,
     categories: list[str] | None = None,
     limit: int = 20,
     offset: int = 0,
 ) -> list[Paper]:
-    """List papers newest-first, optionally windowed by days and filtered by category."""
-    stmt = select(PaperRow.id).order_by(PaperRow.published_at.desc())
-    if days is not None:
-        window_start = datetime.now(UTC) - timedelta(days=days)
-        stmt = stmt.where(PaperRow.published_at >= window_start)
-    if categories:
-        stmt = stmt.where(PaperRow.categories.op("?|")(cast(categories, ARRAY(TEXT))))
-    ids = session.execute(stmt.limit(limit).offset(offset)).scalars().all()
-    papers = (get_paper(session, paper_id) for paper_id in ids)
-    return [paper for paper in papers if paper is not None]
+    """List papers ordered by ``sort`` and filtered by ``facets``.
+
+    The legacy ``days``/``categories`` kwargs fold into a facets object when none is given, so
+    existing callers keep their meaning.
+    """
+    if facets is None:
+        facets = PaperFacets(days=days, categories=categories)
+    stmt = select(PaperRow)
+    where = facets_where(facets)
+    if where is not None:
+        stmt = stmt.where(where)
+    rows = session.execute(_apply_sort(stmt, sort).limit(limit).offset(offset)).scalars().all()
+    return _rows_to_papers(session, rows)
+
+
+def count_papers(session: Session, facets: PaperFacets) -> int:
+    """How many papers match the facets (no pagination)."""
+    stmt = select(func.count()).select_from(PaperRow)
+    where = facets_where(facets)
+    if where is not None:
+        stmt = stmt.where(where)
+    return session.execute(stmt).scalar_one()
 
 
 def get_paper(session: Session, paper_id: str) -> Paper | None:
@@ -98,9 +132,28 @@ def get_paper(session: Session, paper_id: str) -> Paper | None:
     pairs = session.execute(
         select(ExternalIdRow.scheme, ExternalIdRow.value).where(ExternalIdRow.paper_id == paper_id)
     ).all()
+    return _row_to_paper(row, {scheme: value for scheme, value in pairs})
+
+
+def _rows_to_papers(session: Session, rows: Sequence[PaperRow]) -> list[Paper]:
+    """Convert rows in order, loading all external ids in one query (no per-row round trips)."""
+    ids = [row.id for row in rows]
+    external: dict[str, dict[str, str]] = {}
+    if ids:
+        pairs = session.execute(
+            select(ExternalIdRow.paper_id, ExternalIdRow.scheme, ExternalIdRow.value).where(
+                ExternalIdRow.paper_id.in_(ids)
+            )
+        ).all()
+        for paper_id, scheme, value in pairs:
+            external.setdefault(paper_id, {})[scheme] = value
+    return [_row_to_paper(row, external.get(row.id, {})) for row in rows]
+
+
+def _row_to_paper(row: PaperRow, external_ids: dict[str, str]) -> Paper:
     return Paper(
         id=row.id,
-        external_ids={scheme: value for scheme, value in pairs},
+        external_ids=external_ids,
         title=row.title,
         abstract=row.abstract,
         authors=[Author(**author) for author in row.authors],
