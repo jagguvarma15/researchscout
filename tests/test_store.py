@@ -10,6 +10,7 @@ from researchscout.store.papers import (
     find_by_external_id,
     get_paper,
     link_external_ids,
+    set_citation_count,
     upsert_paper,
 )
 from researchscout.store.raw import append_raw
@@ -59,6 +60,38 @@ def test_external_ids_collapse_to_one_paper(session: Session) -> None:
 
 def test_find_by_external_id_missing_returns_none(session: Session) -> None:
     assert find_by_external_id(session, "arxiv", "9999.99999") is None
+
+
+def test_facet_fields_round_trip(session: Session) -> None:
+    paper = _paper()
+    paper = paper.model_copy(
+        update={
+            "primary_category": "cs.LG",
+            "comment": "9 pages, accepted at NeurIPS 2025",
+            "venue": "NeurIPS 2025",
+        }
+    )
+    upsert_paper(session, paper)
+    session.flush()
+
+    got = get_paper(session, "arxiv:2401.00001")
+    assert got is not None
+    assert got.primary_category == "cs.LG"
+    assert got.comment == "9 pages, accepted at NeurIPS 2025"
+    assert got.venue == "NeurIPS 2025"
+    assert got.citation_count == 0
+
+
+def test_citation_count_survives_reupsert(session: Session) -> None:
+    upsert_paper(session, _paper(title="First"))
+    set_citation_count(session, "arxiv:2401.00001", 5)
+    upsert_paper(session, _paper(title="Second"))  # content re-ingest
+    session.flush()
+
+    got = get_paper(session, "arxiv:2401.00001")
+    assert got is not None
+    assert got.title == "Second"
+    assert got.citation_count == 5  # materialized state untouched by the conflict update
 
 
 def test_raw_append_returns_id(session: Session) -> None:
