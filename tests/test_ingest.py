@@ -108,6 +108,30 @@ def test_max_items_caps_ingestion(session: Session) -> None:
     assert _count(session) == 3
 
 
+def test_resume_continues_from_cursor(session: Session) -> None:
+    papers = [_paper(f"2401.{i:05d}") for i in range(1, 6)]
+    run_ingest(session, FakeSource(papers, page_size=2), SINCE, max_items=2)
+    cursor, _ = get_state(session, "fake")
+    assert cursor is not None  # interrupted mid-pagination
+
+    summary = run_ingest(session, FakeSource(papers, page_size=2), SINCE, resume=True)
+    assert summary.new_papers == 3  # the remainder, no duplicates
+    assert _count(session) == 5
+    cursor, _ = get_state(session, "fake")
+    assert cursor is None  # paginated to exhaustion
+
+
+def test_resume_ignores_stale_window(session: Session) -> None:
+    papers = [_paper(f"2401.{i:05d}") for i in range(1, 4)]
+    run_ingest(session, FakeSource(papers, page_size=2), SINCE, max_items=2)
+
+    other_since = datetime(2024, 2, 1, tzinfo=UTC)
+    summary = run_ingest(session, FakeSource(papers, page_size=2), other_since, resume=True)
+    assert summary.collapsed == 2  # started from offset 0, re-saw the first page
+    assert summary.new_papers == 1
+    assert _count(session) == 3
+
+
 def test_reingest_refreshes_same_paper(session: Session) -> None:
     run_ingest(session, FakeSource([_paper("2401.00001")]), SINCE)
     refreshed = _paper("2401.00001").model_copy(update={"venue": "NeurIPS 2024"})
