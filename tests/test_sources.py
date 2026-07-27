@@ -11,10 +11,13 @@ from researchscout.sources.arxiv import ArxivSource, _entry_payload, _normalize_
 FIXTURE = Path(__file__).parent / "fixtures" / "arxiv_query.atom"
 
 
-def _first_payload() -> dict[str, object]:
+MATH_FIXTURE = Path(__file__).parent / "fixtures" / "arxiv_query_math.atom"
+
+
+def _first_payload(fixture: Path = FIXTURE) -> dict[str, object]:
     import feedparser
 
-    feed = feedparser.parse(FIXTURE.read_text())
+    feed = feedparser.parse(fixture.read_text())
     return _entry_payload(feed.entries[0])
 
 
@@ -22,7 +25,7 @@ def test_normalize_maps_canonical_fields() -> None:
     paper = _normalize_payload(_first_payload())
     assert isinstance(paper, Paper)
     assert paper.id == "arxiv:2401.12345"
-    assert paper.external_ids == {"arxiv": "2401.12345"}
+    assert paper.external_ids == {"arxiv": "2401.12345", "doi": "10.1000/example.2024"}
     assert paper.title == "A Great Paper on Transformers"
     assert paper.abstract.startswith("We present a great method.")
     assert [a.name for a in paper.authors] == ["Ada Lovelace", "Alan Turing"]
@@ -31,6 +34,27 @@ def test_normalize_maps_canonical_fields() -> None:
     assert paper.published_at == datetime(2024, 1, 23, 18, 30, tzinfo=UTC)
     assert paper.source == "arxiv"
     assert paper.pdf_url == "http://arxiv.org/pdf/2401.12345v2"
+
+
+def test_normalize_maps_enriched_fields() -> None:
+    paper = _normalize_payload(_first_payload())
+    assert paper.primary_category == "cs.LG"
+    assert paper.comment == "14 pages, 3 figures, accepted at NeurIPS 2024"
+    assert paper.venue == "Advances in Neural Information Processing Systems 37 (2024)"
+
+
+def test_normalize_keeps_latex_and_paragraphs() -> None:
+    paper = _normalize_payload(_first_payload(MATH_FIXTURE))
+    assert paper.title == "X$^3$-Attention: Fast $O(n \\log n)$ Kernels for $n \\geq 10^6$"
+    assert "\n\n" in paper.abstract
+    first, second = paper.abstract.split("\n\n")
+    assert first == (
+        "We study kernels with complexity $O(n \\log n)$ and error bounded by $\\epsilon \\geq 0$."
+    )
+    assert second == (
+        "Our second contribution is a bound of the form $x_i^2 \\leq \\sum_j w_j$ over all inputs."
+    )
+    assert paper.primary_category == "math.OC"
 
 
 def test_normalize_strips_version() -> None:
