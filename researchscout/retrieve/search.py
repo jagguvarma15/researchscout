@@ -27,11 +27,9 @@ degrades gracefully to vector-only.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 
-from sqlalchemy import ColumnElement, cast
-from sqlalchemy.dialects.postgresql import ARRAY, TEXT
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -40,8 +38,8 @@ from researchscout.embed.base import Embedder
 from researchscout.rerank import Candidate, get_reranker, rerank
 from researchscout.schema import Paper
 from researchscout.score import breakthrough
+from researchscout.store.facets import PaperFacets, facets_where
 from researchscout.store.lexical import lexical_search
-from researchscout.store.models import PaperRow
 from researchscout.store.papers import get_paper
 from researchscout.store.vectors import search as vector_search
 
@@ -62,14 +60,6 @@ def _recency_weight(published_at: datetime, half_life_days: float) -> float:
     return math.exp(-age_days / half_life_days)
 
 
-def _filters(days: int, categories: list[str] | None) -> ColumnElement[bool]:
-    window_start = datetime.now(UTC) - timedelta(days=days)
-    clause: ColumnElement[bool] = PaperRow.published_at >= window_start
-    if categories:
-        clause = clause & PaperRow.categories.op("?|")(cast(categories, ARRAY(TEXT)))
-    return clause
-
-
 def retrieve(
     session: Session,
     embedder: Embedder,
@@ -78,12 +68,21 @@ def retrieve(
     k: int = 10,
     days: int | None = None,
     categories: list[str] | None = None,
+    facets: PaperFacets | None = None,
     half_life_days: float = _DEFAULT_HALF_LIFE_DAYS,
 ) -> list[ScoredPaper]:
-    """Up to ``k`` in-window papers, ranked by RRF x recency x breakthrough, optionally reranked."""
+    """Up to ``k`` in-window papers, ranked by RRF x recency x breakthrough, optionally reranked.
+
+    ``facets`` filters both retrieval legs; the legacy ``days``/``categories`` kwargs fold into
+    it. The hard freshness window applies unless the facets already bound time (a year/month
+    window replaces it).
+    """
     settings = get_settings()
-    window_days = days if days is not None else settings.freshness_days
-    where = _filters(window_days, categories)
+    if facets is None:
+        facets = PaperFacets(days=days, categories=categories)
+    if facets.days is None and facets.year is None:
+        facets = replace(facets, days=settings.freshness_days)
+    where = facets_where(facets)
 
     query_vector = embedder.embed_query(query)
     vector_hits = vector_search(session, query_vector, k=_LEG_K, where=where)
