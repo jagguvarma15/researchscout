@@ -1,6 +1,7 @@
 ---
 import { Icon } from 'astro-icon/components';
 import CiteActions from '../../components/CiteActions.svelte';
+import PdfReader from '../../components/PdfReader.svelte';
 import SaveButton from '../../components/SaveButton.svelte';
 import Base from '../../layouts/Base.astro';
 import { fetchPaper, fetchPapers, fetchSaved, formatDate, type PaperSummary } from '../../lib/api';
@@ -92,6 +93,12 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
         {paper.comment && <p class="comment">{paper.comment}</p>}
         <p class="abstract" set:html={renderMathHTML(paper.abstract)} />
         <p class="links">
+          {paper.pdf_url && (
+            <button class="btn btn-primary" type="button" data-open-reader>
+              <Icon name="lucide:book-open" aria-hidden="true" />
+              Read
+            </button>
+          )}
           {paper.url && (
             <a class="btn btn-ghost" href={paper.url} rel="noopener">
               <Icon name="lucide:external-link" aria-hidden="true" />
@@ -112,6 +119,14 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
         <div class="cite-row">
           <CiteActions client:load bibtex={bibtex} url={Astro.url.href} />
         </div>
+        {paper.pdf_url && (
+          <PdfReader
+            client:load
+            pdfUrl={paper.pdf_url}
+            title={stripMath(paper.title)}
+            initialOpen={Astro.url.searchParams.get('read') === '1'}
+          />
+        )}
         {related.length > 0 && (
           <section class="related">
             <h2 class="related-title">Related papers</h2>
