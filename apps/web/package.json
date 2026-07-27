@@ -19,6 +19,7 @@
     "astro": "^7.0.6",
     "katex": "^0.18.1",
     "lucide-svelte": "^1.0.1",
+    "pdfjs-dist": "5.4.149",
     "svelte": "^5.56.4"
   },
   "devDependencies": {
