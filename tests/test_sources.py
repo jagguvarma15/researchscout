@@ -92,17 +92,19 @@ def test_enabled_sources_respects_config(tmp_path: Path, monkeypatch: pytest.Mon
     assert "arxiv" in [s.name for s in enabled_sources("content")]
 
 
+class _Resp:
+    def __init__(self) -> None:
+        self.text = FIXTURE.read_text()
+        self.status_code = 200
+        self.is_success = True
+
+    def raise_for_status(self) -> None:
+        return None
+
+
 def test_fetch_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
-    class _Resp:
-        def __init__(self) -> None:
-            self.text = FIXTURE.read_text()
-            self.status_code = 200
-            self.is_success = True
-
-        def raise_for_status(self) -> None:
-            return None
-
     monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
 
     items, cursor = ArxivSource(page_size=1).fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
     assert len(items) == 1
@@ -110,3 +112,20 @@ def test_fetch_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
 
     _, exhausted = ArxivSource(page_size=10).fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
     assert exhausted is None  # partial page → done
+
+
+def test_fetch_sleeps_before_later_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "2.5")
+    sleeps: list[float] = []
+    src = ArxivSource(page_size=1, sleep=sleeps.append)
+
+    src.fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
+    assert sleeps == []  # the first page never waits
+
+    src.fetch(datetime(2024, 1, 1, tzinfo=UTC), "1")
+    assert sleeps == [2.5]
+
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+    src.fetch(datetime(2024, 1, 1, tzinfo=UTC), "2")
+    assert sleeps == [2.5]  # zero disables the pause
