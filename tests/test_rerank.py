@@ -1,3 +1,5 @@
+import pytest
+
 from researchscout.rerank import Candidate, CrossEncoderReranker, Reranker, get_reranker, rerank
 
 
@@ -52,5 +54,7 @@ def test_cross_encoder_empty_documents_needs_no_model() -> None:
     assert CrossEncoderReranker("any-model").scores("q", []) == []
 
 
-def test_get_reranker_disabled_by_default() -> None:
+def test_get_reranker_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Hermetic against a local .env that enables reranking (env beats .env in pydantic).
+    monkeypatch.setenv("RS_RERANK_ENABLED", "false")
     assert get_reranker() is None
