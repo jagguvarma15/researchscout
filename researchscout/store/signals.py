@@ -61,33 +61,46 @@ def series(
 
 def all_series(
     session: Session, paper_id: str, since: datetime
-) -> dict[str, list[tuple[datetime, float]]]:
-    """A paper's signal series since a time, grouped by type, oldest-first (one query)."""
+) -> dict[tuple[str, str], list[tuple[datetime, float]]]:
+    """A paper's series since a time, grouped by (type, source), oldest-first (one query).
+
+    Source is part of the key: two sources can observe the same signal type (HN points and
+    Bluesky engagement are both ``social_mention``) on different scales, and interleaving them
+    in one series would corrupt its level and derivatives.
+    """
     rows = session.execute(
-        select(SignalRow.type, SignalRow.observed_at, SignalRow.value)
+        select(SignalRow.type, SignalRow.source, SignalRow.observed_at, SignalRow.value)
         .where(SignalRow.paper_id == paper_id, SignalRow.observed_at >= since)
-        .order_by(SignalRow.type, SignalRow.observed_at)
+        .order_by(SignalRow.type, SignalRow.source, SignalRow.observed_at)
     ).all()
-    grouped: dict[str, list[tuple[datetime, float]]] = {}
-    for type_name, observed_at, value in rows:
-        grouped.setdefault(type_name, []).append((observed_at, value))
+    grouped: dict[tuple[str, str], list[tuple[datetime, float]]] = {}
+    for type_name, source, observed_at, value in rows:
+        grouped.setdefault((type_name, source), []).append((observed_at, value))
     return grouped
 
 
 def all_series_many(
     session: Session, paper_ids: Sequence[str], since: datetime
-) -> dict[str, dict[str, list[tuple[datetime, float]]]]:
-    """Signal series for many papers since a time, grouped by paper then type (one query)."""
+) -> dict[str, dict[tuple[str, str], list[tuple[datetime, float]]]]:
+    """Series for many papers since a time, grouped by paper then (type, source) (one query)."""
     if not paper_ids:
         return {}
     rows = session.execute(
-        select(SignalRow.paper_id, SignalRow.type, SignalRow.observed_at, SignalRow.value)
+        select(
+            SignalRow.paper_id,
+            SignalRow.type,
+            SignalRow.source,
+            SignalRow.observed_at,
+            SignalRow.value,
+        )
         .where(SignalRow.paper_id.in_(list(paper_ids)), SignalRow.observed_at >= since)
-        .order_by(SignalRow.paper_id, SignalRow.type, SignalRow.observed_at)
+        .order_by(SignalRow.paper_id, SignalRow.type, SignalRow.source, SignalRow.observed_at)
     ).all()
-    grouped: dict[str, dict[str, list[tuple[datetime, float]]]] = {}
-    for paper_id, type_name, observed_at, value in rows:
-        grouped.setdefault(paper_id, {}).setdefault(type_name, []).append((observed_at, value))
+    grouped: dict[str, dict[tuple[str, str], list[tuple[datetime, float]]]] = {}
+    for paper_id, type_name, source, observed_at, value in rows:
+        grouped.setdefault(paper_id, {}).setdefault((type_name, source), []).append(
+            (observed_at, value)
+        )
     return grouped
 
 
