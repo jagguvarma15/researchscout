@@ -3,10 +3,12 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from researchscout.agentic import _merge, _reference_arxiv_ids, decompose
+import researchscout.agentic as agentic_mod
+from researchscout.agentic import _fuse, _merge, _reference_arxiv_ids, agentic_retrieve, decompose
 from researchscout.llm.base import LLM
 from researchscout.retrieve.search import ScoredPaper
 from researchscout.schema import Author, Paper
+from researchscout.store.facets import PaperFacets
 
 NOW = datetime(2024, 6, 1, tzinfo=UTC)
 
@@ -75,6 +77,42 @@ def test_decompose_falls_back_to_question() -> None:
 def test_merge_dedups_keeping_highest_score() -> None:
     merged = _merge([[_scored("arxiv:1", 0.5), _scored("arxiv:2", 0.7)], [_scored("arxiv:1", 0.9)]])
     assert [(item.paper.id, item.score) for item in merged] == [("arxiv:1", 0.9), ("arxiv:2", 0.7)]
+
+
+def test_fuse_prefers_papers_found_by_multiple_subquestions() -> None:
+    # arxiv:2 is rank 2 then rank 1 (1/62 + 1/61); arxiv:1 is a single rank 1 (1/61).
+    fused = _fuse([[_scored("arxiv:1", 0.9), _scored("arxiv:2", 0.8)], [_scored("arxiv:2", 0.7)]])
+    assert [item.paper.id for item in fused] == ["arxiv:2", "arxiv:1"]
+    assert fused[0].score == pytest.approx(1 / 62 + 1 / 61)
+
+
+def test_fuse_keeps_the_best_measured_distance() -> None:
+    near = _scored("arxiv:1", 0.5)
+    far = ScoredPaper(paper=near.paper, score=0.4, distance=1.0)
+    fused = _fuse([[far], [near]])
+    assert fused[0].distance == 0.0
+
+
+def test_agentic_retrieve_fuses_and_threads_facets(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+    hits = {
+        "a": [_scored("arxiv:1", 0.9), _scored("arxiv:2", 0.8)],
+        "b": [_scored("arxiv:2", 0.7)],
+    }
+
+    def fake_retrieve(session: object, embedder: object, part: str, **kwargs: object) -> list:
+        calls.append({"part": part, **kwargs})
+        return hits[part]
+
+    monkeypatch.setattr(agentic_mod, "retrieve", fake_retrieve)
+    facets = PaperFacets(categories=["cs.LG"])
+    results = agentic_retrieve(
+        None, None, _FakeLLM("a\nb"), "q", k=5, days=30, facets=facets, follow_citations=False
+    )
+    # The old max-score merge would put arxiv:1 (0.9) first; RRF prefers the double hit.
+    assert [item.paper.id for item in results] == ["arxiv:2", "arxiv:1"]
+    assert [call["part"] for call in calls] == ["a", "b"]
+    assert all(call["facets"] is facets for call in calls)
 
 
 def test_reference_arxiv_ids_parses(monkeypatch: pytest.MonkeyPatch) -> None:
