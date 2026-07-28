@@ -65,10 +65,13 @@ def test_index_is_idempotent_and_search_ranks_by_distance(session: Session) -> N
     assert index_papers(session, embedder) == 0  # idempotent
     assert papers_missing_embedding(session, embedder.model_id) == []
 
-    results = search(session, _onehot(0), k=3)
+    results = search(session, _onehot(0), model_id=embedder.model_id, k=3)
     assert results[0][0] == "arxiv:2401.00001"
     assert results[0][1] == pytest.approx(0.0, abs=1e-6)
     assert len(results) == 3
+
+    # Vectors from another embedding space are never searched.
+    assert search(session, _onehot(0), model_id="other-model", k=3) == []
 
 
 def test_local_embedder_contract() -> None:
