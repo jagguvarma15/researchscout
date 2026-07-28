@@ -70,6 +70,7 @@ def test_papers_query_ranks(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["total"] is None  # search has no unpaginated count
     assert seen["q"] == "state space models"
     assert seen["k"] == 5
+    assert seen["use_rerank"] is False  # the feed stays on the fast first-stage path
 
 
 def test_papers_forwards_facets_and_sort(monkeypatch: pytest.MonkeyPatch) -> None:
