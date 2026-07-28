@@ -12,7 +12,7 @@ const q = params.get('q') ?? '';
 const days = params.get('days') ?? '';
 const year = params.get('year') ?? '';
 const month = params.get('month') ?? '';
-const kind = params.get('kind') ?? '';
+const kindParam = params.get('kind') ?? '';
 const author = params.get('author') ?? '';
 const venue = params.get('venue') ?? '';
 const minCitations = params.get('min_citations') ?? '';
@@ -20,6 +20,19 @@ const sort = params.get('sort') ?? '';
 const category = params.getAll('category');
 const group = params.getAll('group');
 const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
+
+// Web-level AI default: a bare feed reads as kind=ai, explicit off is ?kind=all (treated as
+// unfiltered and never forwarded), and searches stay unfiltered. The API keeps no default.
+const kind = kindParam || (q ? 'all' : 'ai');
+
+// Toggle/chip links: the same URL with kind replaced (page reset). Setting kind=all rather
+// than deleting the param is what keeps the ai default from resurrecting.
+function withKind(value: string): string {
+  const next = new URLSearchParams(Astro.url.searchParams);
+  next.set('kind', value);
+  next.delete('page');
+  return `/?${next}`;
+}
 
 // Per-chip removal links: the same URL minus one param (or one value of a repeated param).
 function withoutParams(names: [string, string?][]): string {
@@ -44,8 +57,11 @@ interface Chip {
 }
 const chips: Chip[] = [];
 if (q) chips.push({ label: `“${q}”`, href: withoutParams([['q']]) });
-if (kind) {
-  chips.push({ label: kind === 'tech' ? 'Tech' : 'Non-tech', href: withoutParams([['kind']]) });
+const kindLabels: Record<string, string> = { ai: 'AI', tech: 'Tech', non_tech: 'Non-tech' };
+// Only an explicit kind gets a removable chip; the implicit ai default shows through the
+// active toolbar toggle alone. kind=all never gets a chip.
+if (kindParam && kindParam in kindLabels) {
+  chips.push({ label: kindLabels[kindParam], href: withKind('all') });
 }
 for (const g of group) chips.push({ label: groupLabel(g), href: withoutParams([['group', g]]) });
 for (const c of category) chips.push({ label: c, href: withoutParams([['category', c]]) });
@@ -77,7 +93,7 @@ const result = await fetchPapers({
   days,
   year,
   month,
-  kind,
+  kind: kind === 'all' ? '' : kind,
   author,
   venue,
   minCitations,
@@ -160,6 +176,22 @@ function pageLink(target: number): string {
       Filters
       {activeCount > 0 && <span class="filter-count">{activeCount}</span>}
     </button>
+    <div class="kind-quick" role="group" aria-label="Quick kind filter">
+      <a
+        class:list={['kt', { on: kind === 'ai' }]}
+        href={withKind(kind === 'ai' ? 'all' : 'ai')}
+        aria-current={kind === 'ai' ? 'true' : undefined}
+      >
+        AI
+      </a>
+      <a
+        class:list={['kt', { on: kind === 'tech' }]}
+        href={withKind(kind === 'tech' ? 'all' : 'tech')}
+        aria-current={kind === 'tech' ? 'true' : undefined}
+      >
+        Tech
+      </a>
+    </div>
     {
       q && (
         <p class="toolbar-summary">
@@ -366,6 +398,27 @@ function pageLink(target: number): string {
   }
   .toolbar .btn {
     padding: 0.4rem 0.9rem;
+  }
+  .kind-quick {
+    display: inline-flex;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+  }
+  .kind-quick .kt {
+    padding: 0.35rem 0.8rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-decoration: none;
+  }
+  .kind-quick .kt:hover {
+    background: var(--surface-2);
+    color: var(--ink);
+  }
+  .kind-quick .kt.on {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-weight: 600;
   }
   .filter-count {
     display: inline-flex;
