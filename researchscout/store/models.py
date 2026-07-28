@@ -131,3 +131,27 @@ class SignalRow(Base):
     value: Mapped[float] = mapped_column(Float)
     signal_metadata: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB, default=dict)
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class CitationEdgeRow(Base):
+    __tablename__ = "citation_edges"
+    __table_args__ = (Index("ix_citation_edges_cited", "cited_arxiv"),)
+
+    citing_id: Mapped[str] = mapped_column(
+        ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    # The referenced work's normalized arXiv id: most references are not in the store yet, so
+    # edges point at the external id and resolve through paper_external_ids at query time.
+    cited_arxiv: Mapped[str] = mapped_column(String, primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CitationFetchRow(Base):
+    __tablename__ = "citation_fetches"
+
+    # Distinguishes "fetched, zero references" from "never fetched" — an empty edge set alone
+    # cannot, and a transient fetch failure must not be cached as an empty result.
+    citing_id: Mapped[str] = mapped_column(
+        ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
