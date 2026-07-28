@@ -122,17 +122,23 @@ def score_signal(
     )
 
 
-def _from_grouped(grouped: dict[str, _Series], cfg: ScoreConfig) -> Breakthrough:
+def _from_grouped(grouped: dict[tuple[str, str], _Series], cfg: ScoreConfig) -> Breakthrough:
+    """Score each (type, source) series independently, then sum per type.
+
+    Sources observing the same type (HN points and Bluesky engagement are both
+    ``social_mention``) run on different scales, so each series keeps its own level and
+    derivatives; the reported contribution stays keyed by type, summed across sources.
+    """
     contributions: dict[str, float] = {}
-    for type_name, spec in _SPECS.items():
-        points = grouped.get(type_name)
-        if not points:
+    for (type_name, _source), points in grouped.items():
+        spec = _SPECS.get(type_name)
+        if spec is None or not points:
             continue
         contribution = score_signal(
             _level(points), _slope(points), _acceleration(points), spec=spec, config=cfg
         )
         if contribution != 0.0:
-            contributions[type_name] = contribution
+            contributions[type_name] = contributions.get(type_name, 0.0) + contribution
     return Breakthrough(total=max(0.0, sum(contributions.values())), contributions=contributions)
 
 
