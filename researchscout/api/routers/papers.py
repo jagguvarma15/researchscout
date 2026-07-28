@@ -26,7 +26,7 @@ def papers_index(
     year: Annotated[int | None, Query(ge=2007, le=2100)] = None,
     month: Annotated[int | None, Query(ge=1, le=12)] = None,
     category: Annotated[list[str] | None, Query()] = None,
-    kind: Annotated[Literal["tech", "non_tech"] | None, Query()] = None,
+    kind: Annotated[Literal["tech", "non_tech", "ai"] | None, Query()] = None,
     group: Annotated[list[str] | None, Query()] = None,
     author: Annotated[str | None, Query(max_length=100)] = None,
     venue: Annotated[str | None, Query(max_length=100)] = None,
