@@ -146,6 +146,25 @@ class CitationEdgeRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class EventRow(Base):
+    __tablename__ = "events"
+    __table_args__ = (Index("ix_events_paper_event", "paper_id", "event"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_sub: Mapped[str] = mapped_column(String)
+    event: Mapped[str] = mapped_column(String)
+    paper_id: Mapped[str] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"))
+    # Impression position in the surfaced list; position-bias correction needs it later.
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Event-specific magnitude (dwell milliseconds).
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # Where it happened: feed, search, for-you, detail.
+    surface: Mapped[str | None] = mapped_column(String, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class CitationFetchRow(Base):
     __tablename__ = "citation_fetches"
 
