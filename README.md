@@ -86,7 +86,7 @@ at any OpenAI-compatible provider to swap it.
 | `days` | window in days (mutually exclusive with `year`) |
 | `year`, `month` | calendar window; `month` requires `year` |
 | `category` | arXiv category, repeatable (`category=cs.LG&category=math.CO`) |
-| `kind` | `tech` (cs, stat, eess) or `non_tech` (everything else) |
+| `kind` | `tech` (cs, stat, eess), `non_tech` (everything else), or `ai` (categories overlap cs.AI, cs.LG, cs.CL, cs.CV, cs.NE, stat.ML — cross-lists count) |
 | `group` | taxonomy group key, repeatable (`cs`, `stat`, `eess`, `math`, `physics`, `q-bio`, `q-fin`, `econ`) |
 | `author`, `venue` | case-insensitive contains match |
 | `min_citations` | latest citation count at least N |
