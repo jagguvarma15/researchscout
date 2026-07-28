@@ -177,6 +177,30 @@ def test_group_facet_intersects_kind(session: Session) -> None:
     assert empty == []
 
 
+def test_kind_ai_matches_category_overlap(session: Session) -> None:
+    _seed_mixed(session)
+    upsert_paper(
+        session,
+        _paper(
+            "arxiv:2502.00005",
+            "2502.00005",
+            "Crosslisted OC",
+            categories=["math.OC", "cs.LG"],
+            primary_category="math.OC",
+            published_at=datetime(2025, 2, 1, tzinfo=UTC),
+        ),
+    )
+    session.flush()
+
+    ai = list_papers(session, facets=PaperFacets(kind="ai"))
+    assert set(_ids(ai)) == {"arxiv:2401.00001", "arxiv:2402.00002", "arxiv:2502.00005"}
+    # Overlap vs primary-archive semantics: the cross-list counts as AI but not as tech.
+    tech = list_papers(session, facets=PaperFacets(kind="tech"))
+    assert "arxiv:2502.00005" not in _ids(tech)
+    # Groups AND independently with the AI overlap.
+    assert list_papers(session, facets=PaperFacets(kind="ai", groups=["physics"])) == []
+
+
 def test_year_month_window(session: Session) -> None:
     _seed_mixed(session)
     jan = list_papers(session, facets=PaperFacets(year=2024, month=1))
