@@ -48,6 +48,8 @@ def _setup(
 ) -> None:
     monkeypatch.setattr(search_mod, "vector_search", lambda *a, **k: vector)
     monkeypatch.setattr(search_mod, "lexical_search", lambda *a, **k: lexical)
+    # Hermetic against a local .env that enables reranking: fusion order is under test here.
+    monkeypatch.setattr(search_mod, "get_reranker", lambda: None)
     monkeypatch.setattr(search_mod, "get_papers", lambda s, ids: {pid: _paper(pid) for pid in ids})
     cites = citations or {}
     monkeypatch.setattr(
