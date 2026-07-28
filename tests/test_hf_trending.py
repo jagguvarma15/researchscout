@@ -56,6 +56,20 @@ def test_normalize_builds_trending_signal() -> None:
     assert signal.metadata["num_comments"] == 5
 
 
+def _route(daily: object, per_paper: dict[str, object] | None = None):
+    """Fake httpx.get: the daily feed for its URL, per-paper bodies by arXiv id, else 404."""
+
+    def fake_get(url: str, *a: object, **k: object) -> _Resp:
+        if url == "https://huggingface.co/api/daily_papers":
+            return _Resp(200, daily)
+        for arxiv_id, body in (per_paper or {}).items():
+            if url.endswith(f"/api/papers/{arxiv_id}"):
+                return _Resp(200, body)
+        return _Resp(404, {})
+
+    return fake_get
+
+
 @pytest.mark.integration
 def test_fetch_records_rank_for_stored_paper(
     session: Session, monkeypatch: pytest.MonkeyPatch
@@ -67,7 +81,8 @@ def test_fetch_records_rank_for_stored_paper(
         {"paper": {"id": "2401.00001", "upvotes": 10}, "numComments": 2},  # stored -> rank 1
         {"paper": {"id": "2402.99999", "upvotes": 99}, "numComments": 0},  # not stored -> skipped
     ]
-    monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp(200, daily))
+    monkeypatch.setattr(httpx, "get", _route(daily))
+    monkeypatch.setattr("researchscout.sources.hf_trending.time.sleep", lambda s: None)
 
     summary = run_ingest(session, HuggingFaceTrendingSource(), SINCE)
     assert summary.signals == 1
@@ -80,7 +95,59 @@ def test_fetch_records_rank_for_stored_paper(
 @pytest.mark.integration
 def test_fetch_skips_papers_not_stored(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     daily = [{"paper": {"id": "9999.99999", "upvotes": 1}, "numComments": 0}]
-    monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp(200, daily))
+    monkeypatch.setattr(httpx, "get", _route(daily))
+    monkeypatch.setattr("researchscout.sources.hf_trending.time.sleep", lambda s: None)
 
     summary = run_ingest(session, HuggingFaceTrendingSource(), SINCE)
     assert summary.signals == 0
+
+
+@pytest.mark.integration
+def test_per_paper_upvotes_recorded_off_the_daily_list(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    upsert_paper(session, _paper("arxiv:2401.00001", "2401.00001"))
+    session.commit()
+
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        _route(daily=[], per_paper={"2401.00001": {"upvotes": 7, "numComments": 2}}),
+    )
+    monkeypatch.setattr("researchscout.sources.hf_trending.time.sleep", lambda s: None)
+
+    summary = run_ingest(session, HuggingFaceTrendingSource(), SINCE)
+    assert summary.signals == 2
+
+    mentions = series(session, "arxiv:2401.00001", "social_mention", SINCE)
+    discussion = series(session, "arxiv:2401.00001", "discussion", SINCE)
+    assert [value for _, value in mentions] == [7.0]
+    assert [value for _, value in discussion] == [2.0]
+
+
+def test_normalize_maps_per_paper_metrics() -> None:
+    source = HuggingFaceTrendingSource()
+    upvotes = source.normalize(
+        RawItem(
+            source="hf_trending",
+            fetched_at=NOW,
+            payload={
+                "paper_id": "arxiv:2401.00001",
+                "metric": "upvotes",
+                "value": 7,
+                "arxiv_id": "2401.00001",
+            },
+        )
+    )
+    assert upvotes.type == SignalType.social_mention
+    assert upvotes.value == 7.0
+
+    comments = source.normalize(
+        RawItem(
+            source="hf_trending",
+            fetched_at=NOW,
+            payload={"paper_id": "arxiv:2401.00001", "metric": "comments", "value": 2},
+        )
+    )
+    assert comments.type == SignalType.discussion
+    assert comments.value == 2.0
