@@ -3,8 +3,9 @@
 Pure and dependency-free. A category code like ``cs.LG`` belongs to an archive (``cs``), every
 archive belongs to exactly one group, and every group is either tech or non-tech. The physics
 archives (``hep-th``, ``quant-ph``, ...) share one umbrella group so the facet list stays short.
-The web app keeps a display-only mirror of the group list; this module is authoritative for
-filtering.
+``AI_CATEGORIES`` is the fixed category set behind the AI quick filter, matched against a
+paper's full category list (cross-lists included). The web app keeps a display-only mirror of
+the group list; this module is authoritative for filtering.
 """
 
 from __future__ import annotations
@@ -48,6 +49,8 @@ _PHYSICS_ARCHIVES = frozenset(
         "quant-ph",
     }
 )
+
+AI_CATEGORIES = frozenset({"cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.NE", "stat.ML"})
 
 _GROUP_BY_KEY = {group.key: group for group in _GROUPS}
 _ARCHIVE_TO_GROUP: dict[str, ArchiveGroup] = {
