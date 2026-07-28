@@ -76,8 +76,12 @@ def _merge(results: list[list[ScoredPaper]]) -> list[ScoredPaper]:
     return sorted(best.values(), key=lambda item: item.score, reverse=True)
 
 
-def _reference_arxiv_ids(arxiv_id: str, *, limit: int) -> list[str]:
-    """Best-effort: the arXiv ids this paper references, via Semantic Scholar."""
+def _reference_arxiv_ids(arxiv_id: str, *, limit: int) -> list[str] | None:
+    """The arXiv ids this paper references via Semantic Scholar, or None on any failure.
+
+    None (not an empty list) on failure, so a transient error is never cached as "no
+    references".
+    """
     import httpx
 
     try:
@@ -90,7 +94,7 @@ def _reference_arxiv_ids(arxiv_id: str, *, limit: int) -> list[str]:
         resp.raise_for_status()
         payload = resp.json()
     except (httpx.HTTPError, ValueError):
-        return []
+        return None
     ids: list[str] = []
     for entry in payload.get("data", []):
         external = (entry.get("citedPaper") or {}).get("externalIds") or {}
@@ -103,7 +107,13 @@ def _reference_arxiv_ids(arxiv_id: str, *, limit: int) -> list[str]:
 def follow_references(
     session: Session, papers: list[ScoredPaper], *, max_sources: int = 5, per_source: int = 10
 ) -> list[ScoredPaper]:
-    """One hop of citation-following: referenced papers already in the store, score 0 (context)."""
+    """One hop of citation-following: referenced papers already in the store, score 0 (context).
+
+    Cache-first: each source paper's references are fetched from Semantic Scholar at most once
+    and persisted as citation edges, so repeat questions cost no HTTP and the edges accrue into
+    a local citation graph.
+    """
+    from researchscout.store.citations import references_cached, store_references
     from researchscout.store.papers import find_by_external_id, get_paper
 
     seen = {item.paper.id for item in papers}
@@ -112,7 +122,14 @@ def follow_references(
         arxiv = item.paper.external_ids.get("arxiv")
         if not arxiv:
             continue
-        for ref_arxiv in _reference_arxiv_ids(arxiv, limit=per_source):
+        refs = references_cached(session, item.paper.id)
+        if refs is None:
+            fetched = _reference_arxiv_ids(arxiv, limit=per_source)
+            if fetched is None:
+                continue
+            store_references(session, item.paper.id, fetched)
+            refs = fetched
+        for ref_arxiv in refs:
             canonical = find_by_external_id(session, "arxiv", ref_arxiv)
             if canonical is None or canonical in seen or canonical in added:
                 continue
