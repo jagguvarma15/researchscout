@@ -105,3 +105,52 @@ def test_chat_llm_failure_emits_error_event(monkeypatch: pytest.MonkeyPatch) -> 
     events = _events(response.text)
     assert events[-1][0] == "error"
     assert events[-1][1]["code"] == 502
+
+
+def test_chat_off_topic_refuses_without_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
+    def no_stream(*a: object, **k: object) -> None:
+        raise AssertionError("answer_stream must not run for off-topic questions")
+
+    monkeypatch.setattr(chat_router, "answer_stream", no_stream)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda llm, question: False)
+    client = _client(monkeypatch)
+    response = client.post("/v1/chat", json={"question": "best lasagna recipe"})
+
+    assert response.status_code == 200
+    events = _events(response.text)
+    assert [name for name, _ in events] == ["token", "done"]
+    assert events[0][1]["delta"] == chat_router.REFUSAL_TEXT
+    assert events[1][1] == {"cited": [], "hallucinated": [], "used": []}
+
+
+def test_chat_in_scope_streams_normally(monkeypatch: pytest.MonkeyPatch) -> None:
+    used = [_scored()]
+
+    def fake_stream(*a: object, **k: object):
+        yield StreamMeta(retrieved=1, used=used)
+        yield StreamDelta(text="Hello")
+        yield Answer(text="Hello", cited=[], hallucinated=[], used=used)
+
+    monkeypatch.setattr(chat_router, "answer_stream", fake_stream)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda llm, question: True)
+    client = _client(monkeypatch)
+    events = _events(client.post("/v1/chat", json={"question": "q"}).text)
+    assert [name for name, _ in events] == ["meta", "token", "done"]
+
+
+def test_chat_guardrail_flag_off_skips_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RS_CHAT_GUARDRAIL", "0")
+
+    def no_classify(llm: object, question: object) -> bool:
+        raise AssertionError("the classifier must not run when the flag is off")
+
+    def fake_stream(*a: object, **k: object):
+        yield StreamMeta(retrieved=0, used=[])
+        yield StreamDelta(text="ok")
+        yield Answer(text="ok", cited=[], hallucinated=[], used=[])
+
+    monkeypatch.setattr(chat_router, "is_research_question", no_classify)
+    monkeypatch.setattr(chat_router, "answer_stream", fake_stream)
+    client = _client(monkeypatch)
+    events = _events(client.post("/v1/chat", json={"question": "q"}).text)
+    assert [name for name, _ in events] == ["meta", "token", "done"]
