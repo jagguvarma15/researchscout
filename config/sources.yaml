@@ -29,6 +29,16 @@ sources:
     enabled: true
     kind: signal
     cadence: daily
+  bluesky:
+    # Unauthenticated searchPosts on api.bsky.app (the documented public host 403s for search).
+    # Post engagement feeds social_mention, reply counts feed discussion. Excluded handles are
+    # aggregator bots that would otherwise dominate mention counts.
+    enabled: true
+    kind: signal
+    cadence: daily
+    exclude_accounts:
+      - arxiv-daily-bot.bsky.social
+      - ai-firehose.column.social
   code_adoption:
     # Off by default: GitHub search is rate-limited without a token. Set GITHUB_TOKEN (or `token`
     # here) and flip this to true to record repository stars as a code-adoption signal.
