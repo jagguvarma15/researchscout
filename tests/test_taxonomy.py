@@ -1,4 +1,5 @@
 from researchscout.taxonomy import (
+    AI_CATEGORIES,
     all_groups,
     archive_of,
     archives_for,
@@ -51,3 +52,13 @@ def test_group_labels_and_keys_are_unique() -> None:
     groups = all_groups()
     assert len({group.key for group in groups}) == len(groups)
     assert len({group.label for group in groups}) == len(groups)
+
+
+def test_ai_categories_are_the_locked_six() -> None:
+    assert AI_CATEGORIES == frozenset({"cs.AI", "cs.LG", "cs.CL", "cs.CV", "cs.NE", "stat.ML"})
+
+
+def test_ai_categories_all_map_to_tech_groups() -> None:
+    for category in AI_CATEGORIES:
+        group = group_for(category)
+        assert group is not None and group.tech is True
