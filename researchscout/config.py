@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     # Chat rate limiting (in-process fixed window).
     chat_rate_limit: int = 20
     chat_rate_window_seconds: int = 600
+    # LLM scope pre-check that keeps /v1/chat on research topics. Fails open, so a broken
+    # model never blocks a question; the CLI ask path never runs it.
+    chat_guardrail: bool = True
     digest_days: int = 7
     digest_top_k: int = 10
     # Background refresh loop (`scout serve scheduler`, or `make scheduler`). Intervals are in
