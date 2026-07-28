@@ -18,7 +18,9 @@ The algorithm, in order:
 5. **Optional cross-encoder rerank** — when ``RS_RERANK_ENABLED`` is set, the top first-stage
    candidates are re-scored by a cross encoder that reads the query and paper together; its
    relevance replaces the RRF term while the recency-and-breakthrough prior is kept. Off by
-   default, so the four steps above are the standard path.
+   default, so the four steps above are the standard path. Callers on a latency budget (the
+   feed's search box) pass ``use_rerank=False`` to skip the pass even when the flag is on;
+   ask/chat keep the precise path.
 
 If the query yields no tsquery lexemes (stopwords only) or the lexical leg errors, retrieval
 degrades gracefully to vector-only.
@@ -70,12 +72,14 @@ def retrieve(
     categories: list[str] | None = None,
     facets: PaperFacets | None = None,
     half_life_days: float = _DEFAULT_HALF_LIFE_DAYS,
+    use_rerank: bool = True,
 ) -> list[ScoredPaper]:
     """Up to ``k`` in-window papers, ranked by RRF x recency x breakthrough, optionally reranked.
 
     ``facets`` filters both retrieval legs; the legacy ``days``/``categories`` kwargs fold into
     it. The hard freshness window applies unless the facets already bound time (a year/month
-    window replaces it).
+    window replaces it). ``use_rerank=False`` skips the cross-encoder pass regardless of the
+    ``RS_RERANK_ENABLED`` flag (the None reranker path is a pure pass-through).
     """
     settings = get_settings()
     if facets is None:
@@ -121,7 +125,8 @@ def retrieve(
         # Lexical-only hits have no measured cosine distance; report the maximum.
         lookup[paper_id] = (paper, distances.get(paper_id, 1.0))
 
-    ranked = rerank(query, candidates, get_reranker(), top_n=max(settings.rerank_top_n, k))
+    reranker = get_reranker() if use_rerank else None
+    ranked = rerank(query, candidates, reranker, top_n=max(settings.rerank_top_n, k))
     return [
         ScoredPaper(paper=lookup[key][0], score=score, distance=lookup[key][1])
         for key, score in ranked
