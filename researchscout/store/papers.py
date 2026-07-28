@@ -124,6 +124,14 @@ def count_papers(session: Session, facets: PaperFacets) -> int:
     return session.execute(stmt).scalar_one()
 
 
+def get_papers(session: Session, paper_ids: Sequence[str]) -> dict[str, Paper]:
+    """Load many canonical papers by id in two queries; unknown ids are simply absent."""
+    if not paper_ids:
+        return {}
+    rows = session.execute(select(PaperRow).where(PaperRow.id.in_(list(paper_ids)))).scalars().all()
+    return {paper.id: paper for paper in _rows_to_papers(session, rows)}
+
+
 def get_paper(session: Session, paper_id: str) -> Paper | None:
     """Load a canonical paper (with its external ids) by id."""
     row = session.get(PaperRow, paper_id)
