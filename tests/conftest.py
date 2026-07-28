@@ -37,7 +37,7 @@ def session(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
             text(
                 "TRUNCATE papers, paper_external_ids, raw_items, ingest_state, "
                 "paper_embeddings, signals, digests, topics, saved_papers, user_interests, "
-                "citation_edges, citation_fetches RESTART IDENTITY CASCADE"
+                "citation_edges, citation_fetches, events RESTART IDENTITY CASCADE"
             )
         )
         # Commit before yielding: code under test opens its own session, and an uncommitted
