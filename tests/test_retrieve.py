@@ -116,6 +116,23 @@ def test_lexical_match_ranks_first_despite_orthogonal_vector(session: Session) -
     assert ids[0] == "arxiv:2402.00003"
 
 
+def test_selective_filter_still_fills_the_candidate_pool(session: Session) -> None:
+    """A facet filter must not starve the vector leg: every in-filter paper comes back."""
+    mapping: dict[str, list[float]] = {"q": _onehot(0)}
+    for i in range(30):
+        category = "cs.AI" if i < 5 else "cs.LG"
+        paper = _paper(f"2403.{i:05d}", f"Paper {i}", 2, category)
+        upsert_paper(session, paper)
+        mapping[f"Paper {i}\n\nx"] = _onehot(i % DIM)
+    session.flush()
+    embedder = MockEmbedder(mapping)
+    index_papers(session, embedder)
+
+    results = retrieve(session, embedder, "q", k=40, days=30, categories=["cs.AI"])
+    ids = {item.paper.id for item in results}
+    assert ids == {f"arxiv:2403.{i:05d}" for i in range(5)}
+
+
 def test_cited_paper_outranks_uncited_near_duplicate(session: Session) -> None:
     embedder = _setup_hybrid(session)
     append_signal(
