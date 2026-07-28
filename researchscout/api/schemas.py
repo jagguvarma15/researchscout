@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -124,6 +124,22 @@ class TopicDetail(TopicSummary):
 
 class TopicList(BaseModel):
     items: list[TopicDetail]
+
+
+class EventIn(BaseModel):
+    event: Literal["impression", "click", "dwell", "dismiss", "open_pdf"]
+    paper_id: str = Field(min_length=1, max_length=200)
+    rank: int | None = Field(default=None, ge=0, le=10000)
+    value: float | None = Field(default=None, ge=0)
+    surface: str | None = Field(default=None, max_length=40)
+
+
+class EventBatch(BaseModel):
+    events: list[EventIn] = Field(min_length=1, max_length=200)
+
+
+class EventAck(BaseModel):
+    stored: int
 
 
 class InterestList(BaseModel):
