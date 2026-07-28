@@ -14,13 +14,14 @@ case, so existing behaviour is preserved until momentum data accrues.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from researchscout.config import get_settings
-from researchscout.store.signals import all_series
+from researchscout.store.signals import all_series, all_series_many
 
 _Series = list[tuple[datetime, float]]
 
@@ -121,13 +122,7 @@ def score_signal(
     )
 
 
-def breakthrough(
-    session: Session, paper_id: str, *, config: ScoreConfig | None = None
-) -> Breakthrough:
-    """Combine every signal type's momentum for one paper into a non-negative breakthrough boost."""
-    cfg = config or ScoreConfig.from_settings()
-    since = datetime.now(UTC) - timedelta(days=cfg.window_days)
-    grouped = all_series(session, paper_id, since)
+def _from_grouped(grouped: dict[str, _Series], cfg: ScoreConfig) -> Breakthrough:
     contributions: dict[str, float] = {}
     for type_name, spec in _SPECS.items():
         points = grouped.get(type_name)
@@ -139,3 +134,22 @@ def breakthrough(
         if contribution != 0.0:
             contributions[type_name] = contribution
     return Breakthrough(total=max(0.0, sum(contributions.values())), contributions=contributions)
+
+
+def breakthrough(
+    session: Session, paper_id: str, *, config: ScoreConfig | None = None
+) -> Breakthrough:
+    """Combine every signal type's momentum for one paper into a non-negative breakthrough boost."""
+    cfg = config or ScoreConfig.from_settings()
+    since = datetime.now(UTC) - timedelta(days=cfg.window_days)
+    return _from_grouped(all_series(session, paper_id, since), cfg)
+
+
+def breakthrough_many(
+    session: Session, paper_ids: Sequence[str], *, config: ScoreConfig | None = None
+) -> dict[str, Breakthrough]:
+    """Breakthrough for many papers with one signals query; no history scores 0 as usual."""
+    cfg = config or ScoreConfig.from_settings()
+    since = datetime.now(UTC) - timedelta(days=cfg.window_days)
+    grouped = all_series_many(session, paper_ids, since)
+    return {paper_id: _from_grouped(grouped.get(paper_id, {}), cfg) for paper_id in paper_ids}
