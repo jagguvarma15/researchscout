@@ -7,7 +7,7 @@
   import { SlidersHorizontal, X } from 'lucide-svelte';
 
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
-  import { GROUPS } from '../lib/taxonomy';
+  import { GROUPS, techCategories } from '../lib/taxonomy';
 
   interface Filters {
     kind: string;
@@ -30,9 +30,16 @@
   let previousFocus: Element | null = null;
   let unlockScroll: (() => void) | null = null;
 
+  const knownTechCodes = new Set(
+    GROUPS.flatMap((group) => techCategories(group.key).map((cat) => cat.code)),
+  );
+
   let kind = $state(initial.kind);
   let groups = $state<string[]>([...initial.groups]);
-  let categoriesText = $state(initial.categories.join(', '));
+  let selectedCats = $state<string[]>(initial.categories.filter((cat) => knownTechCodes.has(cat)));
+  let categoriesText = $state(
+    initial.categories.filter((cat) => !knownTechCodes.has(cat)).join(', '),
+  );
   let dateMode = $state<'days' | 'calendar'>(initial.year ? 'calendar' : 'days');
   let days = $state(initial.days);
   let year = $state(initial.year);
@@ -57,6 +64,17 @@
 
   function toggleGroup(key: string) {
     groups = groups.includes(key) ? groups.filter((g) => g !== key) : [...groups, key];
+  }
+
+  function toggleCat(code: string) {
+    selectedCats = selectedCats.includes(code)
+      ? selectedCats.filter((c) => c !== code)
+      : [...selectedCats, code];
+  }
+
+  // Applied once at render; native <details> toggling takes over from there.
+  function initiallyExpanded(groupKey: string): boolean {
+    return techCategories(groupKey).some((cat) => initial.categories.includes(cat.code));
   }
 
   function show() {
@@ -99,7 +117,9 @@
       return option !== undefined && allowed(option.tech);
     });
     for (const key of active) params.append('group', key);
-    for (const cat of categoriesText.split(/[\s,]+/).filter(Boolean)) {
+    const textCodes = categoriesText.split(/[\s,]+/).filter(Boolean);
+    const activeCats = allowed(true) ? selectedCats : [];
+    for (const cat of [...new Set([...activeCats, ...textCodes])]) {
       params.append('category', cat);
     }
     if (dateMode === 'days' && days) params.set('days', days);
@@ -198,6 +218,22 @@
                 />
                 {option.label}
               </label>
+              {#if option.tech}
+                <details class="cats" open={initiallyExpanded(option.key)}>
+                  <summary>Categories</summary>
+                  {#each techCategories(option.key) as cat}
+                    <label class="check sub" class:muted={!allowed(option.tech)}>
+                      <input
+                        type="checkbox"
+                        checked={selectedCats.includes(cat.code)}
+                        disabled={!allowed(option.tech)}
+                        onchange={() => toggleCat(cat.code)}
+                      />
+                      {cat.code} - {cat.name}
+                    </label>
+                  {/each}
+                </details>
+              {/if}
             {/each}
           </fieldset>
           <fieldset>
@@ -205,7 +241,7 @@
             <input
               class="input"
               type="text"
-              placeholder="cs.LG, math.CO"
+              placeholder="math.CO, quant-ph"
               aria-label="Specific categories, comma separated"
               bind:value={categoriesText}
             />
@@ -417,6 +453,18 @@
   }
   .check.muted {
     color: var(--muted, #5d6570);
+  }
+  .cats {
+    margin: 0 0 0.4rem 1.55rem;
+  }
+  .cats summary {
+    color: var(--muted, #5d6570);
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .check.sub {
+    padding: 0.2rem 0;
+    font-size: 0.85rem;
   }
   .check input[type='checkbox'],
   .check input[type='radio'] {
