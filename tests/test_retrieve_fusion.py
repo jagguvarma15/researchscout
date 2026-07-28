@@ -48,12 +48,15 @@ def _setup(
 ) -> None:
     monkeypatch.setattr(search_mod, "vector_search", lambda *a, **k: vector)
     monkeypatch.setattr(search_mod, "lexical_search", lambda *a, **k: lexical)
-    monkeypatch.setattr(search_mod, "get_paper", lambda s, pid: _paper(pid))
+    monkeypatch.setattr(search_mod, "get_papers", lambda s, ids: {pid: _paper(pid) for pid in ids})
     cites = citations or {}
     monkeypatch.setattr(
         search_mod,
-        "breakthrough",
-        lambda s, pid: Breakthrough(total=math.log1p(cites.get(pid, 0.0)), contributions={}),
+        "breakthrough_many",
+        lambda s, ids: {
+            pid: Breakthrough(total=math.log1p(cites.get(pid, 0.0)), contributions={})
+            for pid in ids
+        },
     )
 
 
