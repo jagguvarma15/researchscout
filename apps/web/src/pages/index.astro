@@ -284,7 +284,7 @@ function pageLink(target: number): string {
                       <span class="quick">
                         <a href={`/papers/${paper.id}?read=1`}>Read</a>
                         {' · '}
-                        <a href={paper.pdf_url} rel="noopener">PDF</a>
+                        <a href={`/papers/${paper.id}?read=1`}>PDF</a>
                       </span>
                     )}
                   </p>
