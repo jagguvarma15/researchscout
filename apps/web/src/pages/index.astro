@@ -5,7 +5,7 @@ import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE, type PaperSummary } from '../lib/api';
 import { renderMathHTML } from '../lib/math';
-import { groupLabel } from '../lib/taxonomy';
+import { categoryName, groupLabel } from '../lib/taxonomy';
 
 const params = Astro.url.searchParams;
 const q = params.get('q') ?? '';
@@ -266,9 +266,15 @@ function pageLink(target: number): string {
                     )}
                   </p>
                   <p class="tags">
-                    {badges.primary && <span class="badge badge-primary">{badges.primary}</span>}
+                    {badges.primary && (
+                      <span class="badge badge-primary" title={categoryName(badges.primary)}>
+                        {badges.primary}
+                      </span>
+                    )}
                     {badges.rest.map((cat) => (
-                      <span class="badge">{cat}</span>
+                      <span class="badge" title={categoryName(cat)}>
+                        {cat}
+                      </span>
                     ))}
                     {badges.more > 0 && <span class="badge">+{badges.more}</span>}
                     {paper.score !== null && (
