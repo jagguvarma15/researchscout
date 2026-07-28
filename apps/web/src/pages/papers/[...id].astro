@@ -6,6 +6,7 @@ import SaveButton from '../../components/SaveButton.svelte';
 import Base from '../../layouts/Base.astro';
 import { fetchPaper, fetchPapers, fetchSaved, formatDate, type PaperSummary } from '../../lib/api';
 import { renderMathHTML, stripMath } from '../../lib/math';
+import { categoryName } from '../../lib/taxonomy';
 
 // Rest param, not a plain [id]: canonical ids like doi:10.1145/nnn.mmm contain slashes.
 const id = Astro.params.id ?? '';
@@ -78,7 +79,10 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
           {' · '}
           <code>{paper.id}</code>
           {orderedCategories.map((cat, index) => (
-            <span class={index === 0 && paper.primary_category ? 'badge badge-primary' : 'badge'}>
+            <span
+              class={index === 0 && paper.primary_category ? 'badge badge-primary' : 'badge'}
+              title={categoryName(cat)}
+            >
               {cat}
             </span>
           ))}
