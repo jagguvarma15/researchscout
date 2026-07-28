@@ -23,6 +23,12 @@ sources:
     enabled: true
     kind: signal
     cadence: daily
+  hn_discussion:
+    # Hacker News via the Algolia search API: keyless. Points feed social_mention, comment
+    # counts feed discussion; both attach only to papers already stored.
+    enabled: true
+    kind: signal
+    cadence: daily
   code_adoption:
     # Off by default: GitHub search is rate-limited without a token. Set GITHUB_TOKEN (or `token`
     # here) and flip this to true to record repository stars as a code-adoption signal.
