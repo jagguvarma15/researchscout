@@ -107,6 +107,17 @@ def test_lexical_errors_fall_back_to_vector_only(monkeypatch: pytest.MonkeyPatch
     assert rolled_back == [True]
 
 
+def test_use_rerank_false_never_touches_the_reranker(monkeypatch: pytest.MonkeyPatch) -> None:
+    _setup(monkeypatch, vector=[("arxiv:1", 0.1)], lexical=[])
+
+    def boom() -> None:
+        raise AssertionError("get_reranker must not be called when use_rerank is False")
+
+    monkeypatch.setattr(search_mod, "get_reranker", boom)
+    results = retrieve(_session(), StubEmbedder(), "q", k=5, days=30, use_rerank=False)
+    assert [item.paper.id for item in results] == ["arxiv:1"]
+
+
 def test_k_truncates_after_fusion(monkeypatch: pytest.MonkeyPatch) -> None:
     _setup(
         monkeypatch,
