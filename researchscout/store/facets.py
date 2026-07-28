@@ -15,7 +15,7 @@ from sqlalchemy import ColumnElement, and_, cast, false, func, literal_column
 from sqlalchemy.dialects.postgresql import ARRAY, TEXT
 
 from researchscout.store.models import PaperRow
-from researchscout.taxonomy import archives_for, archives_for_group
+from researchscout.taxonomy import AI_CATEGORIES, archives_for, archives_for_group
 
 SortKey = Literal["newest", "citations", "activity"]
 
@@ -26,7 +26,7 @@ class PaperFacets:
     year: int | None = None
     month: int | None = None  # only meaningful with year
     categories: list[str] | None = None
-    kind: Literal["tech", "non_tech"] | None = None
+    kind: Literal["tech", "non_tech", "ai"] | None = None
     groups: list[str] | None = None
     author: str | None = None
     venue: str | None = None
@@ -38,8 +38,14 @@ def _escape_like(value: str) -> str:
 
 
 def _archives(facets: PaperFacets) -> frozenset[str] | None:
-    """The archive prefixes implied by kind/groups; None when neither is set."""
-    kind_set = archives_for(facets.kind) if facets.kind is not None else None
+    """The archive prefixes implied by kind/groups; None when neither narrows by archive.
+
+    kind=ai filters by category overlap in ``facets_where`` instead, so groups still AND
+    independently: ``kind=ai&group=cs`` means AI-overlapping papers with a cs primary archive.
+    """
+    kind_set: frozenset[str] | None = None
+    if facets.kind == "tech" or facets.kind == "non_tech":
+        kind_set = archives_for(facets.kind)
     group_set: frozenset[str] | None = None
     if facets.groups:
         group_set = frozenset().union(*(archives_for_group(g) for g in facets.groups))
@@ -67,6 +73,9 @@ def facets_where(facets: PaperFacets) -> ColumnElement[bool] | None:
         clauses.append(PaperRow.published_at < end)
     if facets.categories:
         clauses.append(PaperRow.categories.op("?|")(cast(facets.categories, ARRAY(TEXT))))
+    if facets.kind == "ai":
+        # Same GIN-indexed overlap path as the categories facet, so cross-lists count.
+        clauses.append(PaperRow.categories.op("?|")(cast(sorted(AI_CATEGORIES), ARRAY(TEXT))))
     archives = _archives(facets)
     if archives is not None:
         if archives:
