@@ -4,6 +4,7 @@ from researchscout.sources import (  # noqa: F401  (import registers connectors)
     arxiv,
     code_adoption,
     hf_trending,
+    hn_discussion,
     s2_signal,
 )
 from researchscout.sources.base import (
