@@ -37,10 +37,10 @@ from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
 from researchscout.rerank import Candidate, get_reranker, rerank
 from researchscout.schema import Paper
-from researchscout.score import breakthrough
+from researchscout.score import breakthrough_many
 from researchscout.store.facets import PaperFacets, facets_where
 from researchscout.store.lexical import lexical_search
-from researchscout.store.papers import get_paper
+from researchscout.store.papers import get_papers
 from researchscout.store.vectors import search as vector_search
 
 _DEFAULT_HALF_LIFE_DAYS = 14.0
@@ -85,7 +85,9 @@ def retrieve(
     where = facets_where(facets)
 
     query_vector = embedder.embed_query(query)
-    vector_hits = vector_search(session, query_vector, k=_LEG_K, where=where)
+    vector_hits = vector_search(
+        session, query_vector, model_id=embedder.model_id, k=_LEG_K, where=where
+    )
     try:
         lexical_hits = lexical_search(session, query, k=_LEG_K, where=where)
     except SQLAlchemyError:
@@ -98,15 +100,16 @@ def retrieve(
             fused[paper_id] = fused.get(paper_id, 0.0) + 1.0 / (_RRF_K + rank)
 
     distances = dict(vector_hits)
+    # Hydrate every fused candidate in three grouped queries, not one round-trip per paper.
+    papers = get_papers(session, list(fused))
+    boosts = breakthrough_many(session, list(papers))
     candidates: list[Candidate] = []
     lookup: dict[str, tuple[Paper, float]] = {}
     for paper_id, rrf_score in fused.items():
-        paper = get_paper(session, paper_id)
+        paper = papers.get(paper_id)
         if paper is None:
             continue
-        prior = _recency_weight(paper.published_at, half_life_days) * (
-            1.0 + breakthrough(session, paper_id).total
-        )
+        prior = _recency_weight(paper.published_at, half_life_days) * (1.0 + boosts[paper_id].total)
         candidates.append(
             Candidate(
                 key=paper_id,
