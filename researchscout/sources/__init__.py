@@ -2,6 +2,7 @@
 
 from researchscout.sources import (  # noqa: F401  (import registers connectors)
     arxiv,
+    bluesky,
     code_adoption,
     hf_trending,
     hn_discussion,
