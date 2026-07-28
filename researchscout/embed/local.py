@@ -1,7 +1,8 @@
 """Local embeddings via sentence-transformers (BGE-small-en-v1.5).
 
 The model is loaded lazily on first use, so importing this module is cheap (no torch import until an
-embedding is actually requested). BGE asks for an instruction prefix on queries only, not documents.
+embedding is actually requested). BGE asks for an instruction prefix on queries only, not documents;
+other models get no prefix, so eval A/Bs across models stay fair.
 """
 
 from __future__ import annotations
@@ -11,7 +12,14 @@ from typing import Any
 
 from researchscout.embed.base import Embedder
 
-_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+_BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
+
+def query_prefix_for(model_id: str) -> str:
+    """The query-side instruction prefix a model expects ("" for models that use none)."""
+    if model_id.startswith("BAAI/bge-") and "-en" in model_id:
+        return _BGE_QUERY_PREFIX
+    return ""
 
 
 class LocalEmbedder(Embedder):
@@ -48,5 +56,7 @@ class LocalEmbedder(Embedder):
         return [vector.tolist() for vector in vectors]
 
     def embed_query(self, text: str) -> list[float]:
-        vector = self._model.encode(_QUERY_PREFIX + text, normalize_embeddings=True)
+        vector = self._model.encode(
+            query_prefix_for(self.model_id) + text, normalize_embeddings=True
+        )
         return list(vector.tolist())
