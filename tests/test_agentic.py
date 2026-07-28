@@ -127,9 +127,10 @@ def test_reference_arxiv_ids_parses(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _reference_arxiv_ids("2401.00001", limit=10) == ["2301.00001"]
 
 
-def test_reference_arxiv_ids_swallows_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reference_arxiv_ids_returns_none_on_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*args: object, **kwargs: object) -> _Resp:
         raise httpx.HTTPError("nope")
 
     monkeypatch.setattr(httpx, "get", boom)
-    assert _reference_arxiv_ids("2401.00001", limit=10) == []
+    # None, not [] - a transient failure must never be cached as "no references".
+    assert _reference_arxiv_ids("2401.00001", limit=10) is None
