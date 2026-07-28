@@ -4,8 +4,17 @@
   // the current page is rendered (canvas + text layer for selection), so the closed path costs
   // zero bytes and paging keeps memory flat. Opened by [data-open-reader] clicks or ?read=1.
 
-  import type { PDFDocumentProxy } from 'pdfjs-dist';
-  import { Download, ExternalLink, Minus, Plus, Scaling, X } from 'lucide-svelte';
+  import type { PDFDocumentProxy, RenderTask, TextLayer as TextLayerTask } from 'pdfjs-dist';
+  import {
+    ChevronLeft,
+    ChevronRight,
+    Download,
+    ExternalLink,
+    Minus,
+    Plus,
+    Scaling,
+    X,
+  } from 'lucide-svelte';
 
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
 
@@ -31,6 +40,8 @@
   let previousFocus: Element | null = null;
   let unlockScroll: (() => void) | null = null;
   let renderSeq = 0;
+  let renderTask: RenderTask | null = null;
+  let textTask: TextLayerTask | null = null;
 
   async function show() {
     previousFocus = document.activeElement;
@@ -51,6 +62,13 @@
     const url = new URL(window.location.href);
     url.searchParams.delete('read');
     history.replaceState(null, '', url);
+    // Invalidate any render still awaiting getPage and cancel live tasks before destroy:
+    // destroying the document mid-render throws.
+    renderSeq += 1;
+    renderTask?.cancel();
+    renderTask = null;
+    textTask?.cancel();
+    textTask = null;
     void doc?.destroy();
     doc = null;
     pageCount = 0;
@@ -79,6 +97,10 @@
   async function renderPage() {
     if (doc === null || pdfjs === null || !canvas || !textLayer) return;
     const seq = ++renderSeq;
+    renderTask?.cancel();
+    renderTask = null;
+    textTask?.cancel();
+    textTask = null;
     const page = await doc.getPage(pageNum);
     if (scale === 0 && pageBox) {
       // Fit-width on first render.
@@ -96,18 +118,34 @@
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    await page.render({ canvasContext: ctx, viewport }).promise;
+    renderTask = page.render({ canvasContext: ctx, viewport });
+    try {
+      await renderTask.promise;
+    } catch (error) {
+      // A newer render cancelled this one mid-draw; that render owns the canvas now.
+      if (error instanceof pdfjs.RenderingCancelledException) return;
+      throw error;
+    }
+    renderTask = null;
+    if (seq !== renderSeq) return;
 
     textLayer.replaceChildren();
     textLayer.style.width = `${viewport.width}px`;
     textLayer.style.height = `${viewport.height}px`;
     textLayer.style.setProperty('--scale-factor', String(viewport.scale));
-    const layer = new pdfjs.TextLayer({
+    textTask = new pdfjs.TextLayer({
       textContentSource: page.streamTextContent(),
       container: textLayer,
       viewport,
     });
-    await layer.render();
+    try {
+      await textTask.render();
+    } catch (error) {
+      // Cancelled text-layer renders reject; only surface errors from the live render.
+      if (seq !== renderSeq) return;
+      throw error;
+    }
+    textTask = null;
   }
 
   function goTo(target: number) {
@@ -133,9 +171,19 @@
     }
   }
 
+  function isEditable(target: EventTarget | null): boolean {
+    return (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    );
+  }
+
   function onWindowKeydown(event: KeyboardEvent) {
     if (!open) return;
     if (event.key === 'Escape') hide();
+    else if (isEditable(event.target)) return;
     else if (event.key === 'ArrowRight') goTo(pageNum + 1);
     else if (event.key === 'ArrowLeft') goTo(pageNum - 1);
   }
@@ -167,6 +215,14 @@
       </button>
       <span class="doc-title">{title}</span>
       <div class="controls">
+        <button
+          class="tool"
+          onclick={() => goTo(pageNum - 1)}
+          disabled={pageNum <= 1}
+          aria-label="Previous page"
+        >
+          <ChevronLeft size={16} aria-hidden="true" />
+        </button>
         <label class="pagectl">
           <input
             type="number"
@@ -178,6 +234,14 @@
           />
           <span>/ {pageCount || '?'}</span>
         </label>
+        <button
+          class="tool"
+          onclick={() => goTo(pageNum + 1)}
+          disabled={pageCount === 0 || pageNum >= pageCount}
+          aria-label="Next page"
+        >
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>
         <button class="tool" onclick={() => zoom(-0.2)} aria-label="Zoom out">
           <Minus size={16} aria-hidden="true" />
         </button>
@@ -265,6 +329,14 @@
   .tool:hover {
     background: var(--surface-2, #f4f0e8);
     color: var(--ink, #17191c);
+  }
+  .tool:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .tool:disabled:hover {
+    background: none;
+    color: var(--muted, #5d6570);
   }
   .pagectl {
     display: inline-flex;
