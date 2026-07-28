@@ -20,5 +20,8 @@ htmlcov/
 .env
 .local/
 
+# Eval query sets reference local-corpus paper ids (see scout eval draft).
+config/eval_queries.yaml
+
 # macOS
 .DS_Store
