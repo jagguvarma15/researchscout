@@ -57,7 +57,8 @@ def papers_index(
         min_citations=min_citations,
     )
     if q:
-        results = retrieve(session, embedder, q, k=limit, facets=facets)
+        # The feed's search box stays on the fast first-stage path; ask/chat rerank instead.
+        results = retrieve(session, embedder, q, k=limit, facets=facets, use_rerank=False)
         items = [PaperSummary.from_paper(item.paper, score=item.score) for item in results]
         return PaperList(items=items, total=None, limit=limit, offset=offset)
 
