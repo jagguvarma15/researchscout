@@ -15,19 +15,33 @@ _QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
 
 class LocalEmbedder(Embedder):
-    """BGE-small-en-v1.5 via sentence-transformers; normalized vectors, MPS when available."""
+    """BGE-small-en-v1.5 via sentence-transformers; normalized vectors, MPS when available.
 
-    def __init__(self, model_id: str = "BAAI/bge-small-en-v1.5", dim: int = 384) -> None:
+    ``device``/``backend`` exist for the eval harness (``scout eval embed-speed``): forcing
+    cpu vs mps, or the onnx backend (needs a manual optimum[onnxruntime] install), without
+    changing the defaults the rest of the app uses.
+    """
+
+    def __init__(
+        self,
+        model_id: str = "BAAI/bge-small-en-v1.5",
+        dim: int = 384,
+        *,
+        device: str | None = None,
+        backend: str = "torch",
+    ) -> None:
         self.model_id = model_id
         self.dim = dim
+        self._device = device
+        self._backend = backend
 
     @cached_property
     def _model(self) -> Any:
         import torch
         from sentence_transformers import SentenceTransformer
 
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-        return SentenceTransformer(self.model_id, device=device)
+        device = self._device or ("mps" if torch.backends.mps.is_available() else "cpu")
+        return SentenceTransformer(self.model_id, device=device, backend=self._backend)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         vectors = self._model.encode(texts, normalize_embeddings=True)
