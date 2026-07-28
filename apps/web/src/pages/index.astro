@@ -2,6 +2,7 @@
 import { Icon } from 'astro-icon/components';
 import FilterSidebar from '../components/FilterSidebar.svelte';
 import SaveButton from '../components/SaveButton.svelte';
+import Telemetry from '../components/Telemetry.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE, type PaperSummary } from '../lib/api';
 import { renderMathHTML } from '../lib/math';
@@ -123,6 +124,9 @@ function formatDayHeading(iso: string): string {
 
 const savedPapers: PaperSummary[] = (await fetchSaved()) ?? [];
 const savedIds = new Set(savedPapers.map((p) => p.id));
+
+// Feed position per paper id for impression telemetry (stable across the day groups).
+const rankOf = new Map((items ?? []).map((paper, index) => [paper.id, index]));
 
 // Venue when known, otherwise the arXiv comment ("14 pages, accepted at ...").
 function sourceNote(paper: PaperSummary): string | null {
@@ -270,7 +274,7 @@ function pageLink(target: number): string {
               const note = sourceNote(paper);
               const badges = badgesFor(paper);
               return (
-                <li class="row">
+                <li class="row" data-paper-id={paper.id} data-rank={rankOf.get(paper.id)}>
                   <div class="row-head">
                     <a
                       class="title"
@@ -319,6 +323,9 @@ function pageLink(target: number): string {
                         <a href={`/papers/${paper.id}?read=1`}>PDF</a>
                       </span>
                     )}
+                    <button class="dismiss" type="button" data-dismiss aria-label="Not interested">
+                      Dismiss
+                    </button>
                   </p>
                   <p class="abstract" set:html={renderMathHTML(paper.abstract)} />
                 </li>
@@ -368,6 +375,7 @@ function pageLink(target: number): string {
     )
   }
 
+  <Telemetry client:idle surface={q ? 'search' : 'feed'} />
   <FilterSidebar
     client:load
     initial={{
@@ -602,6 +610,19 @@ function pageLink(target: number): string {
   }
   .quick a:hover {
     color: var(--accent);
+    text-decoration: underline;
+  }
+  .dismiss {
+    border: none;
+    background: none;
+    padding: 0;
+    color: var(--muted);
+    font: inherit;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .dismiss:hover {
+    color: var(--ink);
     text-decoration: underline;
   }
   .abstract {
