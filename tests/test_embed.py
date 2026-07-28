@@ -74,6 +74,15 @@ def test_index_is_idempotent_and_search_ranks_by_distance(session: Session) -> N
     assert search(session, _onehot(0), model_id="other-model", k=3) == []
 
 
+def test_query_prefix_is_bge_only() -> None:
+    from researchscout.embed.local import query_prefix_for
+
+    assert query_prefix_for("BAAI/bge-small-en-v1.5").startswith("Represent this sentence")
+    assert query_prefix_for("BAAI/bge-base-en-v1.5") != ""
+    assert query_prefix_for("ibm-granite/granite-embedding-small-english-r2") == ""
+    assert query_prefix_for("BAAI/bge-m3") == ""  # multilingual family: no english prefix
+
+
 def test_local_embedder_contract() -> None:
     from researchscout.embed.local import LocalEmbedder
 
