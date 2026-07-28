@@ -101,3 +101,55 @@ def test_breakthrough_rewards_momentum(session: Session) -> None:
     assert result.total > math.log1p(80.0)  # rising series scores above its level alone
     assert "citation" in result.contributions
     assert breakthrough(session, "arxiv:9999.99999").total == 0.0  # no signals -> no boost
+
+
+@pytest.mark.integration
+def test_sources_sharing_a_type_score_independently(session: Session) -> None:
+    """HN points and Bluesky engagement both write social_mention on different scales;
+    interleaved into one series they would fake level jumps and huge derivatives."""
+    from researchscout.schema import Author, Paper, Signal, SignalType
+    from researchscout.store.papers import upsert_paper
+    from researchscout.store.signals import append_signal
+
+    def _paper(pid: str, arxiv: str) -> Paper:
+        return Paper(
+            id=pid,
+            external_ids={"arxiv": arxiv},
+            title="T",
+            abstract="A",
+            authors=[Author(name="X")],
+            categories=["cs.LG"],
+            published_at=datetime(2024, 1, 1, tzinfo=UTC),
+            source="arxiv",
+        )
+
+    def _append(pid: str, source: str, points: list[tuple[float, float]]) -> None:
+        now = datetime.now(UTC)
+        for days_ago, value in points:
+            append_signal(
+                session,
+                Signal(
+                    paper_id=pid,
+                    type=SignalType.social_mention,
+                    source=source,
+                    value=value,
+                    observed_at=now - timedelta(days=days_ago),
+                ),
+            )
+
+    hn_series = [(3.0, 100.0), (1.0, 110.0)]
+    bsky_series = [(2.0, 3.0), (0.5, 5.0)]
+    upsert_paper(session, _paper("arxiv:2401.00011", "2401.00011"))  # both sources
+    upsert_paper(session, _paper("arxiv:2401.00012", "2401.00012"))  # hn only
+    upsert_paper(session, _paper("arxiv:2401.00013", "2401.00013"))  # bsky only
+    _append("arxiv:2401.00011", "hn_discussion", hn_series)
+    _append("arxiv:2401.00011", "bluesky", bsky_series)
+    _append("arxiv:2401.00012", "hn_discussion", hn_series)
+    _append("arxiv:2401.00013", "bluesky", bsky_series)
+
+    both = breakthrough(session, "arxiv:2401.00011")
+    hn_only = breakthrough(session, "arxiv:2401.00012")
+    bsky_only = breakthrough(session, "arxiv:2401.00013")
+    assert both.contributions["social_mention"] == pytest.approx(
+        hn_only.contributions["social_mention"] + bsky_only.contributions["social_mention"]
+    )
