@@ -7,6 +7,7 @@ velocity and acceleration. This module stores and reads the series; the breakthr
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -70,6 +71,23 @@ def all_series(
     grouped: dict[str, list[tuple[datetime, float]]] = {}
     for type_name, observed_at, value in rows:
         grouped.setdefault(type_name, []).append((observed_at, value))
+    return grouped
+
+
+def all_series_many(
+    session: Session, paper_ids: Sequence[str], since: datetime
+) -> dict[str, dict[str, list[tuple[datetime, float]]]]:
+    """Signal series for many papers since a time, grouped by paper then type (one query)."""
+    if not paper_ids:
+        return {}
+    rows = session.execute(
+        select(SignalRow.paper_id, SignalRow.type, SignalRow.observed_at, SignalRow.value)
+        .where(SignalRow.paper_id.in_(list(paper_ids)), SignalRow.observed_at >= since)
+        .order_by(SignalRow.paper_id, SignalRow.type, SignalRow.observed_at)
+    ).all()
+    grouped: dict[str, dict[str, list[tuple[datetime, float]]]] = {}
+    for paper_id, type_name, observed_at, value in rows:
+        grouped.setdefault(paper_id, {}).setdefault(type_name, []).append((observed_at, value))
     return grouped
 
 
