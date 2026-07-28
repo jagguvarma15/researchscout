@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 import typer
@@ -21,11 +22,13 @@ db_app = typer.Typer(help="Database setup and migrations.", no_args_is_help=True
 signals_app = typer.Typer(help="Inspect the signal time series.", no_args_is_help=True)
 topics_app = typer.Typer(help="Build and inspect emerging topics.", no_args_is_help=True)
 serve_app = typer.Typer(help="Run ResearchScout services.", no_args_is_help=True)
+eval_app = typer.Typer(help="Evaluate retrieval quality and embedding speed.", no_args_is_help=True)
 app.add_typer(sources_app, name="sources")
 app.add_typer(db_app, name="db")
 app.add_typer(signals_app, name="signals")
 app.add_typer(topics_app, name="topics")
 app.add_typer(serve_app, name="serve")
+app.add_typer(eval_app, name="eval")
 
 
 @app.command()
@@ -88,13 +91,17 @@ def ingest(
 @app.command()
 def index(
     batch_size: Annotated[int, typer.Option("--batch", help="Embedding batch size.")] = 64,
+    model: Annotated[
+        str | None, typer.Option(help="Embedding model id (defaults to RS_EMBEDDING_MODEL).")
+    ] = None,
 ) -> None:
     """Embed stored papers into the pgvector index."""
+    from researchscout.config import get_settings
     from researchscout.embed.local import LocalEmbedder
     from researchscout.store.db import session_scope
     from researchscout.store.vectors import index_papers
 
-    embedder = LocalEmbedder()
+    embedder = LocalEmbedder(model or get_settings().embedding_model)
     with session_scope() as session:
         count = index_papers(session, embedder, batch_size=batch_size)
     typer.secho(f"Embedded {count} paper(s) with {embedder.model_id}.", fg=typer.colors.GREEN)
@@ -373,3 +380,122 @@ def topics_build(
     typer.secho(f"built {len(topics)} topic(s)", fg=typer.colors.GREEN)
     for topic in topics:
         typer.echo(f"  {topic.score:7.3f}  {topic.size:>3}  {topic.label}")
+
+
+@eval_app.command("draft")
+def eval_draft(
+    out: Annotated[Path, typer.Option("--out", help="Where to write the YAML query set.")] = Path(
+        "config/eval_queries.yaml"
+    ),
+    n: Annotated[int, typer.Option("--n", help="How many known-item cases to draft.")] = 20,
+    days: Annotated[int, typer.Option(help="Corpus window to draft from, in days.")] = 3650,
+) -> None:
+    """Draft a known-item query set (each title -> its paper); hand-edit before trusting it."""
+    from researchscout.evaluate import EvalCase, save_cases
+    from researchscout.store.db import session_scope
+    from researchscout.store.facets import PaperFacets
+    from researchscout.store.papers import list_papers
+
+    with session_scope() as session:
+        papers = list_papers(session, facets=PaperFacets(days=days), limit=n)
+    if not papers:
+        typer.secho("No papers in the window - ingest first.", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    cases = [EvalCase(query=paper.title, relevant=(paper.id,)) for paper in papers]
+    save_cases(out, cases)
+    typer.secho(
+        f"Wrote {len(cases)} case(s) to {out}. Edit the queries before trusting the numbers.",
+        fg=typer.colors.GREEN,
+    )
+
+
+@eval_app.command("retrieval")
+def eval_retrieval(
+    queries: Annotated[Path, typer.Option(help="YAML query set (see scout eval draft).")] = Path(
+        "config/eval_queries.yaml"
+    ),
+    k: Annotated[int, typer.Option("-k", "--top-k", help="Cutoff for the metrics.")] = 10,
+    days: Annotated[
+        int, typer.Option(help="Freshness window; wide by default so older papers stay in.")
+    ] = 3650,
+    model: Annotated[
+        str | None,
+        typer.Option(help="Embedding model id (must be indexed; see scout index --model)."),
+    ] = None,
+    rerank: Annotated[
+        bool, typer.Option("--rerank/--no-rerank", help="Include the cross-encoder pass.")
+    ] = False,
+) -> None:
+    """Score retrieval against a labeled query set (Recall@k and nDCG@k)."""
+    from researchscout.config import get_settings
+    from researchscout.embed.local import LocalEmbedder
+    from researchscout.evaluate import evaluate_cases, load_cases
+    from researchscout.retrieve.search import retrieve
+    from researchscout.store.db import session_scope
+
+    cases = load_cases(queries)
+    if not cases:
+        typer.secho(f"No cases in {queries} - run scout eval draft.", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    embedder = LocalEmbedder(model or get_settings().embedding_model)
+    with session_scope() as session:
+
+        def ranker(query: str) -> list[str]:
+            hits = retrieve(session, embedder, query, k=k, days=days, use_rerank=rerank)
+            return [item.paper.id for item in hits]
+
+        report = evaluate_cases(cases, ranker, k=k)
+    for result in report.cases:
+        typer.echo(f"  recall {result.recall:.2f}  ndcg {result.ndcg:.2f}  {result.query[:70]}")
+    typer.secho(
+        f"{embedder.model_id}  mean recall@{k} {report.mean_recall:.3f}"
+        f"  mean ndcg@{k} {report.mean_ndcg:.3f}  ({len(report.cases)} cases)",
+        fg=typer.colors.GREEN,
+    )
+
+
+@eval_app.command("embed-speed")
+def eval_embed_speed(
+    model: Annotated[
+        str | None, typer.Option(help="Embedding model id (defaults to RS_EMBEDDING_MODEL).")
+    ] = None,
+    device: Annotated[
+        str | None, typer.Option(help="cpu or mps (default: mps when available).")
+    ] = None,
+    backend: Annotated[
+        str,
+        typer.Option(
+            help="torch or onnx (onnx needs a manual 'uv pip install optimum[onnxruntime]'; "
+            "kept out of the lock because optimum pins an older transformers)."
+        ),
+    ] = "torch",
+    batch_size: Annotated[int, typer.Option("--batch", help="Embedding batch size.")] = 64,
+    docs: Annotated[int, typer.Option(help="How many documents to embed.")] = 256,
+) -> None:
+    """Benchmark document-embedding throughput over stored title+abstract texts."""
+    from researchscout.config import get_settings
+    from researchscout.embed.local import LocalEmbedder
+    from researchscout.evaluate import benchmark_embedding
+    from researchscout.store.db import session_scope
+    from researchscout.store.facets import PaperFacets
+    from researchscout.store.papers import list_papers
+
+    with session_scope() as session:
+        papers = list_papers(session, facets=PaperFacets(days=3650), limit=min(docs, 500))
+    if not papers:
+        typer.secho("No papers stored - ingest first.", fg=typer.colors.YELLOW)
+        raise typer.Exit(1)
+    texts = [f"{paper.title}\n\n{paper.abstract}" for paper in papers]
+    while len(texts) < docs:
+        texts.extend(texts)
+    texts = texts[:docs]
+    embedder = LocalEmbedder(
+        model or get_settings().embedding_model, device=device, backend=backend
+    )
+    embedder.embed_documents(texts[:8])  # warmup: model load stays out of the timing
+    rate = benchmark_embedding(embedder.embed_documents, texts, batch_size=batch_size)
+    typer.secho(
+        f"{embedder.model_id}  device {device or 'auto'}  backend {backend}"
+        f"  {rate:.1f} docs/sec  (batch {batch_size}, {len(texts)} docs)",
+        fg=typer.colors.GREEN,
+    )
