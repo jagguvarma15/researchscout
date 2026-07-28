@@ -125,6 +125,37 @@ def test_papers_query_forwards_facets(monkeypatch: pytest.MonkeyPatch) -> None:
     assert facets.kind == "non_tech"
 
 
+def test_papers_kind_ai_forwards_on_both_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_list(session: object, **kwargs: object) -> list:
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(papers_router, "list_papers", fake_list)
+    monkeypatch.setattr(papers_router, "count_papers", lambda *a, **k: 0)
+    assert _client().get("/v1/papers", params={"kind": "ai"}).status_code == 200
+    facets = seen["facets"]
+    assert isinstance(facets, PaperFacets)
+    assert facets.kind == "ai"
+
+    seen.clear()
+
+    def fake_retrieve(session: object, embedder: object, q: str, **kwargs: object) -> list:
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(papers_router, "retrieve", fake_retrieve)
+    assert _client().get("/v1/papers", params={"q": "ssm", "kind": "ai"}).status_code == 200
+    facets = seen["facets"]
+    assert isinstance(facets, PaperFacets)
+    assert facets.kind == "ai"
+
+
+def test_papers_bogus_kind_is_422() -> None:
+    assert _client().get("/v1/papers", params={"kind": "banana"}).status_code == 422
+
+
 def test_month_without_year_is_422() -> None:
     assert _client().get("/v1/papers", params={"month": 3}).status_code == 422
 
