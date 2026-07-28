@@ -1,9 +1,10 @@
 """Agentic multi-hop retrieval: decompose the question, retrieve per part, follow references.
 
 One embedding of a broad question misses papers matching only one facet. This asks the LLM to
-split it into focused sub-questions, retrieves each, merges the hits, and (best-effort) follows
-one hop of Semantic Scholar references to pull in cited work already in the store. The union
-feeds the same grounded-citation synthesis, which still cites only what it was handed.
+split it into focused sub-questions, retrieves each, fuses the hits with RRF (a paper surfaced
+by several sub-questions floats up), and (best-effort) follows one hop of Semantic Scholar
+references to pull in cited work already in the store. The union feeds the same
+grounded-citation synthesis, which still cites only what it was handed.
 
 Off by default (``RS_AGENTIC_ASK``): it costs an extra LLM call and one retrieval per sub-question.
 """
@@ -18,6 +19,7 @@ from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
 from researchscout.retrieve.search import ScoredPaper, retrieve
 from researchscout.schema import normalize_arxiv_id
+from researchscout.store.facets import PaperFacets
 
 _DECOMPOSE_SYSTEM = (
     "Break the user's research question into 2-4 focused sub-questions, one per line, with no "
@@ -28,6 +30,8 @@ _S2_BASE = "https://api.semanticscholar.org/graph/v1"
 _REQUEST_TIMEOUT = 30.0
 # Strips a leading list marker (1., 2), -, *, •) but not real leading digits.
 _MARKER_RE = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
+# Same constant as retrieve.search's leg fusion, applied here across sub-questions.
+_RRF_K = 60
 
 
 def decompose(llm: LLM, question: str, *, max_parts: int = 4) -> list[str]:
@@ -43,8 +47,26 @@ def decompose(llm: LLM, question: str, *, max_parts: int = 4) -> list[str]:
     return parts[:max_parts] if parts else [question]
 
 
+def _fuse(results: list[list[ScoredPaper]]) -> list[ScoredPaper]:
+    """RRF across sub-question result lists (ranks, not scores, so lists need no calibration)."""
+    fused: dict[str, float] = {}
+    keep: dict[str, ScoredPaper] = {}
+    for hits in results:
+        for rank, item in enumerate(hits, start=1):
+            paper_id = item.paper.id
+            fused[paper_id] = fused.get(paper_id, 0.0) + 1.0 / (_RRF_K + rank)
+            current = keep.get(paper_id)
+            if current is None or item.distance < current.distance:
+                keep[paper_id] = item
+    rescored = [
+        ScoredPaper(paper=keep[paper_id].paper, score=score, distance=keep[paper_id].distance)
+        for paper_id, score in fused.items()
+    ]
+    return sorted(rescored, key=lambda item: item.score, reverse=True)
+
+
 def _merge(results: list[list[ScoredPaper]]) -> list[ScoredPaper]:
-    """Union hits across sub-questions, deduped by paper id keeping the highest score."""
+    """Union lists, deduped by paper id keeping the highest score (used for the reference hop)."""
     best: dict[str, ScoredPaper] = {}
     for hits in results:
         for item in hits:
@@ -108,11 +130,19 @@ def agentic_retrieve(
     *,
     k: int = 8,
     days: int | None = None,
+    facets: PaperFacets | None = None,
     follow_citations: bool = True,
 ) -> list[ScoredPaper]:
-    """Decompose, retrieve per sub-question, merge, follow one hop, and take the top-k."""
+    """Decompose, retrieve per sub-question, fuse by RRF, follow one hop, and take the top-k.
+
+    ``facets`` applies to every sub-retrieval, so agentic mode filters exactly like the
+    single-shot path. The reference hop appends context papers at score 0 via ``_merge`` (they
+    never displace a retrieved hit).
+    """
     parts = decompose(llm, question)
-    merged = _merge([retrieve(session, embedder, part, k=k, days=days) for part in parts])
+    merged = _fuse(
+        [retrieve(session, embedder, part, k=k, days=days, facets=facets) for part in parts]
+    )
     if follow_citations and merged:
         merged = _merge([merged, follow_references(session, merged)])
     return merged[:k]
