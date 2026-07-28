@@ -13,6 +13,8 @@
   interface Message {
     role: 'user' | 'assistant';
     text: string;
+    phase?: 'searching' | 'thinking' | 'streaming' | 'done';
+    retrieved?: number;
     cited?: string[];
     used?: UsedPaper[];
     error?: boolean;
@@ -23,6 +25,20 @@
   let busy = $state(false);
   let messages = $state<Message[]>([]);
   let scroller: HTMLElement | undefined = $state();
+  let fab: HTMLButtonElement | undefined = $state();
+  let inputEl: HTMLInputElement | undefined = $state();
+  let everOpened = false;
+
+  $effect(() => {
+    // Hand focus to the composer on open and back to the FAB on close; the guard keeps the
+    // mount-time run from stealing focus on page load.
+    if (open) {
+      everOpened = true;
+      inputEl?.focus();
+    } else if (everOpened) {
+      fab?.focus();
+    }
+  });
 
   $effect(() => {
     // Track message content so streaming tokens keep the newest text in view.
@@ -39,15 +55,35 @@
     }
     if (!data) return;
     const payload = JSON.parse(data);
-    if (event === 'token') {
+    if (event === 'meta') {
+      current.retrieved = payload.retrieved;
+      if (current.phase !== 'streaming') current.phase = 'thinking';
+    } else if (event === 'token') {
+      // The first token flips to streaming whether or not meta arrived; guardrail refusals
+      // skip meta entirely.
+      current.phase = 'streaming';
       current.text += payload.delta;
     } else if (event === 'done') {
+      current.phase = 'done';
       current.cited = payload.cited;
       current.used = payload.used;
     } else if (event === 'error') {
+      current.phase = 'done';
       current.text = payload.message ?? 'Something went wrong.';
       current.error = true;
     }
+  }
+
+  function statusLabel(message: Message): string | null {
+    if (message.role !== 'assistant' || message.text) return null;
+    if (message.phase === 'searching') return 'Searching papers';
+    if (message.phase === 'thinking') {
+      if (message.retrieved && message.retrieved > 0) {
+        return `Reading ${message.retrieved} paper${message.retrieved === 1 ? '' : 's'}`;
+      }
+      return 'Thinking';
+    }
+    return null;
   }
 
   async function send(event: SubmitEvent) {
@@ -57,7 +93,7 @@
     input = '';
     busy = true;
     messages.push({ role: 'user', text: question });
-    const current: Message = { role: 'assistant', text: '' };
+    const current: Message = { role: 'assistant', text: '', phase: 'searching' };
     messages.push(current);
 
     try {
@@ -95,23 +131,17 @@
       current.text = 'Connection lost mid-answer — try again.';
       current.error = true;
     } finally {
+      current.phase = 'done';
       busy = false;
     }
   }
 </script>
 
-<button
-  class="fab"
-  onclick={() => (open = !open)}
-  aria-expanded={open}
-  aria-label={open ? 'Close the chat panel' : 'Ask about papers'}
->
-  {#if open}
-    <X size={22} aria-hidden="true" />
-  {:else}
+{#if !open}
+  <button class="fab" bind:this={fab} onclick={() => (open = true)} aria-label="Ask about papers">
     <MessageCircle size={22} aria-hidden="true" />
-  {/if}
-</button>
+  </button>
+{/if}
 
 <aside class="drawer" class:open aria-label="Ask about research papers" aria-hidden={!open}>
   <header>
@@ -129,7 +159,15 @@
     {/if}
     {#each messages as message}
       <div class="msg {message.role}" class:error={message.error}>
-        <p>{message.text}{#if message.role === 'assistant' && busy && message === messages[messages.length - 1]}<span class="cursor">▍</span>{/if}</p>
+        {#if statusLabel(message)}
+          <p class="pending" role="status">
+            {statusLabel(message)}<span class="dots" aria-hidden="true"
+              ><span>.</span><span>.</span><span>.</span></span
+            >
+          </p>
+        {:else}
+          <p>{message.text}{#if message.role === 'assistant' && busy && message === messages[messages.length - 1]}<span class="cursor">▍</span>{/if}</p>
+        {/if}
         {#if message.cited && message.cited.length > 0}
           <p class="citations">
             {#each message.used ?? [] as paper}
@@ -146,6 +184,7 @@
     <input
       type="text"
       placeholder="What's new in reinforcement learning?"
+      bind:this={inputEl}
       bind:value={input}
       disabled={busy}
     />
@@ -301,8 +340,33 @@
       opacity: 0;
     }
   }
+  .msg .pending {
+    color: var(--muted, #5d6570);
+  }
+  .dots span {
+    display: inline-block;
+    animation: dot-fade 1.2s infinite;
+  }
+  .dots span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+  .dots span:nth-child(3) {
+    animation-delay: 0.4s;
+  }
+  @keyframes dot-fade {
+    0%,
+    60%,
+    100% {
+      opacity: 0.25;
+    }
+    20% {
+      opacity: 1;
+    }
+  }
+  /* Stilled to a static ellipsis under reduced motion, like the cursor. */
   @media (prefers-reduced-motion: reduce) {
-    .cursor {
+    .cursor,
+    .dots span {
       animation: none;
     }
   }
