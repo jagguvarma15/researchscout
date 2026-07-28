@@ -57,7 +57,7 @@
   ];
 
   function allowed(groupTech: boolean): boolean {
-    if (kind === 'tech') return groupTech;
+    if (kind === 'tech' || kind === 'ai') return groupTech;
     if (kind === 'non_tech') return !groupTech;
     return true;
   }
@@ -111,7 +111,8 @@
 
   function extract() {
     const params = new URLSearchParams();
-    if (kind) params.set('kind', kind);
+    // Always explicit: kind=all is how the feed's ai default stays switched off.
+    params.set('kind', kind || 'all');
     const active = groups.filter((key) => {
       const option = GROUPS.find((g) => g.key === key);
       return option !== undefined && allowed(option.tech);
@@ -198,8 +199,9 @@
         {#if tab === 'subjects'}
           <fieldset>
             <legend>Kind</legend>
-            <div class="segmented" role="group" aria-label="Tech or non-tech">
-              <button class:on={kind === ''} onclick={() => (kind = '')}>All</button>
+            <div class="segmented" role="group" aria-label="Paper kind">
+              <button class:on={kind === 'all'} onclick={() => (kind = 'all')}>All</button>
+              <button class:on={kind === 'ai'} onclick={() => (kind = 'ai')}>AI</button>
               <button class:on={kind === 'tech'} onclick={() => (kind = 'tech')}>Tech</button>
               <button class:on={kind === 'non_tech'} onclick={() => (kind = 'non_tech')}>
                 Non-tech
