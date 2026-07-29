@@ -28,9 +28,13 @@ class PaperSummary(BaseModel):
     url: str | None
     pdf_url: str | None
     score: float | None = None
+    # Why the personalized feed picked this paper (None everywhere else).
+    reason: str | None = None
 
     @classmethod
-    def from_paper(cls, paper: Paper, *, score: float | None = None) -> PaperSummary:
+    def from_paper(
+        cls, paper: Paper, *, score: float | None = None, reason: str | None = None
+    ) -> PaperSummary:
         return cls(
             id=paper.id,
             title=paper.title,
@@ -46,6 +50,7 @@ class PaperSummary(BaseModel):
             url=paper.url,
             pdf_url=paper.pdf_url,
             score=score,
+            reason=reason,
         )
 
 
