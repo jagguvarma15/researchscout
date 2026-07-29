@@ -177,6 +177,29 @@ def test_group_facet_intersects_kind(session: Session) -> None:
     assert empty == []
 
 
+def test_full_text_batch_prioritizes_and_skips_checked(session: Session) -> None:
+    from researchscout.store.papers import papers_missing_full_text, set_full_text
+
+    for pid, arxiv, title, month in [
+        ("arxiv:2404.00001", "2404.00001", "Newest", 4),
+        ("arxiv:2403.00002", "2403.00002", "Saved", 3),
+        ("arxiv:2402.00003", "2402.00003", "Checked", 2),
+    ]:
+        upsert_paper(
+            session,
+            _paper(pid, arxiv, title, published_at=datetime(2024, month, 1, tzinfo=UTC)),
+        )
+    session.flush()
+    set_full_text(session, "arxiv:2402.00003", "")  # checked: no HTML available
+
+    pending = papers_missing_full_text(session, limit=10, first=["arxiv:2403.00002"])
+    assert [paper_id for paper_id, _ in pending] == ["arxiv:2403.00002", "arxiv:2404.00001"]
+
+    set_full_text(session, "arxiv:2403.00002", "## S\n\nbody")
+    pending = papers_missing_full_text(session, limit=10)
+    assert [paper_id for paper_id, _ in pending] == ["arxiv:2404.00001"]
+
+
 def test_kind_ai_matches_category_overlap(session: Session) -> None:
     _seed_mixed(session)
     upsert_paper(
