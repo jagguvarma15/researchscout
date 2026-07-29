@@ -165,6 +165,7 @@ export interface TopicDetail {
   summary: string | null;
   score: number;
   size: number;
+  trend: string | null;
   papers: TopicPaper[];
 }
 
