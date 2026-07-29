@@ -374,7 +374,12 @@ def topics_build(
     llm = OpenAICompatLLM()
     with session_scope() as session:
         topics = build_topics(
-            session, embedder, llm, days=window, threshold=settings.cluster_distance_threshold
+            session,
+            embedder,
+            llm,
+            days=window,
+            threshold=settings.cluster_distance_threshold,
+            algo=settings.cluster_algo,
         )
         replace_topics(session, topics)
     typer.secho(f"built {len(topics)} topic(s)", fg=typer.colors.GREEN)
