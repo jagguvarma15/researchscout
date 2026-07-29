@@ -94,8 +94,11 @@ def index(
     model: Annotated[
         str | None, typer.Option(help="Embedding model id (defaults to RS_EMBEDDING_MODEL).")
     ] = None,
+    chunks: Annotated[
+        bool, typer.Option("--chunks", help="Also chunk and embed fetched full text.")
+    ] = False,
 ) -> None:
-    """Embed stored papers into the pgvector index."""
+    """Embed stored papers into the pgvector index (and full-text chunks with --chunks)."""
     from researchscout.config import get_settings
     from researchscout.embed.local import LocalEmbedder
     from researchscout.store.db import session_scope
@@ -104,7 +107,15 @@ def index(
     embedder = LocalEmbedder(model or get_settings().embedding_model)
     with session_scope() as session:
         count = index_papers(session, embedder, batch_size=batch_size)
-    typer.secho(f"Embedded {count} paper(s) with {embedder.model_id}.", fg=typer.colors.GREEN)
+        chunk_count = 0
+        if chunks:
+            from researchscout.store.chunks import index_chunks
+
+            chunk_count = index_chunks(session, embedder, batch_size=batch_size)
+    message = f"Embedded {count} paper(s) with {embedder.model_id}."
+    if chunks:
+        message += f" Embedded {chunk_count} chunk(s)."
+    typer.secho(message, fg=typer.colors.GREEN)
 
 
 @app.command()
