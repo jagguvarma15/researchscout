@@ -116,6 +116,8 @@ class TopicSummary(BaseModel):
     summary: str | None
     score: float
     size: int
+    # new | rising | steady | fading (None before the first continuity-aware build).
+    trend: str | None = None
 
 
 class TopicDetail(TopicSummary):
