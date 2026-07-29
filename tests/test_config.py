@@ -14,6 +14,7 @@ def test_defaults() -> None:
     assert s.foryou_centroids == 0  # legacy single-centroid feed until opted in
     assert s.foryou_mmr_lambda == 1.0
     assert s.foryou_explore_slots == 0
+    assert s.chunk_retrieval is False
 
 
 def test_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
