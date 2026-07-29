@@ -71,6 +71,9 @@ class Settings(BaseSettings):
     scheduler_topics_interval_sec: int = 86400
     # Agentic ask: decompose the question into sub-questions and follow one hop of references.
     agentic_ask: bool = False
+    # Chunk-level retrieval: a third RRF leg over full-text chunks (needs scout fulltext +
+    # scout index --chunks), and best-chunk excerpts in grounded answers.
+    chunk_retrieval: bool = False
     # For You v2: 0 keeps the legacy single-centroid, interests-only feed. >=1 builds a profile
     # from saved papers (weighted down by save age) plus interests, clustered into up to N
     # centroids; the matching centroid names the "why this paper" reason.
