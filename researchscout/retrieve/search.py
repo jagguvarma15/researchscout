@@ -7,6 +7,8 @@ The algorithm, in order:
 2. **Two retrieval legs** over the filtered pool: pgvector cosine ANN on the query embedding, and
    Postgres full-text search (``websearch_to_tsquery`` + ``ts_rank_cd`` over the generated,
    title-weighted ``search_tsv`` column). Each leg contributes its top ``_LEG_K`` candidates.
+   With ``RS_CHUNK_RETRIEVAL`` on, a third leg searches full-text chunks (pooled to papers by
+   best chunk), surfacing papers whose key content never appears in title or abstract.
 3. **Reciprocal Rank Fusion** — a candidate's fused score is ``sum(1 / (60 + rank))`` across the
    legs it appears in (rank is 1-based). RRF needs no score calibration between cosine distance
    and ts_rank, and papers found by both legs float upward.
@@ -40,6 +42,7 @@ from researchscout.embed.base import Embedder
 from researchscout.rerank import Candidate, get_reranker, rerank
 from researchscout.schema import Paper
 from researchscout.score import breakthrough_many
+from researchscout.store.chunks import search_chunks
 from researchscout.store.facets import PaperFacets, facets_where
 from researchscout.store.lexical import lexical_search
 from researchscout.store.papers import get_papers
@@ -97,13 +100,22 @@ def retrieve(
     except SQLAlchemyError:
         session.rollback()
         lexical_hits = []
+    chunk_hits: list[tuple[str, float]] = []
+    if settings.chunk_retrieval:
+        try:
+            chunk_hits = search_chunks(
+                session, query_vector, model_id=embedder.model_id, k=_LEG_K, where=where
+            )
+        except SQLAlchemyError:
+            session.rollback()
 
     fused: dict[str, float] = {}
-    for hits in (vector_hits, lexical_hits):
+    for hits in (vector_hits, lexical_hits, chunk_hits):
         for rank, (paper_id, _leg_score) in enumerate(hits, start=1):
             fused[paper_id] = fused.get(paper_id, 0.0) + 1.0 / (_RRF_K + rank)
 
-    distances = dict(vector_hits)
+    # A chunk-only hit still has a measured distance; the abstract-level one wins when both exist.
+    distances = {**dict(chunk_hits), **dict(vector_hits)}
     # Hydrate every fused candidate in three grouped queries, not one round-trip per paper.
     papers = get_papers(session, list(fused))
     boosts = breakthrough_many(session, list(papers))
