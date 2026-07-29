@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -62,8 +63,11 @@ class Settings(BaseSettings):
     rerank_top_n: int = 40
     # Emerging-topic clustering: the window to cluster over and the cosine-distance threshold that
     # decides how tight a cluster is (lower = tighter, more topics). The scheduler rebuilds daily.
+    # algo "hdbscan" (sklearn-native) needs no fixed count and leaves outliers unclustered; the
+    # threshold only applies to the default agglomerative path.
     cluster_window_days: int = 30
     cluster_distance_threshold: float = 0.5
+    cluster_algo: Literal["agglomerative", "hdbscan"] = "agglomerative"
     scheduler_topics_interval_sec: int = 86400
     # Agentic ask: decompose the question into sub-questions and follow one hop of references.
     agentic_ask: bool = False
