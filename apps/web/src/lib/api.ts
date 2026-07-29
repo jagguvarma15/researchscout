@@ -21,6 +21,8 @@ export interface PaperSummary {
   url: string | null;
   pdf_url: string | null;
   score: number | null;
+  // Why the personalized feed picked this paper (null everywhere else).
+  reason?: string | null;
 }
 
 export interface FeedParams {
