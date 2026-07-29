@@ -6,6 +6,8 @@ from researchscout.sources import (  # noqa: F401  (import registers connectors)
     code_adoption,
     hf_trending,
     hn_discussion,
+    openalex,
+    openreview,
     s2_signal,
 )
 from researchscout.sources.base import (
