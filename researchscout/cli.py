@@ -108,6 +108,47 @@ def index(
 
 
 @app.command()
+def fulltext(
+    limit: Annotated[int, typer.Option("--limit", help="Papers to fetch this run.")] = 25,
+) -> None:
+    """Fetch full text for stored papers (saved and interacted-with first), politely paced.
+
+    arXiv HTML first, ar5iv fallback; papers with neither are marked checked so the batch
+    never retries them. Full-content harvesting is not permitted, so keep batches modest.
+    """
+    import time
+
+    from sqlalchemy import select
+
+    from researchscout.config import get_settings
+    from researchscout.fulltext import fetch_full_text
+    from researchscout.store.db import session_scope
+    from researchscout.store.models import EventRow, SavedPaperRow
+    from researchscout.store.papers import papers_missing_full_text, set_full_text
+
+    delay = get_settings().arxiv_page_delay_sec
+    fetched = unavailable = 0
+    with session_scope() as session:
+        priority = set(session.execute(select(SavedPaperRow.paper_id)).scalars()) | set(
+            session.execute(select(EventRow.paper_id).distinct()).scalars()
+        )
+        pending = papers_missing_full_text(session, limit=limit, first=sorted(priority))
+        for index, (paper_id, arxiv_id) in enumerate(pending):
+            if index and delay > 0:
+                time.sleep(delay)
+            text = fetch_full_text(arxiv_id)
+            set_full_text(session, paper_id, text or "")
+            if text is None:
+                unavailable += 1
+            else:
+                fetched += 1
+    typer.secho(
+        f"full text: fetched={fetched} unavailable={unavailable} of {len(pending)} attempted",
+        fg=typer.colors.GREEN,
+    )
+
+
+@app.command()
 def search(
     query: Annotated[str, typer.Argument(help="Search query / topic.")],
     days: Annotated[int | None, typer.Option(help="Freshness window in days.")] = None,
