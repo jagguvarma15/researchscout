@@ -48,8 +48,9 @@ def _setup(
 ) -> None:
     monkeypatch.setattr(search_mod, "vector_search", lambda *a, **k: vector)
     monkeypatch.setattr(search_mod, "lexical_search", lambda *a, **k: lexical)
-    # Hermetic against a local .env that enables reranking: fusion order is under test here.
+    # Hermetic against a local .env that enables reranking or chunks: fusion is under test.
     monkeypatch.setattr(search_mod, "get_reranker", lambda: None)
+    monkeypatch.setattr(search_mod, "search_chunks", lambda *a, **k: [])
     monkeypatch.setattr(search_mod, "get_papers", lambda s, ids: {pid: _paper(pid) for pid in ids})
     cites = citations or {}
     monkeypatch.setattr(
@@ -117,6 +118,29 @@ def test_use_rerank_false_never_touches_the_reranker(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(search_mod, "get_reranker", boom)
     results = retrieve(_session(), StubEmbedder(), "q", k=5, days=30, use_rerank=False)
+    assert [item.paper.id for item in results] == ["arxiv:1"]
+
+
+def test_chunk_leg_joins_the_fusion_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    _setup(monkeypatch, vector=[("arxiv:1", 0.1)], lexical=[])
+    monkeypatch.setenv("RS_CHUNK_RETRIEVAL", "1")
+    # arxiv:2 is invisible to the abstract-level legs; only its full text matches.
+    monkeypatch.setattr(search_mod, "search_chunks", lambda *a, **k: [("arxiv:2", 0.2)])
+    results = retrieve(_session(), StubEmbedder(), "q", k=10, days=30)
+    by_id = {item.paper.id: item for item in results}
+    assert set(by_id) == {"arxiv:1", "arxiv:2"}
+    assert by_id["arxiv:2"].distance == 0.2  # the chunk distance is a measured one
+
+
+def test_chunk_leg_never_runs_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    _setup(monkeypatch, vector=[("arxiv:1", 0.1)], lexical=[])
+    monkeypatch.setenv("RS_CHUNK_RETRIEVAL", "0")
+
+    def boom(*a: object, **k: object) -> list:
+        raise AssertionError("search_chunks must not be called when the flag is off")
+
+    monkeypatch.setattr(search_mod, "search_chunks", boom)
+    results = retrieve(_session(), StubEmbedder(), "q", k=10, days=30)
     assert [item.paper.id for item in results] == ["arxiv:1"]
 
 
