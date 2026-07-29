@@ -17,6 +17,7 @@ dependencies = [
     "pgvector>=0.3",
     "sentence-transformers>=3.0",
     "openai>=1.0",
+    "selectolax>=0.4.11",
 ]
 
 [project.optional-dependencies]
