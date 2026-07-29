@@ -8,7 +8,7 @@ now" — the clustering the product has always promised but never had.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
@@ -41,6 +41,8 @@ class Topic:
     score: float
     size: int
     members: list[Member]
+    # Unit-mean member embedding: how the store matches a rebuilt topic to its previous self.
+    centroid: list[float] = field(default_factory=list)
 
 
 def cluster_labels(
@@ -106,6 +108,18 @@ def cluster_keywords(
         order = np.argsort(weights[row])[::-1]
         keywords[key] = [str(terms[i]) for i in order[:top_k] if weights[row][i] > 0]
     return keywords
+
+
+def unit_centroid(vectors: list[list[float]]) -> list[float]:
+    """The cluster's mean embedding scaled to unit length (cosine-comparable across builds)."""
+    import numpy as np
+
+    arr = np.array(vectors, dtype=float)
+    centroid = arr.mean(axis=0)
+    norm = float(np.linalg.norm(centroid))
+    if norm > 0:
+        centroid = centroid / norm
+    return [float(value) for value in centroid]
 
 
 def representative_order(vectors: list[list[float]]) -> list[int]:
@@ -193,6 +207,7 @@ def build_topics(
                 score=sum(member.score for member in scored),
                 size=len(scored),
                 members=scored[:_MEMBERS_STORED],
+                centroid=unit_centroid([vector for _, _, vector in members]),
             )
         )
 
