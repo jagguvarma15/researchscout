@@ -12,9 +12,11 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
 from researchscout.retrieve.search import ScoredPaper, retrieve
+from researchscout.store.chunks import best_chunk_texts
 from researchscout.trace import trace_span
 
 _SYSTEM_PROMPT = (
@@ -53,9 +55,32 @@ class StreamDelta:
     text: str
 
 
-def _context(papers: list[ScoredPaper]) -> str:
-    return "\n\n".join(
-        f"[{item.paper.id}] {item.paper.title}\n{item.paper.abstract}" for item in papers
+# Keeps an 8-paper prompt inside Ollama's default 4096-token window even with excerpts.
+_EXCERPT_CHARS = 600
+
+
+def _context(papers: list[ScoredPaper], quotes: dict[str, str] | None = None) -> str:
+    parts = []
+    for item in papers:
+        block = f"[{item.paper.id}] {item.paper.title}\n{item.paper.abstract}"
+        quote = (quotes or {}).get(item.paper.id)
+        if quote:
+            block += f"\nExcerpt: {quote[:_EXCERPT_CHARS]}"
+        parts.append(block)
+    return "\n\n".join(parts)
+
+
+def _excerpts_for(
+    session: Session, embedder: Embedder, question: str, used: list[ScoredPaper]
+) -> dict[str, str]:
+    """Best-chunk excerpts when chunk retrieval is on (empty when off or nothing indexed)."""
+    if not used or not get_settings().chunk_retrieval:
+        return {}
+    return best_chunk_texts(
+        session,
+        embedder.embed_query(question),
+        [item.paper.id for item in used],
+        model_id=embedder.model_id,
     )
 
 
@@ -113,7 +138,8 @@ def answer_stream(
             yield Answer(text=empty, cited=[], hallucinated=[], used=[])
             return
 
-        user_prompt = f"Question: {question}\n\nPapers:\n{_context(used)}"
+        quotes = _excerpts_for(session, embedder, question, used)
+        user_prompt = f"Question: {question}\n\nPapers:\n{_context(used, quotes)}"
         parts: list[str] = []
         for delta in llm.stream(_SYSTEM_PROMPT, user_prompt):
             parts.append(delta)
@@ -145,7 +171,8 @@ def answer(
                 text="No recent papers match this question.", cited=[], hallucinated=[], used=[]
             )
 
-        user_prompt = f"Question: {question}\n\nPapers:\n{_context(used)}"
+        quotes = _excerpts_for(session, embedder, question, used)
+        user_prompt = f"Question: {question}\n\nPapers:\n{_context(used, quotes)}"
         text = llm.complete(_SYSTEM_PROMPT, user_prompt)
         span["model"] = llm.model
 
