@@ -9,6 +9,7 @@ from researchscout.cluster import (
     cluster_labels,
     label_topic,
     representative_order,
+    unit_centroid,
 )
 from researchscout.llm.base import LLM
 
@@ -149,3 +150,11 @@ def test_build_topics_excludes_the_outlier_pool(monkeypatch: pytest.MonkeyPatch)
     assert len(topics) == 1
     assert topics[0].size == 2
     assert {member.paper_id for member in topics[0].members} == {"arxiv:1", "arxiv:2"}
+    norm = sum(value * value for value in topics[0].centroid) ** 0.5
+    assert norm == pytest.approx(1.0)
+
+
+def test_unit_centroid_is_normalized() -> None:
+    centroid = unit_centroid([[2.0, 0.0], [0.0, 2.0]])
+    assert sum(value * value for value in centroid) ** 0.5 == pytest.approx(1.0)
+    assert centroid[0] == pytest.approx(centroid[1])
