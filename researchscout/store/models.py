@@ -92,13 +92,23 @@ class DigestRow(Base):
 
 class TopicRow(Base):
     __tablename__ = "topics"
+    __table_args__ = (Index("ix_topics_key", "topic_key"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # Stable identity across the wholesale rebuilds: carried from the most similar previous
+    # topic (centroid cosine match), so size history and trends survive.
+    topic_key: Mapped[str] = mapped_column(String, nullable=False, server_default="")
     label: Mapped[str] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     score: Mapped[float] = mapped_column(Float)
     size: Mapped[int] = mapped_column(Integer)
     papers: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    # new | rising | steady | fading, from the size history.
+    trend: Mapped[str | None] = mapped_column(String, nullable=True)
+    # [{"built_at": iso, "size": int}, ...] oldest first, capped.
+    history: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
+    centroid: Mapped[list[float] | None] = mapped_column(JSONB, nullable=True)
+    first_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
