@@ -29,8 +29,16 @@ def my_feed(
     """Papers ranked by the caller's interests; empty when they have none."""
     window = days if days is not None else get_settings().freshness_days
     results = personalized_papers(
-        session, embedder, get_interests(session, user.sub), k=limit, days=window
+        session,
+        embedder,
+        get_interests(session, user.sub),
+        user_sub=user.sub,
+        k=limit,
+        days=window,
     )
     return PaperList(
-        items=[PaperSummary.from_paper(item.paper, score=item.score) for item in results]
+        items=[
+            PaperSummary.from_paper(item.paper, score=item.score, reason=item.reason)
+            for item in results
+        ]
     )
