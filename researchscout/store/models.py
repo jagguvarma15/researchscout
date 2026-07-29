@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pgvector.sqlalchemy import Vector
+from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -75,6 +75,22 @@ class PaperEmbeddingRow(Base):
     )
     model_id: Mapped[str] = mapped_column(String, primary_key=True)
     embedding: Mapped[list[float]] = mapped_column(Vector(384))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PaperChunkRow(Base):
+    __tablename__ = "paper_chunks"
+    __table_args__ = (Index("ix_paper_chunks_paper", "paper_id", "model_id", "chunk_index"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    paper_id: Mapped[str] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"))
+    model_id: Mapped[str] = mapped_column(String)
+    chunk_index: Mapped[int] = mapped_column(Integer)
+    section: Mapped[str | None] = mapped_column(Text, nullable=True)
+    text: Mapped[str] = mapped_column(Text)
+    # halfvec halves the RAM of the chunk index — the difference between chunk-level search
+    # fitting on 8GB after a deep backfill and not.
+    embedding: Mapped[list[float]] = mapped_column(HALFVEC(384))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
