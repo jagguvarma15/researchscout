@@ -124,6 +124,35 @@ def count_papers(session: Session, facets: PaperFacets) -> int:
     return session.execute(stmt).scalar_one()
 
 
+def set_full_text(session: Session, paper_id: str, text: str) -> None:
+    """Store extracted full text; an empty string marks "checked, no HTML available"."""
+    session.execute(update(PaperRow).where(PaperRow.id == paper_id).values(full_text=text))
+
+
+def papers_missing_full_text(
+    session: Session, *, limit: int, first: Sequence[str] = ()
+) -> list[tuple[str, str]]:
+    """(paper_id, arXiv id) for papers never checked for full text, ``first`` ids leading.
+
+    Papers marked with an empty string (checked, unavailable) are excluded, so the batch never
+    re-fetches the PDF-only tail.
+    """
+    stmt = (
+        select(PaperRow.id, ExternalIdRow.value)
+        .join(
+            ExternalIdRow,
+            (ExternalIdRow.paper_id == PaperRow.id) & (ExternalIdRow.scheme == "arxiv"),
+        )
+        .where(PaperRow.full_text.is_(None))
+    )
+    if first:
+        stmt = stmt.order_by(PaperRow.id.in_(list(first)).desc(), PaperRow.published_at.desc())
+    else:
+        stmt = stmt.order_by(PaperRow.published_at.desc())
+    rows = session.execute(stmt.limit(limit)).all()
+    return [(paper_id, arxiv_id) for paper_id, arxiv_id in rows]
+
+
 def get_papers(session: Session, paper_ids: Sequence[str]) -> dict[str, Paper]:
     """Load many canonical papers by id in two queries; unknown ids are simply absent."""
     if not paper_ids:
