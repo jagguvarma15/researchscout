@@ -1,4 +1,9 @@
-from researchscout.cluster import cluster_labels, label_topic
+from researchscout.cluster import (
+    cluster_keywords,
+    cluster_labels,
+    label_topic,
+    representative_order,
+)
 from researchscout.llm.base import LLM
 
 
@@ -49,3 +54,48 @@ def test_label_topic_empty_reply_falls_back() -> None:
     label, summary = label_topic(_FakeLLM("   "), ["t1"])
     assert label == "Untitled topic"
     assert summary is None
+
+
+class _CapturingLLM(LLM):
+    model = "fake"
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def complete(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+        self.prompts.append(user)
+        return "Label\nSummary."
+
+
+def test_label_topic_prompt_carries_keywords_and_titles() -> None:
+    llm = _CapturingLLM()
+    label_topic(llm, ["A title"], ["diffusion", "guidance"])
+    assert llm.prompts[0].startswith("Keywords: diffusion, guidance")
+    assert "- A title" in llm.prompts[0]
+
+
+def test_cluster_keywords_are_discriminative() -> None:
+    keywords = cluster_keywords(
+        {
+            0: ["diffusion sampling models", "diffusion guidance models"],
+            1: ["reinforcement policy models", "reinforcement reward models"],
+        }
+    )
+    # "models" appears in both classes; the class-specific terms must outrank it.
+    assert keywords[0][0] != "models"
+    assert any("diffusion" in term for term in keywords[0])
+    assert any("reinforcement" in term for term in keywords[1])
+    assert not any("diffusion" in term for term in keywords[1])
+
+
+def test_cluster_keywords_edge_cases() -> None:
+    assert cluster_keywords({}) == {}
+    # Nothing but stop words: an empty vocabulary must not raise.
+    assert cluster_keywords({0: ["the of and"]}) == {0: []}
+
+
+def test_representative_order_puts_the_centroid_neighbor_first() -> None:
+    # Two aligned vectors and one outlier: the aligned ones are more typical.
+    order = representative_order([[1.0, 0.0], [0.9, 0.1], [0.0, 1.0]])
+    assert order[-1] == 2
+    assert set(order[:2]) == {0, 1}
