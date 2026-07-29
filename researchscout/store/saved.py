@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from researchscout.schema import Paper
-from researchscout.store.models import SavedPaperRow
+from researchscout.store.models import PaperEmbeddingRow, PaperRow, SavedPaperRow
 from researchscout.store.papers import get_paper
 
 
@@ -41,6 +43,35 @@ def list_saved(session: Session, user_sub: str) -> list[Paper]:
     ).scalars()
     papers = (get_paper(session, paper_id) for paper_id in ids)
     return [paper for paper in papers if paper is not None]
+
+
+def saved_vectors(
+    session: Session, user_sub: str, model_id: str
+) -> list[tuple[str, str, datetime, list[float]]]:
+    """(paper_id, title, saved_at, embedding) for the user's saved papers, newest save first.
+
+    Only papers embedded under ``model_id`` return — the profile must live in one vector space.
+    """
+    rows = session.execute(
+        select(
+            SavedPaperRow.paper_id,
+            PaperRow.title,
+            SavedPaperRow.saved_at,
+            PaperEmbeddingRow.embedding,
+        )
+        .join(PaperRow, PaperRow.id == SavedPaperRow.paper_id)
+        .join(
+            PaperEmbeddingRow,
+            (PaperEmbeddingRow.paper_id == SavedPaperRow.paper_id)
+            & (PaperEmbeddingRow.model_id == model_id),
+        )
+        .where(SavedPaperRow.user_sub == user_sub)
+        .order_by(SavedPaperRow.saved_at.desc())
+    ).all()
+    return [
+        (paper_id, title, saved_at, list(embedding))
+        for paper_id, title, saved_at, embedding in rows
+    ]
 
 
 def saved_ids(session: Session, user_sub: str, paper_ids: list[str]) -> set[str]:
