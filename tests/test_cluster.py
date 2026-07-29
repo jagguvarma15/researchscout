@@ -1,4 +1,10 @@
+from types import SimpleNamespace
+
+import pytest
+
+import researchscout.cluster as cluster_mod
 from researchscout.cluster import (
+    build_topics,
     cluster_keywords,
     cluster_labels,
     label_topic,
@@ -99,3 +105,47 @@ def test_representative_order_puts_the_centroid_neighbor_first() -> None:
     order = representative_order([[1.0, 0.0], [0.9, 0.1], [0.0, 1.0]])
     assert order[-1] == 2
     assert set(order[:2]) == {0, 1}
+
+
+def test_hdbscan_finds_dense_groups_and_marks_outliers() -> None:
+    vectors = [
+        [1.0, 0.0, 0.0],
+        [0.99, 0.02, 0.0],
+        [0.98, 0.01, 0.01],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.02, 0.99],
+        [0.01, 0.01, 0.98],
+        [-1.0, -0.5, -0.5],  # anti-aligned misfit: no cohort anywhere near it
+    ]
+    labels = cluster_labels(vectors, threshold=0.5, algo="hdbscan")
+    assert labels[0] == labels[1] == labels[2]
+    assert labels[3] == labels[4] == labels[5]
+    assert labels[0] != labels[3]
+    assert labels[6] == -1
+
+
+def test_hdbscan_tiny_inputs_are_outliers() -> None:
+    assert cluster_labels([], threshold=0.5, algo="hdbscan") == []
+    assert cluster_labels([[1.0, 0.0]], threshold=0.5, algo="hdbscan") == [-1]
+
+
+def test_build_topics_excludes_the_outlier_pool(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = [
+        ("arxiv:1", "diffusion sampling", [1.0, 0.0]),
+        ("arxiv:2", "diffusion guidance", [0.99, 0.01]),
+        ("arxiv:3", "a lone misfit", [0.0, 1.0]),
+    ]
+    monkeypatch.setattr(cluster_mod, "window_vectors", lambda *a, **k: rows)
+    monkeypatch.setattr(cluster_mod, "cluster_labels", lambda v, *, threshold, algo: [0, 0, -1])
+    monkeypatch.setattr(cluster_mod, "breakthrough", lambda s, pid: SimpleNamespace(total=1.0))
+    topics = build_topics(
+        None,  # type: ignore[arg-type]
+        SimpleNamespace(model_id="m"),  # type: ignore[arg-type]
+        _FakeLLM("Label\nSummary."),
+        days=30,
+        threshold=0.5,
+        algo="hdbscan",
+    )
+    assert len(topics) == 1
+    assert topics[0].size == 2
+    assert {member.paper_id for member in topics[0].members} == {"arxiv:1", "arxiv:2"}
