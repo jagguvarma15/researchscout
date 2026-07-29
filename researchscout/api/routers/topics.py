@@ -22,6 +22,7 @@ def _detail(row: TopicRow) -> TopicDetail:
         summary=row.summary,
         score=row.score,
         size=row.size,
+        trend=row.trend,
         papers=[TopicPaper.model_validate(paper) for paper in row.papers],
     )
 
