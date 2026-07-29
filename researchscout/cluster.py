@@ -43,19 +43,36 @@ class Topic:
     members: list[Member]
 
 
-def cluster_labels(vectors: list[list[float]], *, threshold: float) -> list[int]:
-    """Agglomerative cluster id per vector; merges points within ``threshold`` cosine distance."""
+def cluster_labels(
+    vectors: list[list[float]], *, threshold: float, algo: str = "agglomerative"
+) -> list[int]:
+    """Cluster id per vector; ``-1`` marks HDBSCAN outliers (agglomerative assigns everything).
+
+    agglomerative merges points within the cosine ``threshold``. hdbscan (sklearn-native since
+    1.3, no extra dependency) finds density peaks with no fixed count and leaves misfits in
+    the ``-1`` pool — genuinely informative for a radar: a paper with no cohort yet may be an
+    emerging topic of one. ``threshold`` is ignored under hdbscan.
+    """
     if not vectors:
         return []
+    import numpy as np
+
+    data = np.array(vectors, dtype=float)
+    if algo == "hdbscan":
+        if len(vectors) < 2:
+            return [-1 for _ in vectors]
+        from sklearn.cluster import HDBSCAN
+
+        model = HDBSCAN(min_cluster_size=2, metric="cosine", copy=True)
+        return [int(label) for label in model.fit_predict(data)]
     if len(vectors) == 1:
         return [0]
-    import numpy as np
     from sklearn.cluster import AgglomerativeClustering
 
-    model = AgglomerativeClustering(
+    agglomerative = AgglomerativeClustering(
         n_clusters=None, distance_threshold=threshold, metric="cosine", linkage="average"
     )
-    return [int(label) for label in model.fit_predict(np.array(vectors, dtype=float))]
+    return [int(label) for label in agglomerative.fit_predict(data)]
 
 
 def cluster_keywords(
@@ -134,20 +151,24 @@ def build_topics(
     min_size: int = 2,
     max_topics: int = 12,
     label_titles: int = 4,
+    algo: str = "agglomerative",
 ) -> list[Topic]:
     """Cluster the window's embedded papers, score and label each cluster, momentum-first.
 
     Labels come from c-TF-IDF keywords plus the ``label_titles`` most representative
     (nearest-centroid) member titles, so the prompt stays small and on-center regardless of
-    cluster size.
+    cluster size. Under hdbscan the ``-1`` outlier pool is excluded — those papers have no
+    cohort, and one giant pseudo-topic of misfits would be worse than none.
     """
     rows = window_vectors(session, days=days, model_id=embedder.model_id)
     if not rows:
         return []
 
-    labels = cluster_labels([vector for _, _, vector in rows], threshold=threshold)
+    labels = cluster_labels([vector for _, _, vector in rows], threshold=threshold, algo=algo)
     groups: dict[int, list[tuple[str, str, list[float]]]] = {}
     for (paper_id, title, vector), cluster in zip(rows, labels, strict=True):
+        if cluster == -1:
+            continue
         groups.setdefault(cluster, []).append((paper_id, title, vector))
 
     eligible = {cluster: members for cluster, members in groups.items() if len(members) >= min_size}
