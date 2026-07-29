@@ -45,3 +45,18 @@ sources:
     enabled: false
     kind: signal
     cadence: daily
+  openalex:
+    # Off by default: a keyless citation cross-check and S2-outage fallback. With both this and
+    # semantic_scholar on, the citation contribution to the breakthrough score counts twice
+    # (per-source series each score). Set `mailto` to join the polite pool.
+    enabled: false
+    kind: signal
+    cadence: daily
+    # mailto: you@example.com
+  openreview:
+    # Off by default: best-effort review scores via the search endpoint (the /notes listing is
+    # bot-challenged as of 2026-07); partial and bursty around conference review cycles. Flip
+    # on around review season.
+    enabled: false
+    kind: signal
+    cadence: daily
