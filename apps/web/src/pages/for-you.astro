@@ -41,6 +41,7 @@ const items = await fetchForYou();
                 .map((author) => author.name)
                 .join(', ')}
             </p>
+            {paper.reason && <p class="reason">{paper.reason}</p>}
           </li>
         ))}
       </ul>
@@ -81,5 +82,14 @@ const items = await fetchForYou();
     color: var(--muted);
     font-size: 0.85rem;
     margin: 0.35rem 0 0;
+  }
+  .reason {
+    display: inline-block;
+    margin: 0.45rem 0 0;
+    padding: 0.1rem 0.6rem;
+    border-radius: var(--radius-full);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 0.78rem;
   }
 </style>
