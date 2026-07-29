@@ -163,6 +163,7 @@ def _topics(settings: Settings) -> None:
             OpenAICompatLLM(),
             days=settings.cluster_window_days,
             threshold=settings.cluster_distance_threshold,
+            algo=settings.cluster_algo,
         )
         replace_topics(session, topics)
     logger.info("built %d topic(s)", len(topics))
