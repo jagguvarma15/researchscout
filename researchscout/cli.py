@@ -292,6 +292,25 @@ def digest(
     )
 
 
+@app.command()
+def report() -> None:
+    """Build and publish today's report (deterministic; no LLM needed)."""
+    from researchscout.report import build_daily_report
+    from researchscout.store.db import session_scope
+    from researchscout.store.digests import upsert_digest
+
+    with session_scope() as session:
+        result = build_daily_report(session)
+        if result is None:
+            typer.secho("No papers in the last day — no report.", fg=typer.colors.YELLOW)
+            raise typer.Exit(code=1)
+        upsert_digest(session, result)
+    typer.secho(
+        f"published {result.slug}: {len(result.items)} must-read of the day",
+        fg=typer.colors.GREEN,
+    )
+
+
 @sources_app.command("list")
 def sources_list(
     probe: Annotated[bool, typer.Option(help="Probe each source's health.")] = False,
