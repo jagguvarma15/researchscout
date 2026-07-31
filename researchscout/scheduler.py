@@ -15,7 +15,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from functools import lru_cache, partial
+from functools import partial
 from typing import TYPE_CHECKING, Literal
 
 from researchscout.config import Settings
@@ -91,12 +91,11 @@ class Scheduler:
             self._sleep(self._tick_sec)
 
 
-@lru_cache(maxsize=1)
 def _embedder() -> Embedder:
     """One shared embedder so the model loads once across index cycles."""
-    from researchscout.embed.local import LocalEmbedder
+    from researchscout.embed.factory import default_embedder
 
-    return LocalEmbedder()
+    return default_embedder()
 
 
 def _ingest(kind: _SourceKind, window_days: int) -> None:
