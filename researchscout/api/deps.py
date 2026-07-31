@@ -23,11 +23,10 @@ def get_session() -> Iterator[Session]:
         yield session
 
 
-@lru_cache(maxsize=1)
 def get_embedder() -> Embedder:
-    from researchscout.embed.local import LocalEmbedder
+    from researchscout.embed.factory import default_embedder
 
-    return LocalEmbedder()
+    return default_embedder()
 
 
 @lru_cache(maxsize=1)
