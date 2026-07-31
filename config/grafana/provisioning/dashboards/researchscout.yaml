@@ -1,0 +1,18 @@
+# Dashboard file provider. make setup renders this into
+# .local/grafana/provisioning/dashboards/, replacing @REPO@ with the repo root, so the
+# committed JSONs under config/grafana/dashboards/ are served in place: editing one
+# hot-reloads within updateIntervalSeconds. UI edits are disabled on purpose — the JSON
+# in git is the single source of truth.
+apiVersion: 1
+
+providers:
+  - name: researchscout
+    orgId: 1
+    folder: ResearchScout
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 30
+    options:
+      path: "@REPO@/config/grafana/dashboards"
+      foldersFromFilesStructure: false
