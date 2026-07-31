@@ -86,10 +86,14 @@ class Settings(BaseSettings):
     foryou_half_life_days: float = 75.0
     # Streaming pipeline: the brew-managed broker, the topic prefix (rs.raw.v1 and the
     # parsed/enriched taps), the worker's consumer group, and its recovery partitions.
+    # The consumer batch sizes the lists the batch stages see; taps off skips the two
+    # per-batch tap flushes (scout stream tail goes dark while off).
     kafka_bootstrap: str = "localhost:9092"
     kafka_topic_prefix: str = "rs"
     stream_consumer_group: str = "rs-stream"
     stream_recovery_dir: Path = Path(".local/stream-recovery")
+    stream_consumer_batch: int = 100
+    stream_taps_enabled: bool = True
     # Producer polling: content hourly, fulltext in modest politely-paced batches (the
     # signals cadence reuses scheduler_signals_interval_sec).
     stream_poll_interval_sec: int = 3600
