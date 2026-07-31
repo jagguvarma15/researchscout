@@ -33,9 +33,11 @@ def _processed_envelope(event_id: str = "e1") -> Envelope:
             },
         },
     )
-    for stage in ("produce", "parse", "categorize"):
+    for stage in ("produce", "parse"):
         stamp = envelope.begin(stage)  # type: ignore[arg-type]
         envelope.finish(stamp)
+    categorized = envelope.begin("categorize")
+    envelope.finish(categorized, detail={"keyword_method": "statistical", "candidate_count": 3})
     failed = envelope.begin("inject")
     envelope.finish(failed, "error", "db unavailable")
     return envelope
@@ -57,6 +59,9 @@ def test_record_stages_converges_on_redelivery(session: Session) -> None:
     assert row.outcome == "error" and row.error == "db unavailable"
     assert row.paper_id == "arxiv:2607.1"
     assert row.category == "cs" and row.topic == "Efficient attention"
+    categorize_row = session.get(PipelineLineageRow, ("e1", "categorize"))
+    assert categorize_row is not None
+    assert categorize_row.detail == {"keyword_method": "statistical", "candidate_count": 3}
 
 
 def test_record_stages_many_batches_and_dedupes(session: Session) -> None:
