@@ -20,6 +20,9 @@ export interface PaperSummary {
   source: string;
   url: string | null;
   pdf_url: string | null;
+  // Stream enrichment (null until the categorize stage has seen the paper).
+  keywords?: string[] | null;
+  labels?: { label: string; source: string; score?: number | null }[] | null;
   score: number | null;
   // Why the personalized feed picked this paper (null everywhere else).
   reason?: string | null;
