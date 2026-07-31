@@ -27,6 +27,14 @@ def _scored(pid: str = "arxiv:2401.00001") -> ScoredPaper:
     return ScoredPaper(paper=paper, score=1.0, distance=0.0)
 
 
+@pytest.fixture(autouse=True)
+def _capture_metrics(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """Metrics recording opens its own DB session; keep unit tests hermetic."""
+    rows: list[dict] = []
+    monkeypatch.setattr(chat_router, "record_metrics", lambda **kw: rows.append(kw))
+    return rows
+
+
 def _client(monkeypatch: pytest.MonkeyPatch, *, limited: bool = False) -> TestClient:
     def no_limit(key: str, *, limit: int, window_seconds: int) -> None:
         if limited:
@@ -204,3 +212,24 @@ def test_chat_fast_mode_emits_notfound_below_the_floor(monkeypatch: pytest.Monke
     assert [name for name, _ in events] == ["meta", "notfound", "done"]
     assert events[1][1] == {"query": "obscure thing", "web_search": False}
     assert events[2][1] == {"cited": [], "hallucinated": [], "used": []}
+
+
+def test_fast_mode_records_ask_metrics(
+    monkeypatch: pytest.MonkeyPatch, _capture_metrics: list[dict]
+) -> None:
+    from researchscout.answer import FastAnswer
+
+    fast = FastAnswer(
+        answer=Answer(text="No papers matched.", cited=[], hallucinated=[], used=[]),
+        found=False,
+        best_relevance=0.08,
+    )
+    monkeypatch.setattr(chat_router, "answer_fast", lambda *a, **k: fast)
+    client = _client(monkeypatch)
+    client.post("/v1/chat", json={"question": "obscure thing", "mode": "fast"})
+
+    assert len(_capture_metrics) == 1
+    row = _capture_metrics[0]
+    assert row["mode"] == "fast" and row["surface"] == "chat"
+    assert row["found"] is False and row["best_relevance"] == 0.08
+    assert row["llm_ms"] is None and row["total_ms"] >= 0
