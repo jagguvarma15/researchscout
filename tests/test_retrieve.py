@@ -149,3 +149,27 @@ def test_cited_paper_outranks_uncited_near_duplicate(session: Session) -> None:
     ids = [item.paper.id for item in results]
     # Same vector, same age: only the citation authority separates the two.
     assert ids.index("arxiv:2402.00002") < ids.index("arxiv:2402.00001")
+
+
+def test_supplied_query_vector_skips_the_embed_and_timings_fill(session: Session) -> None:
+    embedder = _setup(session)
+
+    class NoEmbed(Embedder):
+        model_id = embedder.model_id
+        dim = DIM
+
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            raise AssertionError("the caller-supplied vector must be reused")
+
+        def embed_query(self, text: str) -> list[float]:
+            raise AssertionError("the caller-supplied vector must be reused")
+
+    timings: dict[str, float] = {}
+    results = retrieve(
+        session, NoEmbed(), "q", k=5, days=30, query_vector=_onehot(0), timings=timings
+    )
+
+    assert results and results[0].paper.title == "Recent"
+    assert results[0].relevance is None  # rerank off in tests: scores are rank-based
+    assert set(timings) == {"embed_ms", "legs_ms", "rerank_ms"}
+    assert timings["embed_ms"] < 1.0  # nothing was embedded
