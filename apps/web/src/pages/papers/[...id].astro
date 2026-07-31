@@ -97,6 +97,17 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
         </p>
         {paper.comment && <p class="comment">{paper.comment}</p>}
         <p class="abstract" set:html={renderMathHTML(paper.abstract)} />
+        {
+          paper.keywords && paper.keywords.length > 0 && (
+            <p class="tags">
+              {paper.keywords.map((keyword) => (
+                <a class="badge" href={`/?q=${encodeURIComponent(keyword)}`}>
+                  {keyword}
+                </a>
+              ))}
+            </p>
+          )
+        }
         <p class="links">
           {paper.pdf_url && (
             <button class="btn btn-primary" type="button" data-open-reader>
@@ -198,23 +209,32 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
     color: var(--accent-ink);
   }
   .comment {
-    max-width: 70ch;
     margin: 0.35rem 0 0;
     color: var(--muted);
     font-size: 0.85rem;
     font-style: italic;
   }
   .authors {
-    max-width: 70ch;
     color: var(--muted);
     font-size: 0.92rem;
     margin: 0.6rem 0 0;
   }
   .abstract {
-    max-width: 70ch;
     white-space: pre-line;
     margin: 1.1rem 0 0;
     line-height: 1.65;
+  }
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0.9rem 0 0;
+  }
+  .tags a {
+    text-decoration: none;
+  }
+  .tags a:hover {
+    background: var(--surface-2);
   }
   .links {
     display: flex;
