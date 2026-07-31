@@ -14,6 +14,7 @@ from researchscout.store.papers import (
     link_external_ids,
     list_papers,
     set_citation_count,
+    set_full_text,
     upsert_paper,
 )
 from researchscout.store.raw import append_raw
@@ -62,6 +63,18 @@ def test_upsert_is_idempotent(session: Session) -> None:
     assert got.title == "Second"  # upsert updated in place
     assert got.external_ids == {"arxiv": "2401.00001"}
     assert [a.name for a in got.authors] == ["Jane Doe"]
+
+
+def test_reupsert_preserves_full_text(session: Session) -> None:
+    upsert_paper(session, _paper(title="First"))
+    set_full_text(session, "arxiv:2401.00001", "## Introduction\n\nBody text.")
+    upsert_paper(session, _paper(title="Refreshed"))  # a re-ingest carries full_text=None
+    session.flush()
+
+    row = session.get(PaperRow, "arxiv:2401.00001")
+    assert row is not None
+    assert row.title == "Refreshed"
+    assert row.full_text == "## Introduction\n\nBody text."
 
 
 def test_external_ids_collapse_to_one_paper(session: Session) -> None:
