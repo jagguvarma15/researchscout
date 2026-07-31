@@ -210,7 +210,7 @@ def test_chat_fast_mode_emits_notfound_below_the_floor(monkeypatch: pytest.Monke
 
     events = _events(response.text)
     assert [name for name, _ in events] == ["meta", "notfound", "done"]
-    assert events[1][1] == {"query": "obscure thing", "web_search": False}
+    assert events[1][1] == {"query": "obscure thing", "web_search": True}  # flag default on
     assert events[2][1] == {"cited": [], "hallucinated": [], "used": []}
 
 
