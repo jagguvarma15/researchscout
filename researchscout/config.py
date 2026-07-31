@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     kafka_topic_prefix: str = "rs"
     stream_consumer_group: str = "rs-stream"
     stream_recovery_dir: Path = Path(".local/stream-recovery")
+    # Producer polling: content hourly, fulltext in modest politely-paced batches (the
+    # signals cadence reuses scheduler_signals_interval_sec).
+    stream_poll_interval_sec: int = 3600
+    stream_fulltext_interval_sec: int = 900
+    stream_fulltext_batch: int = 25
     # Streaming categorize stage: minimum centroid cosine for tagging a paper with a live
     # topic, the keyword extraction similarity floor, the LLM fallback for weak extractions,
     # and the optional custom-label classifier over config/labels.yaml.
