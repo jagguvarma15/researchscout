@@ -9,7 +9,13 @@ import pytest
 import researchscout.stream.categorize as categorize_mod
 from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
-from researchscout.stream.categorize import Categorizer, LabelSpec, extract_keywords, load_labels
+from researchscout.stream.categorize import (
+    Categorizer,
+    LabelSpec,
+    extract_keywords,
+    keyword_candidates,
+    load_labels,
+)
 from researchscout.stream.envelope import Envelope
 
 DOC = [1.0, 0.0, 0.0]
@@ -112,6 +118,24 @@ def test_extract_keywords_scores_and_diversifies() -> None:
     )
     assert picked[0][0] == "sparse attention"
     assert picked[1][0] == "kernel fusion"  # diversity beat the near duplicate
+
+
+def test_keyword_candidates_cap_keeps_the_most_frequent() -> None:
+    text = "alpha alpha alpha beta beta gamma"
+    capped = keyword_candidates(text, cap=2)
+    assert capped == ["alpha", "alpha alpha"]  # top 2 by in-document frequency
+    assert "gamma" in keyword_candidates(text, cap=80)
+    assert keyword_candidates("the and of", cap=80) == []  # all stop words
+
+
+def test_extract_keywords_honors_the_candidate_cap() -> None:
+    # With the cap at 1 only the most frequent term is ever embedded or selectable.
+    doc = [1.0, 0.0, 0.0]
+    table = {"kernel": [0.9, 0.0, 0.1], "fusion": [0.9, 0.1, 0.0]}
+    picked = extract_keywords(
+        "kernel kernel fusion", doc, FakeEmbedder(table), cap=1, min_similarity=0.35
+    )
+    assert [phrase for phrase, _ in picked] == ["kernel"]
 
 
 def test_run_enriches_a_paper_packet(monkeypatch: pytest.MonkeyPatch) -> None:
