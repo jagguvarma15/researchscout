@@ -39,12 +39,17 @@ class StreamTopics:
         }
 
 
+# Producer batching: a short linger amortizes the per-message broker round-trips of a
+# poll burst, and lz4 shrinks fulltext packets. Constants, not knobs - single-host values.
+PRODUCER_TUNING = {"linger.ms": "50", "compression.type": "lz4"}
+
+
 class Broker(Protocol):
     """What producers need: fire-and-forget publish plus a drain before shutdown."""
 
     def publish(self, topic: str, key: str, value: bytes) -> None: ...
 
-    def flush(self) -> None: ...
+    def flush(self, timeout: float | None = None) -> None: ...
 
 
 class KafkaBroker:
@@ -53,14 +58,18 @@ class KafkaBroker:
     def __init__(self, bootstrap: str) -> None:
         from confluent_kafka import Producer
 
-        self._producer = Producer({"bootstrap.servers": bootstrap})
+        self._producer = Producer({"bootstrap.servers": bootstrap, **PRODUCER_TUNING})
 
     def publish(self, topic: str, key: str, value: bytes) -> None:
         self._producer.produce(topic, value=value, key=key)
         self._producer.poll(0)
 
-    def flush(self) -> None:
-        self._producer.flush()
+    def flush(self, timeout: float | None = None) -> None:
+        """Drain the queue; a timeout bounds the wait for best-effort callers."""
+        if timeout is None:
+            self._producer.flush()
+        else:
+            self._producer.flush(timeout)
 
 
 @dataclass
@@ -72,7 +81,7 @@ class InMemoryBroker:
     def publish(self, topic: str, key: str, value: bytes) -> None:
         self.messages.setdefault(topic, []).append((key, value))
 
-    def flush(self) -> None:
+    def flush(self, timeout: float | None = None) -> None:
         return None
 
 
