@@ -27,6 +27,14 @@ def _paper(pid: str = "arxiv:2401.00001", title: str = "T") -> Paper:
     )
 
 
+@pytest.fixture(autouse=True)
+def _capture_ask_metrics(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    """Metrics recording opens its own DB session; keep unit tests hermetic."""
+    rows: list[dict] = []
+    monkeypatch.setattr(ask_router, "record_metrics", lambda **kw: rows.append(kw))
+    return rows
+
+
 def _client() -> TestClient:
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
