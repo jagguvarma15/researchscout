@@ -2,8 +2,11 @@
 
 Event order: ``meta`` (what retrieval found) -> ``token`` deltas -> ``done`` with the citation
 post-check, or ``error``. Guardrail refusals skip ``meta``: one ``token`` carrying the refusal
-text, then an empty ``done``. The generator is synchronous; Starlette drives it from a
-threadpool, and the request-scoped session stays open until the stream finishes.
+text, then an empty ``done``. Fast mode (``mode: "fast"``) answers extractively with no LLM
+call and no guardrail: ``meta`` (with ``mode``) -> one ``token`` -> ``done`` when something
+matched, or ``meta`` -> ``notfound`` -> empty ``done`` below the relevance floor. The
+generator is synchronous; Starlette drives it from a threadpool, and the request-scoped
+session stays open until the stream finishes.
 """
 
 from __future__ import annotations
@@ -17,7 +20,7 @@ from fastapi.responses import StreamingResponse
 from openai import OpenAIError
 from sqlalchemy.orm import Session
 
-from researchscout.answer import Answer, StreamDelta, StreamMeta, answer_stream
+from researchscout.answer import Answer, StreamDelta, StreamMeta, answer_fast, answer_stream
 from researchscout.api.auth import User, require_user
 from researchscout.api.deps import get_embedder, get_llm, get_session
 from researchscout.api.ratelimit import check_rate_limit
@@ -57,6 +60,9 @@ def chat(
     )
 
     def events() -> Iterator[str]:
+        if body.mode == "fast":
+            yield from _fast_events(session, embedder, body)
+            return
         # Scope check inside the generator so SSE headers flush first and the client can show
         # progress during classify latency. Refusals reuse the token/done shape with no meta
         # event (no retrieval happened), so clients need no extra handling.
@@ -87,3 +93,24 @@ def chat(
             yield _sse("error", {"code": 502, "message": "LLM backend unavailable"})
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=_SSE_HEADERS)
+
+
+def _fast_events(session: Session, embedder: Embedder, body: AskRequest) -> Iterator[str]:
+    """The extractive fast path: no LLM, no guardrail (deterministic output needs none)."""
+    fast = answer_fast(session, embedder, body.question, k=body.k, days=body.days)
+    result = fast.answer
+    yield _sse("meta", {"retrieved": len(result.used), "mode": "fast"})
+    if not fast.found:
+        # web_search flips to the RS_WEB_SEARCH_ENABLED flag once the search endpoint lands.
+        yield _sse("notfound", {"query": body.question, "web_search": False})
+        yield _sse("done", {"cited": [], "hallucinated": [], "used": []})
+        return
+    yield _sse("token", {"delta": result.text})
+    yield _sse(
+        "done",
+        {
+            "cited": result.cited,
+            "hallucinated": result.hallucinated,
+            "used": [UsedPaper.from_scored(item).model_dump() for item in result.used],
+        },
+    )
