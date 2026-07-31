@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
@@ -20,10 +21,15 @@ from sqlalchemy.orm import Session
 from researchscout.config import Settings
 from researchscout.fulltext import fetch_full_text
 from researchscout.scheduler import Task
-from researchscout.sources.base import Source, SourceKind, enabled_sources
+from researchscout.schema import Paper
+from researchscout.sources.base import RawItem, Source, SourceKind, enabled_sources
 from researchscout.store.db import session_scope
 from researchscout.store.models import EventRow, SavedPaperRow
-from researchscout.store.papers import papers_missing_full_text, set_full_text
+from researchscout.store.papers import (
+    enrichment_watermarks,
+    papers_missing_full_text,
+    set_full_text,
+)
 from researchscout.store.raw import append_raw
 from researchscout.store.state import save_state
 from researchscout.stream.broker import Broker, StreamTopics
@@ -34,17 +40,62 @@ logger = logging.getLogger(__name__)
 # Defensive cap under the raw topic's 5MB max.message.bytes.
 _FULLTEXT_TEXT_CAP = 2_000_000
 
+# (scheme, value) -> (updated_at, enriched) for papers already in the store.
+Watermarks = Mapping[tuple[str, str], tuple[datetime | None, bool]]
+
+
+def _should_publish(source: Source, raw: RawItem, known: Watermarks) -> bool:
+    """False only when every external id maps to a known, enriched, not-newer paper.
+
+    Anything uncertain publishes: normalize failures (so parse records them in lineage),
+    unknown ids, papers batch-ingested without enrichment, and newer versions.
+    """
+    try:
+        normalized = source.normalize(raw)
+    except Exception:  # noqa: BLE001 - the parse stage owns error accounting
+        return True
+    if not isinstance(normalized, Paper):
+        return True
+    hits = [known.get(item) for item in normalized.external_ids.items()]
+    if not any(hit is not None for hit in hits):
+        return True
+    for hit in hits:
+        if hit is None:
+            continue
+        stored_updated, enriched = hit
+        if not enriched:
+            return True
+        if normalized.updated_at is not None and (
+            stored_updated is None or normalized.updated_at > stored_updated
+        ):
+            return True
+    return False
+
 
 def publish_source(
-    broker: Broker, topics: StreamTopics, source: Source, since: datetime, *, kind: Kind
-) -> int:
-    """Page through one source, landing raw items and publishing packets; returns count."""
-    published = 0
+    broker: Broker,
+    topics: StreamTopics,
+    source: Source,
+    since: datetime,
+    *,
+    kind: Kind,
+    known: Watermarks | None = None,
+) -> tuple[int, int]:
+    """Page through one source, landing and publishing items; returns (published, skipped).
+
+    Items whose external ids all resolve to known, enriched, not-newer papers are skipped
+    entirely (no raw row, no packet), so hourly re-polls of the same window cost nothing
+    downstream. ``known=None`` disables the check (the pre-dedup behavior).
+    """
+    published = skipped = 0
     cursor: str | None = None
     while True:
         items, next_cursor = source.fetch(since, cursor)
         with session_scope() as session:
             for raw in items:
+                if known is not None and not _should_publish(source, raw, known):
+                    skipped += 1
+                    continue
                 append_raw(
                     session, source=raw.source, fetched_at=raw.fetched_at, payload=raw.payload
                 )
@@ -62,19 +113,30 @@ def publish_source(
         if cursor is None:
             break
     broker.flush()
-    return published
+    return published, skipped
 
 
 def _poll_kind(settings: Settings, broker: Broker, topics: StreamTopics, kind: Kind) -> None:
     source_kind: SourceKind = "content" if kind == "paper" else "signal"
     since = datetime.now(UTC) - timedelta(days=settings.scheduler_ingest_window_days)
+    known: Watermarks | None = None
+    if kind == "paper" and settings.stream_publish_dedup:
+        with session_scope() as session:
+            known = enrichment_watermarks(
+                session,
+                published_after=since - timedelta(days=settings.stream_dedup_overlap_days),
+            )
     for source in enabled_sources(source_kind):
         try:
-            published = publish_source(broker, topics, source, since, kind=kind)
+            published, skipped = publish_source(
+                broker, topics, source, since, kind=kind, known=known
+            )
         except Exception:  # noqa: BLE001 - isolate one source's failure from the rest
             logger.warning("producer for %s failed", source.name, exc_info=True)
             continue
-        logger.info("%s: published %d %s packet(s)", source.name, published, kind)
+        logger.info(
+            "%s: published %d %s packet(s), skipped %d known", source.name, published, kind, skipped
+        )
 
 
 def _priority_ids(session: Session) -> set[str]:
