@@ -115,6 +115,31 @@ def search_chunks(
     return pooled[:k]
 
 
+def best_chunks(
+    session: Session,
+    query_vector: list[float],
+    paper_ids: list[str],
+    *,
+    model_id: str,
+) -> dict[str, tuple[str, float]]:
+    """The closest chunk (text, cosine distance) per requested paper.
+
+    DISTINCT ON keeps the row count at one per paper server-side, replacing the old
+    sort-every-chunk-then-scan approach, and the distance survives so callers can judge
+    how relevant the best excerpt actually is.
+    """
+    if not paper_ids:
+        return {}
+    distance = PaperChunkRow.embedding.cosine_distance(query_vector)
+    stmt = (
+        select(PaperChunkRow.paper_id, PaperChunkRow.text, distance.label("distance"))
+        .distinct(PaperChunkRow.paper_id)
+        .where(PaperChunkRow.model_id == model_id, PaperChunkRow.paper_id.in_(paper_ids))
+        .order_by(PaperChunkRow.paper_id, distance)
+    )
+    return {paper_id: (text, float(dist)) for paper_id, text, dist in session.execute(stmt)}
+
+
 def best_chunk_texts(
     session: Session,
     query_vector: list[float],
@@ -123,18 +148,5 @@ def best_chunk_texts(
     model_id: str,
 ) -> dict[str, str]:
     """The single closest chunk text per requested paper (for quoting in answers)."""
-    if not paper_ids:
-        return {}
-    distance = PaperChunkRow.embedding.cosine_distance(query_vector)
-    stmt = (
-        select(PaperChunkRow.paper_id, PaperChunkRow.text, distance.label("distance"))
-        .where(PaperChunkRow.model_id == model_id, PaperChunkRow.paper_id.in_(paper_ids))
-        .order_by(distance)
-    )
-    best: dict[str, str] = {}
-    for paper_id, text, _dist in session.execute(stmt):
-        if paper_id not in best:
-            best[paper_id] = text
-        if len(best) == len(paper_ids):
-            break
-    return best
+    found = best_chunks(session, query_vector, paper_ids, model_id=model_id)
+    return {paper_id: text for paper_id, (text, _) in found.items()}
