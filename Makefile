@@ -43,7 +43,7 @@ setup: ## install toolchains, dependencies, and the local Postgres cluster
 	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
 	@echo "setup complete — next: make start"
 
-start: ## start postgres, migrate, then the API and web app in the background
+start: ## start postgres, kafka, migrate, then the stream, API, and web app in the background
 	@mkdir -p $(LOG) $(RUN)
 	@if $(PG_BIN)/pg_ctl -D $(PGDATA) status >/dev/null 2>&1; then \
 	  echo "postgres: already running"; \
@@ -57,6 +57,12 @@ start: ## start postgres, migrate, then the API and web app in the background
 	  "SELECT 1 FROM pg_database WHERE datname='$(DB_NAME)'" | grep -q 1 || \
 	  $(PG_BIN)/createdb -h localhost -U $(DB_USER) $(DB_NAME)
 	uv run scout db upgrade
+	@$(MAKE) kafka-start
+	@if [ -f $(RUN)/stream.pid ] && kill -0 $$(cat $(RUN)/stream.pid) 2>/dev/null; then \
+	  echo "stream: already running"; \
+	else \
+	  nohup uv run scout stream serve >> $(LOG)/stream.log 2>&1 & echo $$! > $(RUN)/stream.pid; \
+	fi
 	@if [ -f $(RUN)/api.pid ] && kill -0 $$(cat $(RUN)/api.pid) 2>/dev/null; then \
 	  echo "api: already running"; \
 	else \
@@ -75,9 +81,10 @@ start: ## start postgres, migrate, then the API and web app in the background
 	@echo
 	@echo "  next: make seed   (chat needs 'ollama serve' + qwen2.5:3b-instruct, or a cloud key in .env)"
 
-stop: ## stop the web app, API, kafka, and postgres
+stop: ## stop the web app, API, stream, kafka, and postgres
 	-@[ -f $(RUN)/web.pid ] && kill $$(cat $(RUN)/web.pid) 2>/dev/null; rm -f $(RUN)/web.pid
 	-@[ -f $(RUN)/api.pid ] && kill $$(cat $(RUN)/api.pid) 2>/dev/null; rm -f $(RUN)/api.pid
+	-@[ -f $(RUN)/stream.pid ] && kill $$(cat $(RUN)/stream.pid) 2>/dev/null; rm -f $(RUN)/stream.pid
 	-@lsof -ti :4321 2>/dev/null | xargs kill -9 2>/dev/null; true
 	-@lsof -ti :8000 2>/dev/null | xargs kill -9 2>/dev/null; true
 	-@[ -f $(RUN)/kafka.pid ] && kill $$(cat $(RUN)/kafka.pid) 2>/dev/null; rm -f $(RUN)/kafka.pid
@@ -90,6 +97,7 @@ status: ## show what is running
 	@lsof -ti :8000 >/dev/null 2>&1 && echo "api: up on :8000" || echo "api: stopped"
 	@lsof -ti :4321 >/dev/null 2>&1 && echo "web: up on :4321" || echo "web: stopped"
 	@lsof -ti :9092 >/dev/null 2>&1 && echo "kafka: up on :9092" || echo "kafka: stopped"
+	@[ -f $(RUN)/stream.pid ] && kill -0 $$(cat $(RUN)/stream.pid) 2>/dev/null && echo "stream: running" || echo "stream: stopped"
 
 logs: ## tail the local service logs
 	tail -f $(LOG)/*.log
