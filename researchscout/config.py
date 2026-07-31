@@ -95,6 +95,13 @@ class Settings(BaseSettings):
     stream_poll_interval_sec: int = 3600
     stream_fulltext_interval_sec: int = 900
     stream_fulltext_batch: int = 25
+    # Producer dedup: skip re-publishing papers the pipeline already enriched. Default ON
+    # deliberately (a documented deviation from the default-off convention): this is a
+    # latency fix, and turning it off restores the old republish-the-whole-window behavior,
+    # which is idempotent but floods the worker every poll. The overlap widens the known-id
+    # map past the poll window so boundary papers are never missed.
+    stream_publish_dedup: bool = True
+    stream_dedup_overlap_days: int = 1
     # Streaming categorize stage: minimum centroid cosine for tagging a paper with a live
     # topic, the keyword extraction similarity floor, the LLM fallback for weak extractions,
     # and the optional custom-label classifier over config/labels.yaml.
