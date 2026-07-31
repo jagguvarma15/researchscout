@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from researchscout.embed.base import Embedder
 from researchscout.schema import Author, Paper
-from researchscout.store.chunks import best_chunk_texts, index_chunks, search_chunks
+from researchscout.store.chunks import best_chunk_texts, best_chunks, index_chunks, search_chunks
 from researchscout.store.papers import set_full_text, upsert_paper
 
 pytestmark = pytest.mark.integration
@@ -79,6 +79,18 @@ def test_index_and_search_chunks_pool_to_papers(session: Session) -> None:
 
     quotes = best_chunk_texts(session, _onehot(1), ["arxiv:2607.00002"], model_id=embedder.model_id)
     assert "policy gradients" in quotes["arxiv:2607.00002"]
+
+    found = best_chunks(
+        session,
+        _onehot(0),
+        ["arxiv:2607.00001", "arxiv:2607.00002"],
+        model_id=embedder.model_id,
+    )
+    assert set(found) == {"arxiv:2607.00001", "arxiv:2607.00002"}
+    text, dist = found["arxiv:2607.00001"]
+    assert "sinkhorn" in text and dist == pytest.approx(0.0, abs=1e-3)
+    _, off_dist = found["arxiv:2607.00002"]
+    assert off_dist > 0.5  # the orthogonal paper's best chunk is measurably far
 
 
 def test_search_chunks_scoped_by_model(session: Session) -> None:
