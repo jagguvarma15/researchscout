@@ -141,6 +141,24 @@ def test_answer_fast_composes_extractive_entries(monkeypatch: pytest.MonkeyPatch
     assert fast.answer.cited == ["arxiv:2401.00001"]
     assert fast.answer.hallucinated == []
 
+    # The text derives from the structured entries, so both carry the same facts.
+    assert len(fast.entries) == 1
+    entry = fast.entries[0]
+    assert entry.id == "arxiv:2401.00001"
+    assert entry.title == "T" and entry.venue is None
+    assert entry.published_at == datetime(2024, 1, 1, tzinfo=UTC)
+    assert entry.matches == ["sparse", "attention"]
+    assert entry.keywords == ["sparse attention"]
+    assert entry.excerpt is None  # chunk retrieval is off in unit tests
+    assert entry.relevance == 0.85
+
+
+def test_answer_fast_not_found_carries_no_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    used = [_scored_rel("arxiv:2401.00001", relevance=0.05)]
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: used)
+    fast = answer_mod.answer_fast(None, _StubEmbedder(), "q")
+    assert not fast.found and fast.entries == []
+
 
 def test_answer_fast_below_floor_reports_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
     used = [_scored_rel("arxiv:2401.00001", relevance=0.05)]
