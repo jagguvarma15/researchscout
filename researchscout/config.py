@@ -50,6 +50,7 @@ class Settings(BaseSettings):
     scheduler_index_interval_sec: int = 900
     scheduler_signals_interval_sec: int = 21600
     scheduler_digest_interval_sec: int = 86400
+    scheduler_report_interval_sec: int = 86400
     scheduler_tick_sec: int = 30
     # Breakthrough scoring: how the signal series becomes a ranking boost. The window bounds how
     # far back momentum is measured; the weights set how much velocity and acceleration count
