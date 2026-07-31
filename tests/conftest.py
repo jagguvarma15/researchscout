@@ -37,7 +37,7 @@ def session(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
             text(
                 "TRUNCATE papers, paper_external_ids, raw_items, ingest_state, "
                 "paper_embeddings, paper_chunks, signals, digests, topics, saved_papers, "
-                "user_interests, citation_edges, citation_fetches, events "
+                "user_interests, citation_edges, citation_fetches, events, pipeline_lineage "
                 "RESTART IDENTITY CASCADE"
             )
         )
