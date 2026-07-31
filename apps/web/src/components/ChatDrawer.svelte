@@ -10,14 +10,33 @@
     score: number;
   }
 
+  interface WebHit {
+    provider: string;
+    title: string;
+    authors: string[];
+    year: number | null;
+    snippet: string;
+    arxiv_id: string | null;
+    url: string | null;
+    already_known: boolean;
+    paper_id: string | null;
+  }
+
   interface Message {
     role: 'user' | 'assistant';
     text: string;
     phase?: 'searching' | 'thinking' | 'streaming' | 'done';
+    mode?: 'fast' | 'llm';
+    question?: string;
     retrieved?: number;
     cited?: string[];
     used?: UsedPaper[];
     error?: boolean;
+    notfound?: { query: string; webSearch: boolean };
+    webBusy?: boolean;
+    webHits?: WebHit[];
+    webFailed?: string[];
+    imports?: Record<string, string>;
   }
 
   let open = $state(false);
@@ -58,6 +77,9 @@
     if (event === 'meta') {
       current.retrieved = payload.retrieved;
       if (current.phase !== 'streaming') current.phase = 'thinking';
+    } else if (event === 'notfound') {
+      current.notfound = { query: payload.query, webSearch: Boolean(payload.web_search) };
+      current.text = 'No papers in your library matched this question.';
     } else if (event === 'token') {
       // The first token flips to streaming whether or not meta arrived; guardrail refusals
       // skip meta entirely.
@@ -91,16 +113,27 @@
     const question = input.trim();
     if (!question || busy) return;
     input = '';
-    busy = true;
     messages.push({ role: 'user', text: question });
-    const current: Message = { role: 'assistant', text: '', phase: 'searching' };
+    await ask(question, 'fast');
+  }
+
+  function summarize(message: Message) {
+    // The on-demand LLM pass over the same question, as a fresh exchange.
+    if (busy || !message.question) return;
+    messages.push({ role: 'user', text: `Summarize: ${message.question}` });
+    void ask(message.question, 'llm');
+  }
+
+  async function ask(question: string, mode: 'fast' | 'llm') {
+    busy = true;
+    const current: Message = { role: 'assistant', text: '', phase: 'searching', mode, question };
     messages.push(current);
 
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, mode }),
       });
       if (response.status === 429) {
         const wait = response.headers.get('Retry-After');
@@ -133,6 +166,41 @@
     } finally {
       current.phase = 'done';
       busy = false;
+    }
+  }
+
+  async function searchWeb(message: Message) {
+    const query = message.notfound?.query;
+    if (!query || message.webBusy) return;
+    message.webBusy = true;
+    try {
+      const response = await fetch(`/api/search/web?q=${encodeURIComponent(query)}`);
+      if (!response.ok) throw new Error(String(response.status));
+      const payload = await response.json();
+      message.webHits = payload.hits;
+      message.webFailed = payload.providers_failed;
+    } catch {
+      message.webHits = [];
+      message.webFailed = ['arxiv', 's2'];
+    } finally {
+      message.webBusy = false;
+    }
+  }
+
+  async function importHit(message: Message, hit: WebHit) {
+    if (!hit.arxiv_id) return;
+    message.imports = { ...(message.imports ?? {}), [hit.arxiv_id]: 'busy' };
+    try {
+      const response = await fetch('/api/papers/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ arxiv_id: hit.arxiv_id }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      const payload = await response.json();
+      message.imports = { ...message.imports, [hit.arxiv_id]: payload.id };
+    } catch {
+      message.imports = { ...message.imports, [hit.arxiv_id]: 'error' };
     }
   }
 </script>
@@ -176,6 +244,61 @@
               {/if}
             {/each}
           </p>
+        {/if}
+        {#if message.mode === 'fast' && message.phase === 'done' && !message.error && message.cited && message.cited.length > 0}
+          <p class="actions">
+            <button class="ghost" onclick={() => summarize(message)} disabled={busy}>
+              Summarize with AI
+            </button>
+          </p>
+        {/if}
+        {#if message.notfound && message.phase === 'done'}
+          <div class="webfallback">
+            {#if message.notfound.webSearch && !message.webHits}
+              <p class="actions">
+                <button class="ghost" onclick={() => searchWeb(message)} disabled={message.webBusy}>
+                  {message.webBusy ? 'Searching the web' : 'Search the web'}
+                </button>
+              </p>
+            {/if}
+            {#if message.webHits}
+              {#if message.webHits.length === 0}
+                <p class="webnote">Nothing found on the web either.</p>
+              {/if}
+              {#each message.webHits as hit}
+                <div class="webhit">
+                  <p class="webtitle">{hit.title}{#if hit.year}&nbsp;({hit.year}){/if}</p>
+                  {#if hit.authors.length > 0}<p class="webmeta">{hit.authors.join(', ')}</p>{/if}
+                  {#if hit.snippet}<p class="websnippet">{hit.snippet}</p>{/if}
+                  <p class="webactions">
+                    <span class="provider">{hit.provider}</span>
+                    {#if hit.already_known && hit.paper_id}
+                      <a href={`/papers/${hit.paper_id}`}>In library - open</a>
+                    {:else if hit.arxiv_id}
+                      {#if message.imports?.[hit.arxiv_id] === 'busy'}
+                        <span class="webnote">Adding</span>
+                      {:else if message.imports?.[hit.arxiv_id] === 'error'}
+                        <span class="weberror">Could not add - try again</span>
+                      {:else if message.imports?.[hit.arxiv_id]}
+                        <a href={`/papers/${message.imports[hit.arxiv_id]}`}>
+                          Added to Reading list - open
+                        </a>
+                      {:else}
+                        <button class="ghost" onclick={() => importHit(message, hit)}>
+                          Add to library
+                        </button>
+                      {/if}
+                    {:else if hit.url}
+                      <a href={hit.url} target="_blank" rel="noreferrer">View source</a>
+                    {/if}
+                  </p>
+                </div>
+              {/each}
+              {#if message.webFailed && message.webFailed.length > 0}
+                <p class="webnote">Search unavailable for: {message.webFailed.join(', ')}</p>
+              {/if}
+            {/if}
+          </div>
         {/if}
       </div>
     {/each}
@@ -342,6 +465,98 @@
   }
   .msg .pending {
     color: var(--muted, #5d6570);
+  }
+  .actions {
+    padding: 0.4rem 0 0 !important;
+    background: none !important;
+    border: none !important;
+  }
+  .ghost {
+    border: 1px solid var(--line, #e4e7eb);
+    border-radius: 999px;
+    background: var(--surface, #fff);
+    color: var(--ink, #17191c);
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 0.25rem 0.75rem;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+  .ghost:hover:not(:disabled) {
+    background: var(--surface-2, #f5f7fa);
+  }
+  .ghost:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .ghost:focus-visible {
+    outline: 2px solid var(--accent, #c2410c);
+    outline-offset: 2px;
+  }
+  .webfallback {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-right: 2rem;
+  }
+  .webhit {
+    border: 1px solid var(--line, #e4e7eb);
+    border-radius: 10px;
+    padding: 0.55rem 0.75rem;
+    background: var(--surface, #fff);
+  }
+  .webhit p {
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+  }
+  .webtitle {
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .webmeta {
+    font-size: 0.75rem;
+    color: var(--muted, #5d6570);
+  }
+  .websnippet {
+    font-size: 0.78rem;
+    margin-top: 0.25rem !important;
+    color: var(--ink, #17191c);
+  }
+  .webactions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.4rem !important;
+    font-size: 0.78rem;
+  }
+  .webactions a {
+    color: var(--accent-ink, #78350f);
+    font-weight: 500;
+  }
+  .provider {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted, #5d6570);
+    border: 1px solid var(--line, #e4e7eb);
+    border-radius: 999px;
+    padding: 0.05rem 0.45rem;
+  }
+  .webnote {
+    font-size: 0.78rem;
+    color: var(--muted, #5d6570);
+    background: none !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+  .weberror {
+    font-size: 0.78rem;
+    color: #8b1d1d;
   }
   .dots span {
     display: inline-block;
