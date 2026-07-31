@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 from researchscout.retrieve.search import ScoredPaper
-from researchscout.schema import Author, Paper
+from researchscout.schema import Author, Paper, PaperLabel
 
 
 class PaperSummary(BaseModel):
@@ -27,6 +27,10 @@ class PaperSummary(BaseModel):
     source: str
     url: str | None
     pdf_url: str | None
+    # Stream enrichment (None until the categorize stage has seen the paper). Sections
+    # stay internal: they only feed LLM answer context and no UI needs them.
+    keywords: list[str] | None = None
+    labels: list[PaperLabel] | None = None
     score: float | None = None
     # Why the personalized feed picked this paper (None everywhere else).
     reason: str | None = None
@@ -49,6 +53,8 @@ class PaperSummary(BaseModel):
             source=paper.source,
             url=paper.url,
             pdf_url=paper.pdf_url,
+            keywords=paper.keywords,
+            labels=paper.labels,
             score=score,
             reason=reason,
         )
