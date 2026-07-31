@@ -21,4 +21,12 @@ def test_in_memory_broker_captures_messages() -> None:
     broker.publish("rs.raw.v1", "arxiv:2607.1", b"one")
     broker.publish("rs.raw.v1", "arxiv:2607.2", b"two")
     broker.flush()
+    broker.flush(timeout=0.5)  # the bounded form is part of the protocol
     assert [key for key, _ in broker.messages["rs.raw.v1"]] == ["arxiv:2607.1", "arxiv:2607.2"]
+
+
+def test_kafka_broker_flush_accepts_a_timeout() -> None:
+    from researchscout.stream.broker import KafkaBroker
+
+    broker = KafkaBroker("localhost:1")  # construction is offline; nothing connects yet
+    broker.flush(0.05)  # bounded drain returns promptly even with no broker
