@@ -61,6 +61,7 @@ def test_valid_token_passes(monkeypatch: pytest.MonkeyPatch) -> None:
 
     empty = Answer(text="No recent papers match this question.", cited=[], hallucinated=[], used=[])
     monkeypatch.setattr(ask_router, "answer", lambda *a, **k: empty)
+    monkeypatch.setattr(ask_router, "record_metrics", lambda **kw: None)  # hermetic: no DB
     assert _ask(_client(monkeypatch), _token()) == 200
 
 
