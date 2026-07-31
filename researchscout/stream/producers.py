@@ -54,6 +54,7 @@ def publish_source(
                     fetched_at=raw.fetched_at,
                     payload={"raw": raw.payload},
                 )
+                envelope.finish(envelope.begin("produce"))
                 broker.publish(topics.raw, envelope.key(), encode(envelope))
                 published += 1
             save_state(session, source.name, next_cursor, since)
@@ -115,6 +116,7 @@ def poll_fulltext(settings: Settings, broker: Broker, topics: StreamTopics) -> N
                     "text": text[:_FULLTEXT_TEXT_CAP],
                 },
             )
+            envelope.finish(envelope.begin("produce"))
             broker.publish(topics.raw, envelope.key(), encode(envelope))
             published += 1
     broker.flush()
