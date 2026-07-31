@@ -65,7 +65,12 @@ def _fake_inject(item: Categorized) -> Envelope:
     return item.envelope
 
 
-def test_stages_compose_under_run_main(monkeypatch: pytest.MonkeyPatch) -> None:
+def _fake_inject_batch(items: list[Categorized]) -> list[Envelope]:
+    return [_fake_inject(item) for item in items]
+
+
+@pytest.mark.parametrize("batch_size", [1, 2])
+def test_stages_compose_under_run_main(monkeypatch: pytest.MonkeyPatch, batch_size: int) -> None:
     monkeypatch.setattr(categorize_mod, "list_topics", lambda session: [])
     from contextlib import nullcontext
 
@@ -80,10 +85,14 @@ def test_stages_compose_under_run_main(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     flow = Dataflow("test-stream")
-    packets = op.input("in", flow, TestingSource([_arxiv_envelope(), _bad_source_envelope()]))
+    packets = op.input(
+        "in",
+        flow,
+        TestingSource([_arxiv_envelope(), _bad_source_envelope()], batch_size=batch_size),
+    )
     parsed = op.map("parse", packets, parse_stage)
-    categorized = op.map("categorize", parsed, categorizer.run)
-    injected = op.map("inject", categorized, _fake_inject)
+    categorized = op.flat_map_batch("categorize", parsed, categorizer.run_batch)
+    injected = op.flat_map_batch("inject", categorized, _fake_inject_batch)
     out: list[Envelope] = []
     op.output("out", injected, TestingSink(out))
     run_main(flow)
@@ -99,8 +108,8 @@ def test_stages_compose_under_run_main(monkeypatch: pytest.MonkeyPatch) -> None:
 def _null_deps() -> FlowDeps:
     return FlowDeps(
         parse=lambda envelope: envelope,
-        categorize=lambda envelope: Categorized(envelope, None),
-        inject=lambda item: item.envelope,
+        categorize_batch=lambda envelopes: [Categorized(e, None) for e in envelopes],
+        inject_batch=lambda items: [item.envelope for item in items],
     )
 
 
