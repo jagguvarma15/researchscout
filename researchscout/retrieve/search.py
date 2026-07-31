@@ -31,6 +31,7 @@ degrades gracefully to vector-only.
 from __future__ import annotations
 
 import math
+import time
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
@@ -58,6 +59,9 @@ class ScoredPaper:
     paper: Paper
     score: float
     distance: float
+    # The raw cross-encoder relevance in [0, 1], before the prior multiply — the only
+    # absolute match signal. None when reranking is off (scores are rank-based then).
+    relevance: float | None = None
 
 
 def _recency_weight(published_at: datetime, half_life_days: float) -> float:
@@ -76,13 +80,17 @@ def retrieve(
     facets: PaperFacets | None = None,
     half_life_days: float = _DEFAULT_HALF_LIFE_DAYS,
     use_rerank: bool = True,
+    query_vector: list[float] | None = None,
+    timings: dict[str, float] | None = None,
 ) -> list[ScoredPaper]:
     """Up to ``k`` in-window papers, ranked by RRF x recency x breakthrough, optionally reranked.
 
     ``facets`` filters both retrieval legs; the legacy ``days``/``categories`` kwargs fold into
     it. The hard freshness window applies unless the facets already bound time (a year/month
     window replaces it). ``use_rerank=False`` skips the cross-encoder pass regardless of the
-    ``RS_RERANK_ENABLED`` flag (the None reranker path is a pure pass-through).
+    ``RS_RERANK_ENABLED`` flag (the None reranker path is a pure pass-through). A caller that
+    already embedded the query passes ``query_vector`` to skip the duplicate embed; a
+    ``timings`` dict, when given, is filled with embed_ms/legs_ms/rerank_ms.
     """
     settings = get_settings()
     if facets is None:
@@ -91,7 +99,10 @@ def retrieve(
         facets = replace(facets, days=settings.freshness_days)
     where = facets_where(facets)
 
-    query_vector = embedder.embed_query(query)
+    started = time.perf_counter()
+    if query_vector is None:
+        query_vector = embedder.embed_query(query)
+    embed_done = time.perf_counter()
     vector_hits = vector_search(
         session, query_vector, model_id=embedder.model_id, k=_LEG_K, where=where
     )
@@ -137,9 +148,14 @@ def retrieve(
         # Lexical-only hits have no measured cosine distance; report the maximum.
         lookup[paper_id] = (paper, distances.get(paper_id, 1.0))
 
+    legs_done = time.perf_counter()
     reranker = get_reranker() if use_rerank else None
     ranked = rerank(query, candidates, reranker, top_n=max(settings.rerank_top_n, k))
+    if timings is not None:
+        timings["embed_ms"] = round((embed_done - started) * 1000.0, 1)
+        timings["legs_ms"] = round((legs_done - embed_done) * 1000.0, 1)
+        timings["rerank_ms"] = round((time.perf_counter() - legs_done) * 1000.0, 1)
     return [
-        ScoredPaper(paper=lookup[key][0], score=score, distance=lookup[key][1])
-        for key, score in ranked
+        ScoredPaper(paper=lookup[key][0], score=score, distance=lookup[key][1], relevance=relevance)
+        for key, score, relevance in ranked
     ][:k]
