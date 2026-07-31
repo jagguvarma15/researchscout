@@ -295,11 +295,21 @@ def digest(
 
 
 @stream_app.command("serve")
-def stream_serve() -> None:
-    """Run the streaming worker: consume raw packets, parse, categorize, inject."""
-    from researchscout.stream.serve import run_worker
+def stream_serve(
+    producer_only: Annotated[
+        bool, typer.Option("--producer-only", help="Run only the polling producers.")
+    ] = False,
+    worker_only: Annotated[
+        bool, typer.Option("--worker-only", help="Run only the processing worker.")
+    ] = False,
+) -> None:
+    """Run the streaming pipeline: producers polling sources plus the processing worker."""
+    from researchscout.stream.serve import run_stream
 
-    run_worker()
+    if producer_only and worker_only:
+        typer.secho("choose at most one of --producer-only / --worker-only", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    run_stream(producer_only=producer_only, worker_only=worker_only)
 
 
 @stream_app.command("tail")
