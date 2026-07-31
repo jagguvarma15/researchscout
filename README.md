@@ -110,8 +110,9 @@ uv run scout serve api    # http://127.0.0.1:8000, OpenAPI docs at /docs
 ```
 
 Endpoints: `GET /healthz`, `GET /v1/papers` (recency feed; `?q=` switches to semantic ranking),
-`GET /v1/papers/{id}`, `GET /v1/topics` (emerging topics), `GET /v1/me/feed` (personalized),
-and `POST /v1/ask` (grounded, cited answer). With `RS_OIDC_ISSUER` unset (the default) the API
+`GET /v1/papers/{id}`, `GET /v1/topics` (emerging topics), `GET /v1/keywords` (corpus keyword
+dictionary with paper counts), `GET /v1/me/feed` (personalized), and `POST /v1/ask` (grounded,
+cited answer). With `RS_OIDC_ISSUER` unset (the default) the API
 runs in local no-auth mode as a built-in user; set an issuer to require OIDC Bearer tokens.
 The LLM defaults to local Ollama; point `RS_LLM_BASE_URL` / `RS_LLM_MODEL` / `RS_LLM_API_KEY`
 at any OpenAI-compatible provider to swap it.
