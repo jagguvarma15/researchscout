@@ -36,6 +36,13 @@ class Settings(BaseSettings):
     # Where to fetch signing keys; defaults to the issuer's JWKS endpoint.
     oidc_jwks_url: str | None = None
     # Chat rate limiting (in-process fixed window).
+    # Web search fallback (arXiv + Semantic Scholar cards on not-found answers). Default
+    # ON deliberately (a documented deviation like the guardrail): user-triggered, zero
+    # idle cost, gracefully failing; the flag is a kill switch. The import endpoint stays
+    # available regardless.
+    web_search_enabled: bool = True
+    web_search_rate_limit: int = 10
+    web_search_rate_window_seconds: int = 60
     chat_rate_limit: int = 20
     chat_rate_window_seconds: int = 600
     # LLM scope pre-check that keeps /v1/chat on research topics. Fails open, so a broken
