@@ -12,6 +12,8 @@ session stays open until the stream finishes.
 from __future__ import annotations
 
 import json
+import logging
+import time
 from collections.abc import Iterator
 from typing import Annotated, Any
 
@@ -29,8 +31,27 @@ from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
 from researchscout.guardrail import REFUSAL_TEXT, is_research_question
 from researchscout.llm.base import LLM
+from researchscout.store.ask_metrics import record_ask
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
+
+
+def record_metrics(**fields: Any) -> None:
+    """Best-effort metrics write in a session of its own, after the stream has finished.
+
+    The request session is owned by the streaming response (and may be mid-error), so
+    recording never touches it - and a metrics failure never surfaces to the user.
+    """
+    from researchscout.store.db import session_scope
+
+    try:
+        with session_scope() as metrics_session:
+            record_ask(metrics_session, **fields)
+    except Exception:  # noqa: BLE001 - metrics are never worth an error
+        logger.warning("could not record ask metrics", exc_info=True)
+
 
 _SSE_HEADERS = {
     "Cache-Control": "no-cache",
@@ -70,15 +91,22 @@ def chat(
             yield _sse("token", {"delta": REFUSAL_TEXT})
             yield _sse("done", {"cited": [], "hallucinated": [], "used": []})
             return
+        started = time.perf_counter()
+        meta_at: float | None = None
+        retrieved = 0
+        final: Answer | None = None
         try:
             for event in answer_stream(
                 session, embedder, llm, body.question, k=body.k, days=body.days
             ):
                 if isinstance(event, StreamMeta):
+                    meta_at = time.perf_counter()
+                    retrieved = event.retrieved
                     yield _sse("meta", {"retrieved": event.retrieved})
                 elif isinstance(event, StreamDelta):
                     yield _sse("token", {"delta": event.text})
                 elif isinstance(event, Answer):
+                    final = event
                     yield _sse(
                         "done",
                         {
@@ -91,26 +119,58 @@ def chat(
                     )
         except OpenAIError:
             yield _sse("error", {"code": 502, "message": "LLM backend unavailable"})
+            return
+        ended = time.perf_counter()
+        known = [
+            item.relevance for item in (final.used if final else []) if item.relevance is not None
+        ]
+        record_metrics(
+            mode="llm",
+            surface="chat",
+            question=body.question,
+            retrieved=retrieved,
+            best_relevance=max(known) if known else None,
+            found=retrieved > 0,
+            retrieve_ms=int((meta_at - started) * 1000) if meta_at else None,
+            rerank_ms=None,
+            llm_ms=int((ended - meta_at) * 1000) if meta_at else None,
+            total_ms=int((ended - started) * 1000),
+        )
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=_SSE_HEADERS)
 
 
 def _fast_events(session: Session, embedder: Embedder, body: AskRequest) -> Iterator[str]:
     """The extractive fast path: no LLM, no guardrail (deterministic output needs none)."""
-    fast = answer_fast(session, embedder, body.question, k=body.k, days=body.days)
+    started = time.perf_counter()
+    timings: dict[str, float] = {}
+    fast = answer_fast(session, embedder, body.question, k=body.k, days=body.days, timings=timings)
     result = fast.answer
     yield _sse("meta", {"retrieved": len(result.used), "mode": "fast"})
     if not fast.found:
         # web_search flips to the RS_WEB_SEARCH_ENABLED flag once the search endpoint lands.
         yield _sse("notfound", {"query": body.question, "web_search": False})
         yield _sse("done", {"cited": [], "hallucinated": [], "used": []})
-        return
-    yield _sse("token", {"delta": result.text})
-    yield _sse(
-        "done",
-        {
-            "cited": result.cited,
-            "hallucinated": result.hallucinated,
-            "used": [UsedPaper.from_scored(item).model_dump() for item in result.used],
-        },
+    else:
+        yield _sse("token", {"delta": result.text})
+        yield _sse(
+            "done",
+            {
+                "cited": result.cited,
+                "hallucinated": result.hallucinated,
+                "used": [UsedPaper.from_scored(item).model_dump() for item in result.used],
+            },
+        )
+    retrieve_ms = timings.get("embed_ms", 0.0) + timings.get("legs_ms", 0.0)
+    record_metrics(
+        mode="fast",
+        surface="chat",
+        question=body.question,
+        retrieved=len(result.used),
+        best_relevance=fast.best_relevance,
+        found=fast.found,
+        retrieve_ms=int(retrieve_ms) if timings else None,
+        rerank_ms=int(timings["rerank_ms"]) if "rerank_ms" in timings else None,
+        llm_ms=None,
+        total_ms=int((time.perf_counter() - started) * 1000),
     )
