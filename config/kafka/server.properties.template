@@ -1,0 +1,20 @@
+# KRaft single-node broker for the local streaming pipeline. Rendered into
+# .local/kafka/server.properties by make setup (@KAFKA_DATA@ becomes the absolute
+# repo-local data directory). Sized for one machine: one partition per topic, no
+# replication, modest retention; the JVM heap cap lives in the Makefile.
+
+process.roles=broker,controller
+node.id=1
+controller.quorum.bootstrap.servers=localhost:9093
+listeners=PLAINTEXT://localhost:9092,CONTROLLER://localhost:9093
+advertised.listeners=PLAINTEXT://localhost:9092
+inter.broker.listener.name=PLAINTEXT
+controller.listener.names=CONTROLLER
+log.dirs=@KAFKA_DATA@
+num.partitions=1
+offsets.topic.replication.factor=1
+transaction.state.log.replication.factor=1
+transaction.state.log.min.isr=1
+log.retention.hours=168
+# Topics are created by the stream service (ensure_topics), not on first use.
+auto.create.topics.enable=false
