@@ -1,11 +1,11 @@
-"""In-process refresh loop that keeps the radar fresh without manual runs.
+"""In-process refresh loop for the derived products the stream does not build.
 
-Four tasks run on independent intervals: ingest enabled content sources, embed papers that lack a
-vector, refresh enabled signal sources, and rebuild the weekly digest. The same task set backs both
-``scout serve scheduler`` (a long-lived loop) and ``scout serve scheduler --once`` (a single pass),
-so a host cron or a container job can drive it too. Work is synchronous and sequential on purpose: a
-cycle ingests before it embeds before it refreshes signals, which is the order the data depends on.
-A task that raises is logged and skipped, so one bad source never stops the loop.
+Three tasks run on independent intervals: the weekly digest, the topic rebuild, and the
+daily report. Ingestion, embedding, and signal refresh moved to the streaming pipeline
+(``scout stream serve``); the manual batch path (``scout ingest`` / ``scout index`` /
+``scout fulltext``) remains as the fallback and backfill route. The same task set backs both
+``scout serve scheduler`` (a long-lived loop) and ``--once`` (a single pass), so a host cron
+can drive it too. A task that raises is logged and skipped, so one failure never stops the loop.
 """
 
 from __future__ import annotations
@@ -14,9 +14,8 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from functools import partial
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 from researchscout.config import Settings
 
@@ -27,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 Clock = Callable[[], float]
 Sleep = Callable[[float], None]
-_SourceKind = Literal["content", "signal"]
 
 
 @dataclass
@@ -98,40 +96,6 @@ def _embedder() -> Embedder:
     return default_embedder()
 
 
-def _ingest(kind: _SourceKind, window_days: int) -> None:
-    from researchscout.ingest.pipeline import run_ingest
-    from researchscout.sources.base import enabled_sources
-    from researchscout.store.db import session_scope
-
-    since = datetime.now(UTC) - timedelta(days=window_days)
-    for source in enabled_sources(kind):
-        try:
-            with session_scope() as session:
-                summary = run_ingest(session, source, since)
-        except Exception:  # noqa: BLE001 - isolate one source's failure from the rest
-            logger.warning("%s source %s failed", kind, source.name, exc_info=True)
-            continue
-        logger.info(
-            "%s %s: fetched=%d new=%d collapsed=%d signals=%d",
-            kind,
-            source.name,
-            summary.fetched,
-            summary.new_papers,
-            summary.collapsed,
-            summary.signals,
-        )
-
-
-def _index() -> None:
-    from researchscout.store.db import session_scope
-    from researchscout.store.vectors import index_papers
-
-    with session_scope() as session:
-        count = index_papers(session, _embedder())
-    if count:
-        logger.info("indexed %d new paper(s)", count)
-
-
 def _digest(settings: Settings) -> None:
     from researchscout.digest import build_digest
     from researchscout.llm.openai_compat import OpenAICompatLLM
@@ -187,17 +151,8 @@ def _report(settings: Settings) -> None:
 
 
 def build_tasks(settings: Settings) -> list[Task]:
-    """Construct the scheduler's tasks with intervals drawn from ``settings``.
-
-    Order matters: ingest new papers, embed them, refresh their signals, then rebuild the digest.
-    """
-    window = settings.scheduler_ingest_window_days
-    ingest_content = partial(_ingest, "content", window)
-    ingest_signals = partial(_ingest, "signal", window)
+    """Construct the scheduler's tasks with intervals drawn from ``settings``."""
     return [
-        Task("ingest", settings.scheduler_ingest_interval_sec, ingest_content),
-        Task("index", settings.scheduler_index_interval_sec, _index),
-        Task("signals", settings.scheduler_signals_interval_sec, ingest_signals),
         Task("digest", settings.scheduler_digest_interval_sec, partial(_digest, settings)),
         Task("topics", settings.scheduler_topics_interval_sec, partial(_topics, settings)),
         Task("report", settings.scheduler_report_interval_sec, partial(_report, settings)),
