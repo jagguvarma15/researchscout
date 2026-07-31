@@ -268,6 +268,34 @@ def test_run_batch_degrades_to_serial_on_batch_embed_failure(
     assert envelope.lineage[-1].outcome == "ok"
 
 
+def test_keyword_embedder_scores_in_its_own_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The doc embedder maps the text along x (the stored vector); the keyword embedder
+    # maps it along y. "sparse attention" only scores in the keyword space - if scoring
+    # wrongly used the doc vector, its similarity would fall under the floor.
+    monkeypatch.setattr(categorize_mod, "list_topics", lambda session: [])
+    envelope = _paper_envelope()
+    text = f"Sparse attention\n\n{envelope.payload['paper']['abstract']}"
+    doc_embedder = FakeEmbedder({text: DOC})
+    keyword_embedder = FakeEmbedder({text: [0.0, 1.0, 0.0], "sparse attention": [0.1, 0.9, 0.0]})
+    categorizer = Categorizer(
+        doc_embedder,
+        FakeLLM("unused"),
+        _no_session,
+        topic_match_min=0.55,
+        keyword_min_similarity=0.35,
+        keywords_llm_fallback=False,
+        labels=[],
+        keyword_embedder=keyword_embedder,
+    )
+
+    result = categorizer.run_batch([envelope])[0]
+
+    enrichment = envelope.payload["enrichment"]
+    assert enrichment["keywords"] == ["sparse attention"]
+    assert enrichment["keyword_method"] == "static"
+    assert result.vector == DOC  # the stored embedding stays in the doc space
+
+
 def test_non_paper_and_failed_parse_pass_through() -> None:
     signal = Envelope(
         kind="signal", source="s2", fetched_at=datetime(2026, 7, 30, tzinfo=UTC), payload={}
