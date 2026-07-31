@@ -4,14 +4,14 @@ ResearchScout ingests new AI/ML papers and their surrounding signals (citations,
 ## Quickstart
 
 Everything runs as plain host processes — no Docker. Needs Homebrew Postgres with pgvector
-(`brew install postgresql@17 pgvector`), [uv](https://docs.astral.sh/uv/), and pnpm. Chat needs
-an LLM: the defaults target local [Ollama](https://ollama.com) (`brew install ollama`, run
-`ollama serve`, then `ollama pull qwen2.5:3b-instruct` — one-time ~2.3GB), or point `RS_LLM_*`
-in `.env` at any OpenAI-compatible provider.
+plus Kafka (`brew install postgresql@17 pgvector kafka`), [uv](https://docs.astral.sh/uv/), and
+pnpm. Chat needs an LLM: the defaults target local [Ollama](https://ollama.com) (`brew install
+ollama`, run `ollama serve`, then `ollama pull qwen2.5:3b-instruct` — one-time ~2.3GB), or point
+`RS_LLM_*` in `.env` at any OpenAI-compatible provider.
 
 ```bash
-make setup    # deps, .env, and a repo-local Postgres cluster in .local/
-make start    # postgres, api, web — prints the URLs when ready
+make setup    # deps, .env, a repo-local Postgres cluster and Kafka storage in .local/
+make start    # postgres, kafka, the streaming pipeline, api, web — prints the URLs when ready
 make seed     # ~25 real arXiv papers, embedded and searchable
 ```
 
@@ -23,9 +23,25 @@ year/month), popularity (most cited, most active), authors, and venues; results 
 you can share or bookmark. Read on a card or paper page opens the PDF in-app; math in titles
 and abstracts renders properly. Star papers (`/saved`), run `make digest` and visit `/digests`
 for the weekly summary. `/topics` clusters recent papers into emerging themes ranked by
-momentum, and `/for-you` personalizes the feed from your interests. `make scheduler` keeps
-ingest, signals, embeddings, digests, and topics refreshing on their own. `make stop` shuts
+momentum, and `/for-you` personalizes the feed from your interests. `make stop` shuts
 everything down; `make clean` also wipes the data; plain `make` lists every target.
+
+## Streaming pipeline
+
+Ingestion runs as a streaming pipeline over a local single-node Kafka broker (KRaft mode,
+brew-installed, lifecycle-managed by make with data under `.local/`). `scout stream serve`
+(started by `make start`) runs polling producers — arXiv hourly, signal sources on their
+cadence, full text in politely paced batches — publishing raw packets to `rs.raw.v1`, and a
+Bytewax worker consuming them through three stages: parse (deterministic normalization and
+cleanup), categorize (taxonomy group, topic-centroid match, statistical keywords with a
+small-LLM fallback, optional custom labels), and inject (idempotent upserts, embeddings,
+chunks, signals). Every packet carries per-stage lineage into Postgres: `GET /v1/stream/stats`
+serves hourly rollups, the `pipeline_rollups_hourly` view is Grafana-ready, and
+`scout stream tail` watches packets live on the `rs.parsed.v1` / `rs.enriched.v1` taps.
+Delivery is at-least-once with natural-key upserts everywhere, so replays converge.
+`make scheduler` still drives the derived products (weekly digest, topics, the daily report
+with its must-read five). The batch commands below remain the manual fallback whenever the
+broker is down.
 
 ## Deep backfill
 
