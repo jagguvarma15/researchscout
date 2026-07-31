@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 
 from sqlalchemy.orm import Session
 
@@ -73,12 +74,28 @@ _NOT_FOUND_TEXT = "No papers in the library matched this question closely enough
 
 
 @dataclass
+class FastEntry:
+    """One structured fast-answer hit; the rendered text derives from these."""
+
+    id: str
+    title: str
+    published_at: datetime
+    venue: str | None
+    matches: list[str]
+    keywords: list[str]
+    excerpt: str | None
+    relevance: float | None
+
+
+@dataclass
 class FastAnswer:
     """The extractive result plus the threshold verdict the router acts on."""
 
     answer: Answer
     found: bool
     best_relevance: float | None
+    # Empty on the not-found path; last with a default so existing constructors hold.
+    entries: list[FastEntry] = field(default_factory=list)
 
 
 def _relevance(item: ScoredPaper) -> float | None:
@@ -108,6 +125,25 @@ def _match_terms(question: str, item: ScoredPaper) -> list[str]:
         if len(matched) == _FAST_MATCH_TERMS:
             break
     return matched
+
+
+def _fast_text(entries: list[FastEntry]) -> str:
+    """Render the deterministic extractive text from the structured entries."""
+    plural = "s" if len(entries) != 1 else ""
+    lines = [f"Found {len(entries)} recent paper{plural} matching your question."]
+    for index, entry in enumerate(entries, start=1):
+        head = f"{index}. {entry.title} [{entry.id}] - {entry.published_at.strftime('%b %Y')}"
+        if entry.venue:
+            head += f" - {entry.venue}"
+        block = [head]
+        if entry.matches:
+            block.append("   Matches: " + ", ".join(entry.matches))
+        if entry.keywords:
+            block.append("   Keywords: " + ", ".join(entry.keywords))
+        if entry.excerpt:
+            block.append(f'   Excerpt: "{entry.excerpt}"')
+        lines.append("\n".join(block))
+    return "\n\n".join(lines)
 
 
 def answer_fast(
@@ -153,32 +189,32 @@ def answer_fast(
                 best_relevance=best,
             )
 
-        keep = [
-            item
+        kept = [
+            (item, rel)
             for item, rel in zip(used, relevances, strict=True)
             if rel is None or rel >= settings.ask_min_relevance
         ][:_FAST_SHOWN]
+        keep = [item for item, _ in kept]
         quotes = _excerpts_for(session, embedder, question, keep, query_vector)
-        plural = "s" if len(keep) != 1 else ""
-        lines = [f"Found {len(keep)} recent paper{plural} matching your question."]
-        for index, item in enumerate(keep, start=1):
+        entries: list[FastEntry] = []
+        for item, rel in kept:
             paper = item.paper
-            head = f"{index}. {paper.title} [{paper.id}] - {paper.published_at.strftime('%b %Y')}"
-            if paper.venue:
-                head += f" - {paper.venue}"
-            entry = [head]
-            terms = _match_terms(question, item)
-            if terms:
-                entry.append("   Matches: " + ", ".join(terms))
-            if paper.keywords:
-                entry.append("   Keywords: " + ", ".join(paper.keywords[:6]))
             quote = quotes.get(paper.id)
-            if quote:
-                entry.append(f'   Excerpt: "{quote[:_FAST_EXCERPT_CHARS]}"')
-            lines.append("\n".join(entry))
-        result = _post_check("\n\n".join(lines), keep)
+            entries.append(
+                FastEntry(
+                    id=paper.id,
+                    title=paper.title,
+                    published_at=paper.published_at,
+                    venue=paper.venue,
+                    matches=_match_terms(question, item),
+                    keywords=(paper.keywords or [])[:6],
+                    excerpt=quote[:_FAST_EXCERPT_CHARS] if quote else None,
+                    relevance=rel,
+                )
+            )
+        result = _post_check(_fast_text(entries), keep)
         span["cited"] = len(result.cited)
-        return FastAnswer(answer=result, found=True, best_relevance=best)
+        return FastAnswer(answer=result, found=True, best_relevance=best, entries=entries)
 
 
 def _context(papers: list[ScoredPaper], quotes: dict[str, str] | None = None) -> str:
