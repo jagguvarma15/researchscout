@@ -27,6 +27,9 @@ api = [
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.9",
 ]
+static-embed = [
+    "model2vec>=0.3",
+]
 
 [project.scripts]
 scout = "researchscout.cli:app"
@@ -42,6 +45,7 @@ dev = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.9",
+    "model2vec>=0.8.2",
 ]
 
 [build-system]
