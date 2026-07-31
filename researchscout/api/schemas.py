@@ -127,6 +127,18 @@ class ImportResponse(BaseModel):
     enrichment_queued: bool
 
 
+class KeywordCount(BaseModel):
+    keyword: str
+    papers: int
+
+
+class KeywordList(BaseModel):
+    # items are ranked papers desc then keyword asc; total counts distinct keywords
+    # before the limit cut.
+    items: list[KeywordCount]
+    total: int
+
+
 class DigestItem(BaseModel):
     paper_id: str
     title: str
