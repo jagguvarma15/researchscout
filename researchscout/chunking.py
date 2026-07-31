@@ -45,6 +45,11 @@ def _sections(text: str) -> list[tuple[str | None, list[str]]]:
     return sections
 
 
+def section_headings(text: str) -> list[str]:
+    """Ordered section headings from marked-up full text (unheaded leading prose is skipped)."""
+    return [heading for heading, _ in _sections(text) if heading]
+
+
 def chunk_text(
     text: str,
     *,
