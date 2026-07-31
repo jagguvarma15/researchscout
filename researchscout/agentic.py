@@ -59,7 +59,12 @@ def _fuse(results: list[list[ScoredPaper]]) -> list[ScoredPaper]:
             if current is None or item.distance < current.distance:
                 keep[paper_id] = item
     rescored = [
-        ScoredPaper(paper=keep[paper_id].paper, score=score, distance=keep[paper_id].distance)
+        ScoredPaper(
+            paper=keep[paper_id].paper,
+            score=score,
+            distance=keep[paper_id].distance,
+            relevance=keep[paper_id].relevance,
+        )
         for paper_id, score in fused.items()
     ]
     return sorted(rescored, key=lambda item: item.score, reverse=True)
