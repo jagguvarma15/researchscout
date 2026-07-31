@@ -35,11 +35,15 @@ _SINK_TUNING = dict(PRODUCER_TUNING)
 
 @dataclass(frozen=True)
 class FlowDeps:
-    """The three stage callables, injected so tests wire fakes into the same graph."""
+    """The stage callables, injected so tests wire fakes into the same graph.
+
+    Parse stays per-item (its self-time is ~0); categorize and inject take whole batches
+    so merged embeds and one-transaction sinks amortize across the consumer batch.
+    """
 
     parse: Callable[[Envelope], Envelope]
-    categorize: Callable[[Envelope], Categorized]
-    inject: Callable[[Categorized], Envelope]
+    categorize_batch: Callable[[list[Envelope]], list[Categorized]]
+    inject_batch: Callable[[list[Categorized]], list[Envelope]]
 
 
 def decode_message(
@@ -97,8 +101,8 @@ def build_flow(
             parsed_tap,
             KafkaSink(brokers=[bootstrap], topic=topics.parsed, add_config=_SINK_TUNING),
         )
-    categorized = op.map("categorize", parsed, deps.categorize)
-    injected = op.map("inject", categorized, deps.inject)
+    categorized = op.flat_map_batch("categorize", parsed, deps.categorize_batch)
+    injected = op.flat_map_batch("inject", categorized, deps.inject_batch)
     if taps:
         enriched_tap = op.map("enriched-msg", injected, to_sink_message)
         op.output(
