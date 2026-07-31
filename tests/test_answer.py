@@ -34,6 +34,21 @@ class _StubEmbedder:
         return [0.0, 0.0, 0.0]
 
 
+def _scored_rel(
+    pid: str,
+    *,
+    relevance: float | None = None,
+    distance: float = 0.0,
+    keywords: list[str] | None = None,
+) -> ScoredPaper:
+    item = _scored(pid)
+    item.relevance = relevance
+    item.distance = distance
+    if keywords:
+        item.paper.keywords = keywords
+    return item
+
+
 def _scored(pid: str, title: str = "T", abstract: str = "A") -> ScoredPaper:
     paper = Paper(
         id=pid,
@@ -110,3 +125,52 @@ def test_trace_span_logs(caplog: pytest.LogCaptureFixture) -> None:
         with trace_span("unit", foo=1) as span:
             span["bar"] = 2
     assert any("unit" in record.getMessage() for record in caplog.records)
+
+
+def test_answer_fast_composes_extractive_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    used = [_scored_rel("arxiv:2401.00001", relevance=0.85, keywords=["sparse attention"])]
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: used)
+    fast = answer_mod.answer_fast(None, _StubEmbedder(), "sparse attention transformers")
+
+    assert fast.found and fast.best_relevance == 0.85
+    text = fast.answer.text
+    assert "Found 1 recent paper matching your question." in text
+    assert "[arxiv:2401.00001]" in text
+    assert "Matches: sparse, attention" in text
+    assert "Keywords: sparse attention" in text
+    assert fast.answer.cited == ["arxiv:2401.00001"]
+    assert fast.answer.hallucinated == []
+
+
+def test_answer_fast_below_floor_reports_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    used = [_scored_rel("arxiv:2401.00001", relevance=0.05)]
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: used)
+    fast = answer_mod.answer_fast(None, _StubEmbedder(), "q")
+
+    assert not fast.found
+    assert fast.best_relevance == 0.05
+    assert fast.answer.used == [] and fast.answer.cited == []
+
+
+def test_answer_fast_cosine_fallback_thresholds(monkeypatch: pytest.MonkeyPatch) -> None:
+    close = [_scored_rel("arxiv:2401.00001", distance=0.4)]  # similarity 0.6
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: close)
+    assert answer_mod.answer_fast(None, _StubEmbedder(), "q").found
+
+    far = [_scored_rel("arxiv:2401.00001", distance=0.9)]  # similarity 0.1
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: far)
+    assert not answer_mod.answer_fast(None, _StubEmbedder(), "q").found
+
+
+def test_answer_fast_never_false_negatives_on_unknowable_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A lexical-only hit carries the sentinel distance: relevance unknowable, presence wins.
+    lexical = [_scored_rel("arxiv:2401.00001", distance=1.0)]
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: lexical)
+    fast = answer_mod.answer_fast(None, _StubEmbedder(), "q")
+    assert fast.found and fast.best_relevance is None
+
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: [])
+    empty = answer_mod.answer_fast(None, _StubEmbedder(), "q")
+    assert not empty.found and empty.best_relevance is None
