@@ -201,6 +201,73 @@ def test_custom_labels_filter_to_the_configured_set(monkeypatch: pytest.MonkeyPa
     assert envelope.payload["enrichment"]["labels"] == ["efficiency", "safety"]
 
 
+class CountingEmbedder(FakeEmbedder):
+    def __init__(self, table: dict[str, list[float]] | None = None) -> None:
+        super().__init__(table)
+        self.calls = 0
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        return super().embed_documents(texts)
+
+
+class FlakyEmbedder(FakeEmbedder):
+    """Fails the first call (the merged batch embed), then behaves."""
+
+    def __init__(self, table: dict[str, list[float]] | None = None) -> None:
+        super().__init__(table)
+        self.failed = False
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        if not self.failed:
+            self.failed = True
+            raise RuntimeError("mps hiccup")
+        return super().embed_documents(texts)
+
+
+def test_run_batch_merges_embeds_and_preserves_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(categorize_mod, "list_topics", lambda session: [])
+    first = _paper_envelope()
+    second = _paper_envelope("Kernel fusion", "kernel fusion compiles graphs into fused kernels")
+    signal = Envelope(
+        kind="signal", source="s2", fetched_at=datetime(2026, 7, 31, tzinfo=UTC), payload={}
+    )
+    table = {
+        **_table("Sparse attention", first.payload["paper"]["abstract"]),
+        f"Kernel fusion\n\n{second.payload['paper']['abstract']}": DOC,
+        "kernel fusion": [0.85, 0.0, 0.1],
+    }
+    embedder = CountingEmbedder(table)
+    out = _categorizer(embedder, FakeLLM("unused"), fallback=False).run_batch(
+        [first, signal, second]
+    )
+
+    assert embedder.calls == 2  # one merged doc call, one merged candidate call
+    assert [item.envelope.kind for item in out] == ["paper", "signal", "paper"]
+    assert first.payload["enrichment"]["keywords"] == ["sparse attention", "transformer inference"]
+    assert "kernel fusion" in second.payload["enrichment"]["keywords"]
+    assert out[0].vector == DOC and out[1].vector is None and out[2].vector == DOC
+    assert first.lineage[-1].outcome == "ok" and second.lineage[-1].outcome == "ok"
+
+
+def test_run_batch_degrades_to_serial_on_batch_embed_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(categorize_mod, "list_topics", lambda session: [])
+    envelope = _paper_envelope()
+    table = _table("Sparse attention", envelope.payload["paper"]["abstract"])
+    out = _categorizer(FlakyEmbedder(table), FakeLLM("unused"), fallback=False).run_batch(
+        [envelope]
+    )
+
+    assert envelope.payload["enrichment"]["keywords"] == [
+        "sparse attention",
+        "transformer inference",
+    ]
+    assert out[0].vector == DOC
+    assert envelope.lineage[-1].outcome == "ok"
+
+
 def test_non_paper_and_failed_parse_pass_through() -> None:
     signal = Envelope(
         kind="signal", source="s2", fetched_at=datetime(2026, 7, 30, tzinfo=UTC), payload={}
