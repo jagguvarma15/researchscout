@@ -8,7 +8,7 @@ caller keeps working in paper space.
 
 from __future__ import annotations
 
-from sqlalchemy import ColumnElement, select
+from sqlalchemy import ColumnElement, delete, select
 from sqlalchemy.orm import Session
 
 from researchscout.chunking import chunk_text
@@ -28,6 +28,34 @@ def papers_missing_chunks(session: Session, model_id: str) -> list[tuple[str, st
         )
     ).all()
     return [(paper_id, full_text) for paper_id, full_text in rows]
+
+
+def index_chunks_for(
+    session: Session, embedder: Embedder, paper_id: str, full_text: str, *, batch_size: int = 64
+) -> int:
+    """Replace one paper's chunks for this model (delete then insert, so replays converge)."""
+    session.execute(
+        delete(PaperChunkRow).where(
+            PaperChunkRow.paper_id == paper_id, PaperChunkRow.model_id == embedder.model_id
+        )
+    )
+    chunks = chunk_text(full_text)
+    for start in range(0, len(chunks), batch_size):
+        batch = chunks[start : start + batch_size]
+        vectors = embedder.embed_documents([chunk.text for chunk in batch])
+        for chunk, vector in zip(batch, vectors, strict=True):
+            session.add(
+                PaperChunkRow(
+                    paper_id=paper_id,
+                    model_id=embedder.model_id,
+                    chunk_index=chunk.index,
+                    section=chunk.section,
+                    text=chunk.text,
+                    embedding=vector,
+                )
+            )
+    session.flush()
+    return len(chunks)
 
 
 def index_chunks(session: Session, embedder: Embedder, *, batch_size: int = 64) -> int:
