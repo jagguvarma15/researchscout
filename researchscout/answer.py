@@ -60,6 +60,126 @@ _EXCERPT_CHARS = 600
 # Sections are capped so an enriched prompt still fits the same window.
 _SECTIONS_IN_CONTEXT = 8
 
+# The fast extractive answer shows at most this many papers with shorter excerpts.
+_FAST_SHOWN = 5
+_FAST_EXCERPT_CHARS = 300
+_FAST_MATCH_TERMS = 6
+# Lexical-only hits carry the sentinel cosine distance 1.0: relevance unknowable, never
+# counted against the threshold.
+_LEXICAL_SENTINEL = 0.999
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+_NOT_FOUND_TEXT = "No papers in the library matched this question closely enough."
+
+
+@dataclass
+class FastAnswer:
+    """The extractive result plus the threshold verdict the router acts on."""
+
+    answer: Answer
+    found: bool
+    best_relevance: float | None
+
+
+def _relevance(item: ScoredPaper) -> float | None:
+    """The best absolute match signal available for one hit, or None when unknowable.
+
+    Cross-encoder relevance when reranking ran; cosine similarity otherwise; None for
+    lexical-only hits (their sentinel distance measures nothing).
+    """
+    if item.relevance is not None:
+        return item.relevance
+    if item.distance >= _LEXICAL_SENTINEL:
+        return None
+    return 1.0 - item.distance
+
+
+def _match_terms(question: str, item: ScoredPaper) -> list[str]:
+    """Question terms that appear in the paper's title, abstract, or keywords."""
+    from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+
+    haystack = " ".join(
+        [item.paper.title, item.paper.abstract, " ".join(item.paper.keywords or [])]
+    ).lower()
+    matched = []
+    for token in dict.fromkeys(_TOKEN_RE.findall(question.lower())):
+        if len(token) > 1 and token not in ENGLISH_STOP_WORDS and token in haystack:
+            matched.append(token)
+        if len(matched) == _FAST_MATCH_TERMS:
+            break
+    return matched
+
+
+def answer_fast(
+    session: Session,
+    embedder: Embedder,
+    question: str,
+    *,
+    k: int = 8,
+    days: int | None = None,
+    timings: dict[str, float] | None = None,
+) -> FastAnswer:
+    """A deterministic extractive answer with no LLM call: papers, matches, excerpts.
+
+    ``found`` is False when nothing clears ``RS_ASK_MIN_RELEVANCE`` — the router turns
+    that into the not-found event that offers a web search. When every hit's relevance is
+    unknowable (rerank off and lexical-only), emptiness is the only honest test.
+    """
+    with trace_span("ask-fast", question=question, k=k, days=days) as span:
+        settings = get_settings()
+        query_vector = embedder.embed_query(question)
+        used = retrieve(
+            session,
+            embedder,
+            question,
+            k=k,
+            days=days,
+            query_vector=query_vector,
+            timings=timings,
+        )
+        span["retrieved"] = len(used)
+        relevances = [_relevance(item) for item in used]
+        known = [rel for rel in relevances if rel is not None]
+        best = max(known) if known else None
+        found = (best is not None and best >= settings.ask_min_relevance) or (
+            not known and bool(used)
+        )
+        span["found"] = found
+        span["best_relevance"] = best
+        if not found:
+            return FastAnswer(
+                answer=Answer(text=_NOT_FOUND_TEXT, cited=[], hallucinated=[], used=[]),
+                found=False,
+                best_relevance=best,
+            )
+
+        keep = [
+            item
+            for item, rel in zip(used, relevances, strict=True)
+            if rel is None or rel >= settings.ask_min_relevance
+        ][:_FAST_SHOWN]
+        quotes = _excerpts_for(session, embedder, question, keep, query_vector)
+        plural = "s" if len(keep) != 1 else ""
+        lines = [f"Found {len(keep)} recent paper{plural} matching your question."]
+        for index, item in enumerate(keep, start=1):
+            paper = item.paper
+            head = f"{index}. {paper.title} [{paper.id}] - {paper.published_at.strftime('%b %Y')}"
+            if paper.venue:
+                head += f" - {paper.venue}"
+            entry = [head]
+            terms = _match_terms(question, item)
+            if terms:
+                entry.append("   Matches: " + ", ".join(terms))
+            if paper.keywords:
+                entry.append("   Keywords: " + ", ".join(paper.keywords[:6]))
+            quote = quotes.get(paper.id)
+            if quote:
+                entry.append(f'   Excerpt: "{quote[:_FAST_EXCERPT_CHARS]}"')
+            lines.append("\n".join(entry))
+        result = _post_check("\n\n".join(lines), keep)
+        span["cited"] = len(result.cited)
+        return FastAnswer(answer=result, found=True, best_relevance=best)
+
 
 def _context(papers: list[ScoredPaper], quotes: dict[str, str] | None = None) -> str:
     parts = []
