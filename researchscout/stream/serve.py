@@ -78,7 +78,14 @@ def _run_worker(settings: Settings, topics: StreamTopics) -> None:
     )
     injector = Injector(embedder, session_scope)
     deps = FlowDeps(parse=parse_stage, categorize=categorizer.run, inject=injector.run)
-    flow = build_flow(settings.kafka_bootstrap, topics, settings.stream_consumer_group, deps)
+    flow = build_flow(
+        settings.kafka_bootstrap,
+        topics,
+        settings.stream_consumer_group,
+        deps,
+        batch_size=settings.stream_consumer_batch,
+        taps=settings.stream_taps_enabled,
+    )
 
     recovery_dir = settings.stream_recovery_dir
     recovery_dir.mkdir(parents=True, exist_ok=True)
