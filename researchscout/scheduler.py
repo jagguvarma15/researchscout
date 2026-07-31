@@ -168,6 +168,24 @@ def _topics(settings: Settings) -> None:
     logger.info("built %d topic(s)", len(topics))
 
 
+def _report(settings: Settings) -> None:
+    from researchscout.report import build_daily_report
+    from researchscout.store.db import session_scope
+    from researchscout.store.digests import upsert_digest
+    from researchscout.store.lineage import prune_lineage
+
+    with session_scope() as session:
+        result = build_daily_report(session)
+        if result is None:
+            logger.info("daily report: window empty, nothing to publish")
+        else:
+            upsert_digest(session, result)
+            logger.info("daily report %s: %d must-read", result.slug, len(result.items))
+        pruned = prune_lineage(session)
+    if pruned:
+        logger.info("pruned %d lineage rows", pruned)
+
+
 def build_tasks(settings: Settings) -> list[Task]:
     """Construct the scheduler's tasks with intervals drawn from ``settings``.
 
@@ -182,4 +200,5 @@ def build_tasks(settings: Settings) -> list[Task]:
         Task("signals", settings.scheduler_signals_interval_sec, ingest_signals),
         Task("digest", settings.scheduler_digest_interval_sec, partial(_digest, settings)),
         Task("topics", settings.scheduler_topics_interval_sec, partial(_topics, settings)),
+        Task("report", settings.scheduler_report_interval_sec, partial(_report, settings)),
     ]
