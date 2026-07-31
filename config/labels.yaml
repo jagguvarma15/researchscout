@@ -1,0 +1,19 @@
+# Custom label taxonomy for the streaming categorize stage (RS_STREAM_LABELS_ENABLED).
+# The classifier only ever returns names from this list; edit freely and restart the stream.
+labels:
+  - name: architectures
+    description: New model architectures or major architectural variants.
+  - name: efficiency
+    description: Inference or training efficiency, quantization, distillation, sparsity.
+  - name: reasoning
+    description: Reasoning, planning, chain-of-thought, or agentic behavior.
+  - name: retrieval
+    description: Retrieval, RAG, search, embeddings, vector stores.
+  - name: safety
+    description: Alignment, safety, robustness, evaluation of harms.
+  - name: multimodal
+    description: Vision, audio, video, or any cross-modal modeling.
+  - name: theory
+    description: Learning theory, optimization analysis, generalization bounds.
+  - name: applications
+    description: Domain applications of machine learning outside core methods research.
