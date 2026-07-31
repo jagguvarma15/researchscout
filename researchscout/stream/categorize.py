@@ -314,10 +314,11 @@ class Categorizer:
             keywords, method = self._finish_keywords(title, abstract, extracted)
             if method == "statistical" and not self._same_space:
                 method = "static"
+            topic = self._match_topic(vector)
             envelope.payload["enrichment"] = {
                 "group": group.key if group else None,
                 "tech": group.tech if group else None,
-                "topic": self._match_topic(vector),
+                "topic": topic,
                 "keywords": keywords,
                 "keyword_method": method,
                 "labels": self._custom_labels(title, abstract),
@@ -325,7 +326,14 @@ class Categorizer:
         except Exception as exc:  # noqa: BLE001 - a bad packet must not stop the flow
             envelope.finish(stamp, "error", f"{type(exc).__name__}: {exc}")
             return Categorized(envelope, None)
-        envelope.finish(stamp)
+        envelope.finish(
+            stamp,
+            detail={
+                "keyword_method": method,
+                "candidate_count": len(candidates),
+                "topic_score": topic.get("similarity") if topic else None,
+            },
+        )
         return Categorized(envelope, vector)
 
     def run(self, envelope: Envelope) -> Categorized:
