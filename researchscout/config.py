@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     stream_topic_match_min: float = 0.55
     stream_keyword_min_similarity: float = 0.35
     stream_keyword_candidates: int = 80
+    # "static" scores keyword candidates with model2vec potion-base-8M (needs the
+    # static-embed extra; much faster, 256-dim scoring space). The similarity floor above
+    # was tuned in bge space - watch the keyword-method dashboard panel before relying on
+    # static rankings. The stored paper embedding stays bge either way.
+    stream_keyword_embedder: Literal["bge", "static"] = "bge"
     stream_keywords_llm_fallback: bool = True
     stream_labels_enabled: bool = False
     labels_config_path: Path = Path("config/labels.yaml")
