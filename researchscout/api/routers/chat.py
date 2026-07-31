@@ -148,8 +148,10 @@ def _fast_events(session: Session, embedder: Embedder, body: AskRequest) -> Iter
     result = fast.answer
     yield _sse("meta", {"retrieved": len(result.used), "mode": "fast"})
     if not fast.found:
-        # web_search flips to the RS_WEB_SEARCH_ENABLED flag once the search endpoint lands.
-        yield _sse("notfound", {"query": body.question, "web_search": False})
+        yield _sse(
+            "notfound",
+            {"query": body.question, "web_search": get_settings().web_search_enabled},
+        )
         yield _sse("done", {"cited": [], "hallucinated": [], "used": []})
     else:
         yield _sse("token", {"delta": result.text})
