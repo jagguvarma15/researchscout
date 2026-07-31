@@ -235,16 +235,16 @@ def serve_scheduler(
         bool, typer.Option("--once", help="Run one full pass and exit (for cron / a CronJob).")
     ] = False,
 ) -> None:
-    """Run the refresh loop: ingest sources, embed papers, refresh signals, rebuild the digest."""
-    import logging
+    """Run the refresh loop: weekly digest, topic rebuild, and the daily report."""
     import signal as signalmod
     import threading
     from contextlib import suppress
 
     from researchscout.config import get_settings
     from researchscout.scheduler import Scheduler, build_tasks
+    from researchscout.trace import configure_logging
 
-    logging.basicConfig(level=logging.INFO)
+    configure_logging()
     settings = get_settings()
     scheduler = Scheduler(build_tasks(settings), tick_sec=settings.scheduler_tick_sec)
 
@@ -305,10 +305,12 @@ def stream_serve(
 ) -> None:
     """Run the streaming pipeline: producers polling sources plus the processing worker."""
     from researchscout.stream.serve import run_stream
+    from researchscout.trace import configure_logging
 
     if producer_only and worker_only:
         typer.secho("choose at most one of --producer-only / --worker-only", fg=typer.colors.RED)
         raise typer.Exit(code=1)
+    configure_logging()
     run_stream(producer_only=producer_only, worker_only=worker_only)
 
 
