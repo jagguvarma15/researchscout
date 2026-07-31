@@ -78,10 +78,13 @@ class Categorized:
 
 
 def _ready(
-    vector: list[float], candidates: list[str], candidate_vectors: list[list[float]]
-) -> Callable[[], tuple[list[float], list[str], list[list[float]]]]:
+    vector: list[float],
+    scoring_vector: list[float],
+    candidates: list[str],
+    candidate_vectors: list[list[float]],
+) -> Callable[[], tuple[list[float], list[float], list[str], list[list[float]]]]:
     """Bind precomputed batch results into the compute-thunk shape (no loop-var capture)."""
-    return lambda: (vector, candidates, candidate_vectors)
+    return lambda: (vector, scoring_vector, candidates, candidate_vectors)
 
 
 def load_labels(path: Path) -> list[LabelSpec]:
@@ -183,6 +186,7 @@ class Categorizer:
         keywords_llm_fallback: bool,
         labels: list[LabelSpec],
         keyword_candidate_cap: int = _KEYWORD_CANDIDATE_CAP,
+        keyword_embedder: Embedder | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._embedder = embedder
@@ -192,6 +196,11 @@ class Categorizer:
         self._keyword_min_similarity = keyword_min_similarity
         self._keywords_llm_fallback = keywords_llm_fallback
         self._keyword_candidate_cap = keyword_candidate_cap
+        # Keyword scoring may run in a different (faster, smaller) embedding space; the
+        # stored paper embedding always comes from the document embedder. When the spaces
+        # differ, a scoring-only doc vector keeps every similarity within one space.
+        self._keyword_embedder = keyword_embedder or embedder
+        self._same_space = keyword_embedder is None
         self._labels = labels
         self._clock = clock
         self._centroids: list[TopicCentroid] = []
@@ -282,9 +291,10 @@ class Categorizer:
     def _categorize_one(
         self,
         envelope: Envelope,
-        compute: Callable[[], tuple[list[float], list[str], list[list[float]]]],
+        compute: Callable[[], tuple[list[float], list[float], list[str], list[list[float]]]],
     ) -> Categorized:
-        """Enrich one paper from (doc vector, candidates, candidate vectors) by ``compute``.
+        """Enrich one paper from ``compute``'s (doc vector, scoring vector, candidates,
+        candidate vectors).
 
         The thunk runs inside the try so embedding failures stamp the packet's lineage
         exactly like any other stage error.
@@ -293,15 +303,17 @@ class Categorizer:
         try:
             paper = envelope.payload["paper"]
             title, abstract = paper["title"], paper["abstract"]
-            vector, candidates, candidate_vectors = compute()
+            vector, scoring_vector, candidates, candidate_vectors = compute()
             group = group_for(paper.get("primary_category"))
             extracted = select_keywords(
                 candidates,
                 candidate_vectors,
-                vector,
+                scoring_vector,
                 min_similarity=self._keyword_min_similarity,
             )
             keywords, method = self._finish_keywords(title, abstract, extracted)
+            if method == "statistical" and not self._same_space:
+                method = "static"
             envelope.payload["enrichment"] = {
                 "group": group.key if group else None,
                 "tech": group.tech if group else None,
@@ -322,13 +334,14 @@ class Categorizer:
         if passthrough is not None:
             return passthrough
 
-        def compute() -> tuple[list[float], list[str], list[list[float]]]:
+        def compute() -> tuple[list[float], list[float], list[str], list[list[float]]]:
             paper = envelope.payload["paper"]
             text = f"{paper['title']}\n\n{paper['abstract']}"
             vector = self._embedder.embed_documents([text])[0]
+            scoring = vector if self._same_space else self._keyword_embedder.embed_query(text)
             candidates = keyword_candidates(text, cap=self._keyword_candidate_cap)
-            vectors = self._embedder.embed_documents(candidates) if candidates else []
-            return vector, candidates, vectors
+            vectors = self._keyword_embedder.embed_documents(candidates) if candidates else []
+            return vector, scoring, candidates, vectors
 
         return self._categorize_one(envelope, compute)
 
@@ -351,25 +364,30 @@ class Categorizer:
 
         if papers:
             try:
-                doc_vectors = self._embedder.embed_documents([text for _, _, text in papers])
+                texts = [text for _, _, text in papers]
+                doc_vectors = self._embedder.embed_documents(texts)
+                scoring_vectors = (
+                    doc_vectors
+                    if self._same_space
+                    else self._keyword_embedder.embed_documents(texts)
+                )
                 candidate_lists = [
-                    keyword_candidates(text, cap=self._keyword_candidate_cap)
-                    for _, _, text in papers
+                    keyword_candidates(text, cap=self._keyword_candidate_cap) for text in texts
                 ]
                 flat = [c for candidates in candidate_lists for c in candidates]
-                flat_vectors = self._embedder.embed_documents(flat) if flat else []
+                flat_vectors = self._keyword_embedder.embed_documents(flat) if flat else []
             except Exception:  # noqa: BLE001 - model hiccup: the serial path re-embeds
                 logger.warning("batch embed failed; categorizing serially", exc_info=True)
                 for index, envelope, _ in papers:
                     outputs[index] = self.run(envelope)
             else:
                 offset = 0
-                for (index, envelope, _), candidates, vector in zip(
-                    papers, candidate_lists, doc_vectors, strict=True
+                for (index, envelope, _), candidates, vector, scoring in zip(
+                    papers, candidate_lists, doc_vectors, scoring_vectors, strict=True
                 ):
                     candidate_vectors = flat_vectors[offset : offset + len(candidates)]
                     offset += len(candidates)
                     outputs[index] = self._categorize_one(
-                        envelope, _ready(vector, candidates, candidate_vectors)
+                        envelope, _ready(vector, scoring, candidates, candidate_vectors)
                     )
         return [output for output in outputs if output is not None]
