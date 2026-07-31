@@ -23,6 +23,17 @@ class FakeLLM(LLM):
         return self._reply
 
 
+class _StubEmbedder:
+    model_id = "stub"
+    dim = 3
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0, 0.0, 0.0] for _ in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return [0.0, 0.0, 0.0]
+
+
 def _scored(pid: str, title: str = "T", abstract: str = "A") -> ScoredPaper:
     paper = Paper(
         id=pid,
@@ -47,7 +58,7 @@ def test_answer_cites_only_retrieved(monkeypatch: pytest.MonkeyPatch) -> None:
     used = [_scored("arxiv:2401.00001"), _scored("arxiv:2401.00002")]
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: used)
     llm = FakeLLM("Great [arxiv:2401.00001] but also invented [arxiv:9999.99999].")
-    result = answer(None, None, llm, "q")
+    result = answer(None, _StubEmbedder(), llm, "q")
     assert result.cited == ["arxiv:2401.00001"]
     assert result.hallucinated == ["arxiv:9999.99999"]
 
@@ -56,7 +67,7 @@ def test_prompt_contains_retrieved_context(monkeypatch: pytest.MonkeyPatch) -> N
     used = [_scored("arxiv:2401.00001", title="Cool Paper", abstract="An abstract here.")]
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: used)
     llm = FakeLLM("[arxiv:2401.00001]")
-    answer(None, None, llm, "what is cool?")
+    answer(None, _StubEmbedder(), llm, "what is cool?")
     assert "[arxiv:2401.00001]" in llm.last_user
     assert "Cool Paper" in llm.last_user
     assert "An abstract here." in llm.last_user
@@ -76,7 +87,7 @@ def test_prompt_carries_enrichment_when_present(monkeypatch: pytest.MonkeyPatch)
     plain = _scored("arxiv:2401.00002")
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: [enriched, plain])
     llm = FakeLLM("[arxiv:2401.00001]")
-    answer(None, None, llm, "q")
+    answer(None, _StubEmbedder(), llm, "q")
 
     assert "Keywords: state space models, long context" in llm.last_user
     assert "Sections: S1; S2" in llm.last_user
@@ -89,7 +100,7 @@ def test_prompt_carries_enrichment_when_present(monkeypatch: pytest.MonkeyPatch)
 
 def test_answer_empty_when_no_papers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: [])
-    result = answer(None, None, FakeLLM("unused"), "q")
+    result = answer(None, _StubEmbedder(), FakeLLM("unused"), "q")
     assert result.used == []
     assert result.cited == []
 
