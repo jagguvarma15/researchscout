@@ -84,17 +84,21 @@ def rerank(
     reranker: Reranker | None,
     *,
     top_n: int,
-) -> list[tuple[str, float]]:
-    """Take the top-N first-stage candidates, rerank them, and return (key, score) sorted desc.
+) -> list[tuple[str, float, float | None]]:
+    """Rerank the top-N first-stage candidates; returns (key, blended score, raw relevance).
 
-    With ``reranker`` None this is a pure pass-through of the first-stage order, so retrieval is
-    unchanged when reranking is off. Otherwise each candidate's cross-encoder relevance replaces the
-    RRF term while its recency-and-breakthrough prior is kept.
+    With ``reranker`` None this is a pure pass-through of the first-stage order (relevance
+    None), so retrieval is unchanged when reranking is off. Otherwise each candidate's
+    cross-encoder relevance replaces the RRF term while its recency-and-breakthrough prior
+    is kept — and the raw calibrated relevance in ``[0, 1]`` rides along, because it is the
+    only absolute signal of whether anything actually matched the query.
     """
     ordered = sorted(candidates, key=lambda c: c.first_stage, reverse=True)[:top_n]
     if reranker is None:
-        return [(c.key, c.first_stage) for c in ordered]
+        return [(c.key, c.first_stage, None) for c in ordered]
     relevances = reranker.scores(query, [c.text for c in ordered])
-    blended = [(c.key, rel * c.prior) for c, rel in zip(ordered, relevances, strict=True)]
+    blended: list[tuple[str, float, float | None]] = [
+        (c.key, rel * c.prior, rel) for c, rel in zip(ordered, relevances, strict=True)
+    ]
     blended.sort(key=lambda kv: kv[1], reverse=True)
     return blended
