@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from researchscout.schema import Signal
@@ -30,6 +31,29 @@ def append_signal(session: Session, signal: Signal) -> None:
         )
     )
     session.flush()
+
+
+def append_signal_idempotent(session: Session, signal: Signal) -> bool:
+    """Append one observation unless the exact (paper, type, source, observed_at) row exists.
+
+    Backs the streaming sink: an at-least-once redelivery carries the same observed_at, so
+    replays converge instead of duplicating the series. Returns True when a row was written
+    (detected via RETURNING; rowcount is unreliable on the ORM insert path).
+    """
+    stmt = (
+        insert(SignalRow)
+        .values(
+            paper_id=signal.paper_id,
+            type=str(signal.type),
+            source=signal.source,
+            value=signal.value,
+            signal_metadata=signal.metadata,
+            observed_at=signal.observed_at,
+        )
+        .on_conflict_do_nothing(index_elements=["paper_id", "type", "source", "observed_at"])
+        .returning(SignalRow.id)
+    )
+    return session.execute(stmt).scalar_one_or_none() is not None
 
 
 def latest_value(session: Session, paper_id: str, type: str) -> float:
