@@ -10,25 +10,35 @@ so replays converge.
 from __future__ import annotations
 
 import logging
+import threading
 
 from bytewax.recovery import RecoveryConfig, init_db_dir
 from bytewax.testing import run_main
 
-from researchscout.config import get_settings
+from researchscout.config import Settings, get_settings
 from researchscout.embed.factory import default_embedder
 from researchscout.llm.openai_compat import OpenAICompatLLM
+from researchscout.scheduler import Scheduler
 from researchscout.store.db import session_scope
-from researchscout.stream.broker import StreamTopics, ensure_topics
+from researchscout.stream.broker import KafkaBroker, StreamTopics, ensure_topics
 from researchscout.stream.categorize import Categorizer, load_labels
 from researchscout.stream.flow import FlowDeps, build_flow
 from researchscout.stream.inject import Injector
 from researchscout.stream.parse import parse_stage
+from researchscout.stream.producers import build_producer_tasks
 
 logger = logging.getLogger(__name__)
 
 
-def run_worker() -> None:
-    """Run the parse/categorize/inject worker until interrupted."""
+def _producer_scheduler(settings: Settings, topics: StreamTopics) -> Scheduler:
+    broker = KafkaBroker(settings.kafka_bootstrap)
+    return Scheduler(
+        build_producer_tasks(settings, broker, topics), tick_sec=settings.scheduler_tick_sec
+    )
+
+
+def run_stream(*, producer_only: bool = False, worker_only: bool = False) -> None:
+    """Run producers and the worker together (or one side alone for debugging)."""
     settings = get_settings()
     if not settings.sources_config_path.exists():
         raise SystemExit(
@@ -38,6 +48,22 @@ def run_worker() -> None:
     topics = StreamTopics.for_prefix(settings.kafka_topic_prefix)
     ensure_topics(settings.kafka_bootstrap, topics)
 
+    if producer_only:
+        logger.info("producers polling into %s (no worker)", topics.raw)
+        _producer_scheduler(settings, topics).run_forever(lambda: False)
+        return
+    if not worker_only:
+        scheduler = _producer_scheduler(settings, topics)
+        thread = threading.Thread(
+            target=lambda: scheduler.run_forever(lambda: False), name="producers", daemon=True
+        )
+        thread.start()
+        logger.info("producers polling into %s", topics.raw)
+    _run_worker(settings, topics)
+
+
+def _run_worker(settings: Settings, topics: StreamTopics) -> None:
+    """Run the parse/categorize/inject worker until interrupted."""
     embedder = default_embedder()
     labels = load_labels(settings.labels_config_path) if settings.stream_labels_enabled else []
     categorizer = Categorizer(
