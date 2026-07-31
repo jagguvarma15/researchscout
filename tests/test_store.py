@@ -77,6 +77,29 @@ def test_reupsert_preserves_full_text(session: Session) -> None:
     assert row.full_text == "## Introduction\n\nBody text."
 
 
+def test_enrichment_round_trips_and_survives_reupsert(session: Session) -> None:
+    from researchscout.schema import PaperLabel
+    from researchscout.store.papers import set_enrichment
+
+    upsert_paper(session, _paper(title="First"))
+    set_enrichment(
+        session,
+        "arxiv:2401.00001",
+        keywords=["state space models", "long context"],
+        labels=[PaperLabel(label="efficiency", source="custom", score=0.9)],
+    )
+    set_enrichment(session, "arxiv:2401.00001", sections=["Introduction", "Method"])
+    upsert_paper(session, _paper(title="Refreshed"))  # a re-ingest carries no enrichment
+    session.flush()
+
+    got = get_paper(session, "arxiv:2401.00001")
+    assert got is not None
+    assert got.title == "Refreshed"
+    assert got.keywords == ["state space models", "long context"]  # partial update kept these
+    assert got.sections == ["Introduction", "Method"]
+    assert got.labels == [PaperLabel(label="efficiency", source="custom", score=0.9)]
+
+
 def test_external_ids_collapse_to_one_paper(session: Session) -> None:
     upsert_paper(session, _paper())
     link_external_ids(session, "arxiv:2401.00001", {"doi": "10.1000/xyz"})
