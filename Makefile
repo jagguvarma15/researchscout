@@ -16,8 +16,13 @@ KAFKA_DATA := $(LOCAL)/kafka-logs
 KAFKA_CONF := $(LOCAL)/kafka/server.properties
 KAFKA_HEAP ?= -Xmx512m -Xms128m
 
+GRAFANA_BIN   := $(shell brew --prefix grafana 2>/dev/null)/bin
+GRAFANA_HOME  := $(shell brew --prefix grafana 2>/dev/null)/share/grafana
+GRAFANA_LOCAL := $(LOCAL)/grafana
+GRAFANA_CONF  := $(GRAFANA_LOCAL)/grafana.ini
+
 .DEFAULT_GOAL := help
-.PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop check clean
+.PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop grafana-start grafana-stop check clean
 
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-10s\033[0m %s\n", $$1, $$2}'
@@ -40,6 +45,11 @@ setup: ## install toolchains, dependencies, and the local Postgres cluster
 	@[ -f $(KAFKA_DATA)/meta.properties ] || { \
 	  $(KAFKA_BIN)/kafka-storage format --standalone -t $$($(KAFKA_BIN)/kafka-storage random-uuid) -c $(KAFKA_CONF) >/dev/null && \
 	  echo "initialized $(KAFKA_DATA)"; }
+	@[ -x "$(GRAFANA_BIN)/grafana" ] || echo "note: no grafana — monitoring dashboards need it (brew install grafana)"
+	@mkdir -p $(GRAFANA_LOCAL)/data $(GRAFANA_LOCAL)/plugins $(GRAFANA_LOCAL)/provisioning/datasources $(GRAFANA_LOCAL)/provisioning/dashboards $(GRAFANA_LOCAL)/provisioning/plugins $(GRAFANA_LOCAL)/provisioning/alerting
+	@sed -e "s|@GRAFANA_DATA@|$(GRAFANA_LOCAL)|" -e "s|@REPO@|$(CURDIR)|" config/grafana/grafana.ini.template > $(GRAFANA_CONF)
+	@sed "s|@REPO@|$(CURDIR)|" config/grafana/provisioning/dashboards/researchscout.yaml > $(GRAFANA_LOCAL)/provisioning/dashboards/researchscout.yaml
+	@cp config/grafana/provisioning/datasources/researchscout.yaml $(GRAFANA_LOCAL)/provisioning/datasources/researchscout.yaml
 	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
 	@echo "setup complete — next: make start"
 
@@ -75,18 +85,22 @@ start: ## start postgres, kafka, migrate, then the stream, API, and web app in t
 	else \
 	  cd apps/web && { nohup ./node_modules/.bin/astro dev >> $(LOG)/web.log 2>&1 & echo $$! > $(RUN)/web.pid; }; \
 	fi
+	@if [ -x "$(GRAFANA_BIN)/grafana" ]; then $(MAKE) grafana-start; else echo "grafana: not installed (brew install grafana)"; fi
 	@echo
 	@echo "  web       http://localhost:4321   (no sign-in — you are the local user)"
 	@echo "  api docs  http://localhost:8000/docs"
+	@echo "  grafana   http://localhost:3000   (monitoring dashboards, no sign-in)"
 	@echo
 	@echo "  next: make seed   (chat needs 'ollama serve' + qwen2.5:3b-instruct, or a cloud key in .env)"
 
-stop: ## stop the web app, API, stream, kafka, and postgres
+stop: ## stop the web app, API, stream, grafana, kafka, and postgres
 	-@[ -f $(RUN)/web.pid ] && kill $$(cat $(RUN)/web.pid) 2>/dev/null; rm -f $(RUN)/web.pid
 	-@[ -f $(RUN)/api.pid ] && kill $$(cat $(RUN)/api.pid) 2>/dev/null; rm -f $(RUN)/api.pid
 	-@[ -f $(RUN)/stream.pid ] && kill $$(cat $(RUN)/stream.pid) 2>/dev/null; rm -f $(RUN)/stream.pid
 	-@lsof -ti :4321 2>/dev/null | xargs kill -9 2>/dev/null; true
 	-@lsof -ti :8000 2>/dev/null | xargs kill -9 2>/dev/null; true
+	-@[ -f $(RUN)/grafana.pid ] && kill $$(cat $(RUN)/grafana.pid) 2>/dev/null; rm -f $(RUN)/grafana.pid
+	-@lsof -ti :3000 2>/dev/null | xargs kill 2>/dev/null; true
 	-@[ -f $(RUN)/kafka.pid ] && kill $$(cat $(RUN)/kafka.pid) 2>/dev/null; rm -f $(RUN)/kafka.pid
 	-@lsof -ti :9092 2>/dev/null | xargs kill 2>/dev/null; true
 	-@$(PG_BIN)/pg_ctl -D $(PGDATA) status >/dev/null 2>&1 && $(PG_BIN)/pg_ctl -D $(PGDATA) stop >/dev/null
@@ -97,6 +111,7 @@ status: ## show what is running
 	@lsof -ti :8000 >/dev/null 2>&1 && echo "api: up on :8000" || echo "api: stopped"
 	@lsof -ti :4321 >/dev/null 2>&1 && echo "web: up on :4321" || echo "web: stopped"
 	@lsof -ti :9092 >/dev/null 2>&1 && echo "kafka: up on :9092" || echo "kafka: stopped"
+	@lsof -ti :3000 >/dev/null 2>&1 && echo "grafana: up on :3000" || echo "grafana: stopped"
 	@[ -f $(RUN)/stream.pid ] && kill -0 $$(cat $(RUN)/stream.pid) 2>/dev/null && echo "stream: running" || echo "stream: stopped"
 
 logs: ## tail the local service logs
@@ -130,6 +145,26 @@ kafka-stop: ## stop the kafka broker
 	-@[ -f $(RUN)/kafka.pid ] && kill $$(cat $(RUN)/kafka.pid) 2>/dev/null; rm -f $(RUN)/kafka.pid
 	-@lsof -ti :9092 2>/dev/null | xargs kill 2>/dev/null; true
 	@echo "kafka: stopped"
+
+grafana-start: ## start grafana with the provisioned dashboards in the background
+	@mkdir -p $(LOG) $(RUN)
+	@[ -x "$(GRAFANA_BIN)/grafana" ] || { echo "grafana is required: brew install grafana"; exit 1; }
+	@[ -f $(GRAFANA_CONF) ] || { echo "no grafana config — run: make setup"; exit 1; }
+	@if [ -f $(RUN)/grafana.pid ] && kill -0 $$(cat $(RUN)/grafana.pid) 2>/dev/null; then \
+	  echo "grafana: already running"; \
+	elif lsof -ti :3000 >/dev/null 2>&1; then \
+	  echo "error: another process owns port 3000 — stop it first"; exit 1; \
+	else \
+	  nohup $(GRAFANA_BIN)/grafana server --config $(GRAFANA_CONF) --homepath $(GRAFANA_HOME) >> $(LOG)/grafana.log 2>&1 & echo $$! > $(RUN)/grafana.pid; \
+	fi
+	@for i in $$(seq 1 30); do curl -sf http://127.0.0.1:3000/api/health >/dev/null && break; sleep 1; done; \
+	  curl -sf http://127.0.0.1:3000/api/health >/dev/null || { echo "grafana did not come up — check: make logs"; exit 1; }
+	@echo "grafana: up on http://127.0.0.1:3000"
+
+grafana-stop: ## stop grafana
+	-@[ -f $(RUN)/grafana.pid ] && kill $$(cat $(RUN)/grafana.pid) 2>/dev/null; rm -f $(RUN)/grafana.pid
+	-@lsof -ti :3000 2>/dev/null | xargs kill 2>/dev/null; true
+	@echo "grafana: stopped"
 
 check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run ruff check researchscout tests
