@@ -84,6 +84,12 @@ class Settings(BaseSettings):
     # Feed slots reserved for high-momentum papers outside every centroid (0 = off).
     foryou_explore_slots: int = 0
     foryou_half_life_days: float = 75.0
+    # Streaming pipeline: the brew-managed broker, the topic prefix (rs.raw.v1 and the
+    # parsed/enriched taps), the worker's consumer group, and its recovery partitions.
+    kafka_bootstrap: str = "localhost:9092"
+    kafka_topic_prefix: str = "rs"
+    stream_consumer_group: str = "rs-stream"
+    stream_recovery_dir: Path = Path(".local/stream-recovery")
     # Streaming categorize stage: minimum centroid cosine for tagging a paper with a live
     # topic, the keyword extraction similarity floor, the LLM fallback for weak extractions,
     # and the optional custom-label classifier over config/labels.yaml.
