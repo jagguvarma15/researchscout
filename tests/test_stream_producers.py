@@ -143,7 +143,8 @@ def test_poll_fulltext_publishes_and_marks_unavailable(
     broker = InMemoryBroker()
     poll_fulltext(settings, broker, TOPICS)
 
-    published = broker.messages[TOPICS.raw]
+    assert TOPICS.raw not in broker.messages  # fulltext rides the slow lane
+    published = broker.messages[TOPICS.raw_fulltext]
     assert len(published) == 1
     envelope = decode(published[0][1])
     assert envelope.kind == "fulltext"
