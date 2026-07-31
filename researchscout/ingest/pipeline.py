@@ -35,7 +35,7 @@ class IngestSummary:
     raw_stored: int = 0
 
 
-def _resolve_existing(session: Session, paper: Paper) -> str | None:
+def resolve_existing(session: Session, paper: Paper) -> str | None:
     """Return the canonical id this paper already maps to (strict external-id match), if any."""
     for scheme, value in paper.external_ids.items():
         existing = find_by_external_id(session, scheme, value)
@@ -80,7 +80,7 @@ def run_ingest(
                     set_citation_count(session, obj.paper_id, int(obj.value))
                 summary.signals += 1
                 continue
-            existing = _resolve_existing(session, obj)
+            existing = resolve_existing(session, obj)
             if existing is not None:
                 link_external_ids(session, existing, obj.external_ids)
                 if existing == obj.id:
