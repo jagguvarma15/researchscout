@@ -74,15 +74,20 @@ def build_flow(
     deps: FlowDeps,
     *,
     batch_size: int = 100,
+    fulltext_batch_size: int = 1,
     taps: bool = True,
 ) -> Dataflow:
     """Wire the production graph: Kafka in, three stages, two observability taps.
 
+    Fulltext packets arrive on their own input with a batch size of one (the slow lane):
+    bytewax polls every input each cycle, so at most one chunk-heavy fulltext interleaves
+    per batch of papers instead of queueing ahead of them. Sources carry their resume
+    state per step id, so adding the second input never disturbs raw-in's offsets.
     ``taps=False`` drops the parsed/enriched tap topics (and their per-batch producer
     flushes); scout stream tail goes dark in that mode.
     """
     flow = Dataflow("researchscout-stream")
-    messages = op.input(
+    raw_messages = op.input(
         "raw-in",
         flow,
         KafkaSource(
@@ -92,6 +97,17 @@ def build_flow(
             batch_size=batch_size,
         ),
     )
+    fulltext_messages = op.input(
+        "fulltext-in",
+        flow,
+        KafkaSource(
+            brokers=[bootstrap],
+            topics=[topics.raw_fulltext],
+            add_config={"group.id": consumer_group},
+            batch_size=fulltext_batch_size,
+        ),
+    )
+    messages = op.merge("merge-raw", raw_messages, fulltext_messages)
     envelopes = op.filter_map("decode", messages, decode_message)
     parsed = op.map("parse", envelopes, deps.parse)
     if taps:
