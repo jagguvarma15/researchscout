@@ -28,6 +28,7 @@ _UPDATED_COLUMNS = (
     "exited_at",
     "outcome",
     "error",
+    "detail",
 )
 
 
@@ -54,6 +55,7 @@ def _stamp_rows(envelope: Envelope) -> dict[tuple[str, str], dict[str, Any]]:
             "exited_at": stamp.exited_at,
             "outcome": stamp.outcome,
             "error": stamp.error,
+            "detail": stamp.detail,
         }
     return rows
 
