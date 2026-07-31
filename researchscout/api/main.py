@@ -16,6 +16,7 @@ from researchscout.api.routers import (
     saved,
     stream,
     topics,
+    webimport,
 )
 
 
@@ -32,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(profile.router, prefix="/v1")
     app.include_router(events.router, prefix="/v1")
     app.include_router(stream.router, prefix="/v1")
+    app.include_router(webimport.router, prefix="/v1")
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
