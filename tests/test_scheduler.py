@@ -70,13 +70,10 @@ def test_run_forever_stops_when_asked() -> None:
 
 def test_build_tasks_maps_settings_intervals() -> None:
     settings = Settings(
-        scheduler_ingest_interval_sec=111,
-        scheduler_index_interval_sec=222,
-        scheduler_signals_interval_sec=333,
         scheduler_digest_interval_sec=444,
         scheduler_topics_interval_sec=555,
         scheduler_report_interval_sec=666,
     )
     tasks = build_tasks(settings)
-    assert [t.name for t in tasks] == ["ingest", "index", "signals", "digest", "topics", "report"]
-    assert [t.interval_sec for t in tasks] == [111, 222, 333, 444, 555, 666]
+    assert [t.name for t in tasks] == ["digest", "topics", "report"]
+    assert [t.interval_sec for t in tasks] == [444, 555, 666]
