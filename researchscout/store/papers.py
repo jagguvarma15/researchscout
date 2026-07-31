@@ -10,14 +10,14 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from researchscout.config import get_settings
-from researchscout.schema import Author, Paper
+from researchscout.schema import Author, Paper, PaperLabel
 from researchscout.store.facets import PaperFacets, SortKey, facets_where
 from researchscout.store.models import ExternalIdRow, PaperRow, SignalRow
 
-# Columns written after ingest (scout fulltext, the streaming inject stage). A content
+# Columns written after ingest (scout fulltext, the streaming stages). A content
 # re-ingest carries None for these, so the conflict update must never touch them --
 # the same contract that keeps citation_count out of the values dict entirely.
-_ENRICHED_AFTER_INGEST = frozenset({"full_text"})
+_ENRICHED_AFTER_INGEST = frozenset({"full_text", "keywords", "sections", "labels"})
 
 
 def upsert_paper(session: Session, paper: Paper) -> str:
@@ -43,6 +43,11 @@ def upsert_paper(session: Session, paper: Paper) -> str:
         "url": paper.url,
         "pdf_url": paper.pdf_url,
         "full_text": paper.full_text,
+        "keywords": paper.keywords,
+        "sections": paper.sections,
+        "labels": (
+            [label.model_dump() for label in paper.labels] if paper.labels is not None else None
+        ),
     }
     stmt = insert(PaperRow).values(**values)
     stmt = stmt.on_conflict_do_update(
@@ -139,6 +144,26 @@ def set_full_text(session: Session, paper_id: str, text: str) -> None:
     session.execute(update(PaperRow).where(PaperRow.id == paper_id).values(full_text=text))
 
 
+def set_enrichment(
+    session: Session,
+    paper_id: str,
+    *,
+    keywords: list[str] | None = None,
+    sections: list[str] | None = None,
+    labels: list[PaperLabel] | None = None,
+) -> None:
+    """Write categorize-stage output onto the paper row; a None argument leaves its column alone."""
+    values: dict[str, object] = {}
+    if keywords is not None:
+        values["keywords"] = keywords
+    if sections is not None:
+        values["sections"] = sections
+    if labels is not None:
+        values["labels"] = [label.model_dump() for label in labels]
+    if values:
+        session.execute(update(PaperRow).where(PaperRow.id == paper_id).values(**values))
+
+
 def papers_missing_full_text(
     session: Session, *, limit: int, first: Sequence[str] = ()
 ) -> list[tuple[str, str]]:
@@ -214,5 +239,8 @@ def _row_to_paper(row: PaperRow, external_ids: dict[str, str]) -> Paper:
         url=row.url,
         pdf_url=row.pdf_url,
         full_text=row.full_text,
+        keywords=row.keywords,
+        sections=row.sections,
+        labels=([PaperLabel(**label) for label in row.labels] if row.labels is not None else None),
         citation_count=row.citation_count,
     )
