@@ -30,6 +30,10 @@ logger = logging.getLogger(__name__)
 
 _KEYWORD_TOP_K = 6
 _KEYWORD_MMR_LAMBDA = 0.7
+# Candidate n-grams embedded per paper are capped (top-N by in-document frequency): an
+# uncapped 1-3 gram vocabulary runs to several hundred forward passes per abstract, and
+# frequency is exactly the criterion a post-fit ranking would apply anyway.
+_KEYWORD_CANDIDATE_CAP = 80
 # The LLM fallback triggers when extraction looks weak: too few phrases, a low best
 # similarity, or a document too short for statistics to mean anything.
 _KEYWORD_LLM_MIN_COUNT = 3
@@ -86,33 +90,33 @@ def load_labels(path: Path) -> list[LabelSpec]:
     return specs
 
 
-def extract_keywords(
-    text: str,
+def keyword_candidates(text: str, *, cap: int = _KEYWORD_CANDIDATE_CAP) -> list[str]:
+    """Candidate 1-3 grams from the document itself, top ``cap`` by in-document frequency."""
+    from sklearn.feature_extraction.text import CountVectorizer
+
+    vectorizer = CountVectorizer(stop_words="english", ngram_range=(1, 3), max_features=cap)
+    try:
+        vectorizer.fit([text])
+    except ValueError:  # empty vocabulary: everything was a stop word
+        return []
+    return [str(term) for term in vectorizer.get_feature_names_out()]
+
+
+def select_keywords(
+    candidates: list[str],
+    candidate_vectors: list[list[float]],
     doc_vector: list[float],
-    embedder: Embedder,
     *,
     top_k: int = _KEYWORD_TOP_K,
     min_similarity: float,
     mmr_lambda: float = _KEYWORD_MMR_LAMBDA,
 ) -> list[tuple[str, float]]:
-    """KeyBERT-style statistical keywords: candidate n-grams scored by cosine to the doc.
-
-    Candidates come from a CountVectorizer over the document itself (1-3 grams, English
-    stop words removed); each candidate embeds through the same model as the document, and
-    greedy MMR picks a relevant-but-diverse top-k above the similarity floor.
-    """
+    """Greedy MMR pick of relevant-but-diverse candidates above the similarity floor."""
     import numpy as np
-    from sklearn.feature_extraction.text import CountVectorizer
 
-    vectorizer = CountVectorizer(stop_words="english", ngram_range=(1, 3))
-    try:
-        vectorizer.fit([text])
-    except ValueError:  # empty vocabulary: everything was a stop word
-        return []
-    candidates = [str(term) for term in vectorizer.get_feature_names_out()]
     if not candidates:
         return []
-    vectors = np.asarray(embedder.embed_documents(candidates))
+    vectors = np.asarray(candidate_vectors)
     doc = np.asarray(doc_vector)
     similarities = vectors @ doc
 
@@ -130,6 +134,34 @@ def extract_keywords(
     return [(candidates[i], float(similarities[i])) for i in selected]
 
 
+def extract_keywords(
+    text: str,
+    doc_vector: list[float],
+    embedder: Embedder,
+    *,
+    cap: int = _KEYWORD_CANDIDATE_CAP,
+    top_k: int = _KEYWORD_TOP_K,
+    min_similarity: float,
+    mmr_lambda: float = _KEYWORD_MMR_LAMBDA,
+) -> list[tuple[str, float]]:
+    """KeyBERT-style statistical keywords: candidate n-grams scored by cosine to the doc.
+
+    Candidates come from :func:`keyword_candidates`; each embeds through the same model as
+    the document, and :func:`select_keywords` picks a relevant-but-diverse top-k.
+    """
+    candidates = keyword_candidates(text, cap=cap)
+    if not candidates:
+        return []
+    return select_keywords(
+        candidates,
+        embedder.embed_documents(candidates),
+        doc_vector,
+        top_k=top_k,
+        min_similarity=min_similarity,
+        mmr_lambda=mmr_lambda,
+    )
+
+
 class Categorizer:
     """Per-process enrichment state: cached centroids, the label set, and both models."""
 
@@ -143,6 +175,7 @@ class Categorizer:
         keyword_min_similarity: float,
         keywords_llm_fallback: bool,
         labels: list[LabelSpec],
+        keyword_candidate_cap: int = _KEYWORD_CANDIDATE_CAP,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._embedder = embedder
@@ -151,6 +184,7 @@ class Categorizer:
         self._topic_match_min = topic_match_min
         self._keyword_min_similarity = keyword_min_similarity
         self._keywords_llm_fallback = keywords_llm_fallback
+        self._keyword_candidate_cap = keyword_candidate_cap
         self._labels = labels
         self._clock = clock
         self._centroids: list[TopicCentroid] = []
@@ -195,7 +229,11 @@ class Categorizer:
     def _keywords(self, title: str, abstract: str, vector: list[float]) -> tuple[list[str], str]:
         text = f"{title}\n\n{abstract}"
         extracted = extract_keywords(
-            text, vector, self._embedder, min_similarity=self._keyword_min_similarity
+            text,
+            vector,
+            self._embedder,
+            cap=self._keyword_candidate_cap,
+            min_similarity=self._keyword_min_similarity,
         )
         weak = (
             len(text.split()) < _KEYWORD_MIN_DOC_WORDS
