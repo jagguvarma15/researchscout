@@ -74,6 +74,7 @@ def _run_worker(settings: Settings, topics: StreamTopics) -> None:
         keyword_min_similarity=settings.stream_keyword_min_similarity,
         keywords_llm_fallback=settings.stream_keywords_llm_fallback,
         labels=labels,
+        keyword_candidate_cap=settings.stream_keyword_candidates,
     )
     injector = Injector(embedder, session_scope)
     deps = FlowDeps(parse=parse_stage, categorize=categorizer.run, inject=injector.run)
