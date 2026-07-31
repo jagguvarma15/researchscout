@@ -37,6 +37,12 @@ def _scored(pid: str, title: str = "T", abstract: str = "A") -> ScoredPaper:
     return ScoredPaper(paper=paper, score=1.0, distance=0.0)
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_chunk_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermetic against a local .env that enables chunk retrieval (tests opt in explicitly)."""
+    monkeypatch.setenv("RS_CHUNK_RETRIEVAL", "0")
+
+
 def test_answer_cites_only_retrieved(monkeypatch: pytest.MonkeyPatch) -> None:
     used = [_scored("arxiv:2401.00001"), _scored("arxiv:2401.00002")]
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: used)
@@ -54,6 +60,31 @@ def test_prompt_contains_retrieved_context(monkeypatch: pytest.MonkeyPatch) -> N
     assert "[arxiv:2401.00001]" in llm.last_user
     assert "Cool Paper" in llm.last_user
     assert "An abstract here." in llm.last_user
+
+
+def test_prompt_carries_enrichment_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    from researchscout.schema import PaperLabel
+
+    enriched = _scored("arxiv:2401.00001")
+    enriched.paper = enriched.paper.model_copy(
+        update={
+            "keywords": ["state space models", "long context"],
+            "sections": [f"S{i}" for i in range(1, 11)],  # capped at 8 in the prompt
+            "labels": [PaperLabel(label="efficiency", source="custom")],
+        }
+    )
+    plain = _scored("arxiv:2401.00002")
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: [enriched, plain])
+    llm = FakeLLM("[arxiv:2401.00001]")
+    answer(None, None, llm, "q")
+
+    assert "Keywords: state space models, long context" in llm.last_user
+    assert "Sections: S1; S2" in llm.last_user
+    assert "S8" in llm.last_user and "S9" not in llm.last_user
+    assert "Labels: efficiency" in llm.last_user
+    # The unenriched paper's block gains no empty enrichment lines.
+    plain_block = llm.last_user.split("[arxiv:2401.00002]")[1]
+    assert "Keywords:" not in plain_block and "Labels:" not in plain_block
 
 
 def test_answer_empty_when_no_papers(monkeypatch: pytest.MonkeyPatch) -> None:
