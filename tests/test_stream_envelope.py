@@ -30,6 +30,19 @@ def test_round_trip_preserves_fields_and_lineage() -> None:
     assert again.lineage[0].entered_at <= again.lineage[0].exited_at
 
 
+def test_stamp_detail_round_trips_and_defaults_to_none() -> None:
+    envelope = _envelope()
+    stamp = envelope.begin("categorize")
+    envelope.finish(stamp, detail={"keyword_method": "statistical", "candidate_count": 42})
+
+    again = decode(encode(envelope))
+    assert again.lineage[0].detail == {"keyword_method": "statistical", "candidate_count": 42}
+
+    plain = _envelope()
+    plain.finish(plain.begin("parse"))
+    assert decode(encode(plain)).lineage[0].detail is None
+
+
 def test_decode_rejects_future_version() -> None:
     data = encode(_envelope())
     payload = json.loads(data)
