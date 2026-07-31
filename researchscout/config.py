@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     score_velocity_weight: float = 2.0
     score_acceleration_weight: float = 1.0
     # Optional cross-encoder reranking of the top retrieval candidates (see researchscout.rerank).
+    # The fast-answer found/not-found floor. With reranking on this compares against the
+    # cross-encoder sigmoid (clear positives 0.7-0.99, hard negatives under 0.1); with it
+    # off, against cosine similarity (on-topic pairs roughly 0.3 and up on bge).
+    ask_min_relevance: float = 0.30
     rerank_enabled: bool = False
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     rerank_top_n: int = 40
