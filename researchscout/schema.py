@@ -22,6 +22,14 @@ class Author(BaseModel):
     affiliation: str | None = None
 
 
+class PaperLabel(BaseModel):
+    """A label attached after ingest by the categorize stage (topic match or custom classifier)."""
+
+    label: str
+    source: str  # "topic" | "custom"
+    score: float | None = None
+
+
 class SignalType(StrEnum):
     """Kinds of evidence about a paper's importance, observed over time."""
 
@@ -51,6 +59,10 @@ class Paper(BaseModel):
     url: str | None = None
     pdf_url: str | None = None
     full_text: str | None = None
+    # Enriched after ingest by the categorize stage; sources never set these.
+    keywords: list[str] | None = None
+    sections: list[str] | None = None
+    labels: list[PaperLabel] | None = None
     # Materialized from citation signals by the store; sources never set it.
     citation_count: int = 0
 
