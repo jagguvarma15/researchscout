@@ -1,0 +1,112 @@
+from datetime import UTC, datetime
+from pathlib import Path
+
+import bytewax.operators as op
+import pytest
+from bytewax.connectors.kafka import KafkaSourceMessage
+from bytewax.dataflow import Dataflow
+from bytewax.testing import TestingSink, TestingSource, run_main
+
+import researchscout.stream.categorize as categorize_mod
+from researchscout.embed.base import Embedder
+from researchscout.llm.base import LLM
+from researchscout.sources.arxiv import _entry_payload
+from researchscout.stream.categorize import Categorized, Categorizer
+from researchscout.stream.envelope import Envelope, decode, encode
+from researchscout.stream.flow import decode_message, to_sink_message
+from researchscout.stream.parse import parse_stage
+
+FIXTURE = Path(__file__).parent / "fixtures" / "arxiv_query.atom"
+
+
+class _NullEmbedder(Embedder):
+    model_id = "fake"
+    dim = 3
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.0, 0.0, 1.0] for _ in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        return [0.0, 0.0, 1.0]
+
+
+class _NullLLM(LLM):
+    model = "fake"
+
+    def complete(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+        return "keywords, from, the, model"
+
+
+def _arxiv_envelope() -> Envelope:
+    import feedparser
+
+    feed = feedparser.parse(FIXTURE.read_text())
+    return Envelope(
+        kind="paper",
+        source="arxiv",
+        fetched_at=datetime(2026, 7, 30, tzinfo=UTC),
+        payload={"raw": _entry_payload(feed.entries[0])},
+    )
+
+
+def _bad_source_envelope() -> Envelope:
+    return Envelope(
+        kind="paper",
+        source="no-such-source",
+        fetched_at=datetime(2026, 7, 30, tzinfo=UTC),
+        payload={"raw": {}},
+    )
+
+
+def _fake_inject(item: Categorized) -> Envelope:
+    stamp = item.envelope.begin("inject")
+    item.envelope.finish(stamp)
+    return item.envelope
+
+
+def test_stages_compose_under_run_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(categorize_mod, "list_topics", lambda session: [])
+    from contextlib import nullcontext
+
+    categorizer = Categorizer(
+        _NullEmbedder(),
+        _NullLLM(),
+        lambda: nullcontext(None),
+        topic_match_min=0.55,
+        keyword_min_similarity=0.35,
+        keywords_llm_fallback=True,
+        labels=[],
+    )
+
+    flow = Dataflow("test-stream")
+    packets = op.input("in", flow, TestingSource([_arxiv_envelope(), _bad_source_envelope()]))
+    parsed = op.map("parse", packets, parse_stage)
+    categorized = op.map("categorize", parsed, categorizer.run)
+    injected = op.map("inject", categorized, _fake_inject)
+    out: list[Envelope] = []
+    op.output("out", injected, TestingSink(out))
+    run_main(flow)
+
+    assert len(out) == 2
+    ok, bad = out
+    assert [s.stage for s in ok.lineage] == ["parse", "categorize", "inject"]
+    assert [s.outcome for s in ok.lineage] == ["ok", "ok", "ok"]
+    assert ok.payload["enrichment"]["group"] == "cs"
+    assert [s.outcome for s in bad.lineage] == ["error", "skipped", "ok"]
+
+
+def test_decode_message_drops_bad_bytes() -> None:
+    envelope = _arxiv_envelope()
+    good = KafkaSourceMessage(key=None, value=encode(envelope))
+    decoded = decode_message(good)
+    assert decoded is not None and decoded.event_id == envelope.event_id
+    assert decode_message(KafkaSourceMessage(key=None, value=b"junk")) is None
+    assert decode_message(KafkaSourceMessage(key=None, value=None)) is None
+
+
+def test_to_sink_message_keys_by_canonical_id() -> None:
+    envelope = _arxiv_envelope()
+    parse_stage(envelope)
+    message = to_sink_message(envelope)
+    assert message.key == b"arxiv:2401.12345"
+    assert decode(message.value).event_id == envelope.event_id
