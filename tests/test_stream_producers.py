@@ -69,6 +69,8 @@ def test_publish_source_pages_and_lands_raw(_stub_store: dict[str, list]) -> Non
     envelope = decode(published[0][1])
     assert envelope.kind == "paper" and envelope.source == "fakearxiv"
     assert envelope.payload == {"raw": {"id": "2607.00001"}}
+    assert [s.stage for s in envelope.lineage] == ["produce"]
+    assert envelope.lineage[0].outcome == "ok"
     assert len(_stub_store["raw"]) == 3  # replay parity: raw items still land
     assert _stub_store["state"] == [("fakearxiv", "page-2"), ("fakearxiv", None)]
 
