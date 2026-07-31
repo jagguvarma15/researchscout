@@ -7,7 +7,7 @@ const digests = await fetchDigests();
 ---
 
 <Base title="Digests">
-  <h1 class="page-title">Weekly digests</h1>
+  <h1 class="page-title">Digests</h1>
 
   {
     digests === null && (
@@ -21,7 +21,7 @@ const digests = await fetchDigests();
     digests !== null && digests.length === 0 && (
       <div class="card empty">
         <Icon name="lucide:hourglass" aria-hidden="true" />
-        <p>No digests published yet — the first one lands after the next weekly sweep.</p>
+        <p>No digests published yet — the first one lands after the next scheduled sweep.</p>
       </div>
     )
   }
