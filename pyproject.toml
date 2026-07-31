@@ -18,6 +18,7 @@ dependencies = [
     "sentence-transformers>=3.0",
     "openai>=1.0",
     "selectolax>=0.4.11",
+    "bytewax[kafka]>=0.21,<0.22",
 ]
 
 [project.optional-dependencies]
@@ -76,6 +77,8 @@ module = [
     "torch.*",
     "sklearn",
     "sklearn.*",
+    "confluent_kafka",
+    "confluent_kafka.*",
 ]
 ignore_missing_imports = true
 
