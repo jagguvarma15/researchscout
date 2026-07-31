@@ -6,7 +6,18 @@ from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import HALFVEC, Vector
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -227,3 +238,21 @@ class PipelineLineageRow(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Small per-stage facts (keyword method, candidate counts, chunk counts) for dashboards.
     detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+
+class AskMetricRow(Base):
+    __tablename__ = "ask_metrics"
+    __table_args__ = (Index("ix_ask_metrics_asked_at", "asked_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    asked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    mode: Mapped[str] = mapped_column(String)  # fast | llm
+    surface: Mapped[str] = mapped_column(String)  # chat | ask
+    question: Mapped[str] = mapped_column(String(200))
+    retrieved: Mapped[int] = mapped_column(Integer)
+    best_relevance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    found: Mapped[bool] = mapped_column(Boolean)
+    retrieve_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rerank_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    llm_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_ms: Mapped[int] = mapped_column(Integer)
