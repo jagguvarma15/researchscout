@@ -167,11 +167,11 @@ def search(
     k: Annotated[int, typer.Option("-k", "--top-k", help="Number of results.")] = 10,
 ) -> None:
     """Freshness-aware semantic search over stored papers."""
-    from researchscout.embed.local import LocalEmbedder
+    from researchscout.embed.factory import default_embedder
     from researchscout.retrieve.search import retrieve
     from researchscout.store.db import session_scope
 
-    embedder = LocalEmbedder()
+    embedder = default_embedder()
     categories = [category] if category else None
     with session_scope() as session:
         results = retrieve(session, embedder, query, k=k, days=days, categories=categories)
@@ -197,12 +197,12 @@ def ask(
     """Answer a question with a grounded, cited summary of recent papers."""
     from researchscout.answer import answer
     from researchscout.config import get_settings
-    from researchscout.embed.local import LocalEmbedder
+    from researchscout.embed.factory import default_embedder
     from researchscout.llm.openai_compat import OpenAICompatLLM
     from researchscout.store.db import session_scope
 
     use_agentic = agentic if agentic is not None else get_settings().agentic_ask
-    embedder = LocalEmbedder()
+    embedder = default_embedder()
     llm = OpenAICompatLLM()
     with session_scope() as session:
         result = answer(session, embedder, llm, question, k=k, days=days, agentic=use_agentic)
@@ -415,14 +415,14 @@ def topics_build(
     """Cluster recent papers into emerging topics and store them (needs the LLM up)."""
     from researchscout.cluster import build_topics
     from researchscout.config import get_settings
-    from researchscout.embed.local import LocalEmbedder
+    from researchscout.embed.factory import default_embedder
     from researchscout.llm.openai_compat import OpenAICompatLLM
     from researchscout.store.db import session_scope
     from researchscout.store.topics import replace_topics
 
     settings = get_settings()
     window = days if days is not None else settings.cluster_window_days
-    embedder = LocalEmbedder()
+    embedder = default_embedder()
     llm = OpenAICompatLLM()
     with session_scope() as session:
         topics = build_topics(
