@@ -1,0 +1,90 @@
+"""The Bytewax dataflow: raw packets through parse, categorize, and inject, with taps.
+
+This file (plus serve.py) is deliberately the only place bytewax is imported; the stage
+functions it wires are plain callables, so swapping the processor for a hand-rolled
+consume loop stays a two-file change. One fused in-process flow keeps a single bge model
+in RAM, and the Kafka taps after parse and inject are what scout stream tail watches.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
+
+import bytewax.operators as op
+from bytewax.connectors.kafka import (
+    KafkaError,
+    KafkaSink,
+    KafkaSinkMessage,
+    KafkaSource,
+    KafkaSourceMessage,
+)
+from bytewax.dataflow import Dataflow
+
+from researchscout.stream.broker import StreamTopics
+from researchscout.stream.categorize import Categorized
+from researchscout.stream.envelope import Envelope, decode, encode
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class FlowDeps:
+    """The three stage callables, injected so tests wire fakes into the same graph."""
+
+    parse: Callable[[Envelope], Envelope]
+    categorize: Callable[[Envelope], Categorized]
+    inject: Callable[[Categorized], Envelope]
+
+
+def decode_message(
+    message: KafkaSourceMessage[bytes | None, bytes | None]
+    | KafkaError[bytes | None, bytes | None],
+) -> Envelope | None:
+    """Bytes to envelope; malformed or future-versioned packets are logged and dropped."""
+    if isinstance(message, KafkaError):  # raise_on_errors=True means these never arrive
+        return None
+    if message.value is None:
+        return None
+    try:
+        return decode(message.value)
+    except ValueError:
+        logger.warning("dropping undecodable packet", exc_info=True)
+        return None
+
+
+def to_sink_message(envelope: Envelope) -> KafkaSinkMessage[bytes, bytes]:
+    """Serialize an envelope for a tap topic, keyed like the raw topic."""
+    return KafkaSinkMessage(key=envelope.key().encode("utf-8"), value=encode(envelope))
+
+
+def build_flow(
+    bootstrap: str,
+    topics: StreamTopics,
+    consumer_group: str,
+    deps: FlowDeps,
+    *,
+    batch_size: int = 100,
+) -> Dataflow:
+    """Wire the production graph: Kafka in, three stages, two observability taps."""
+    flow = Dataflow("researchscout-stream")
+    messages = op.input(
+        "raw-in",
+        flow,
+        KafkaSource(
+            brokers=[bootstrap],
+            topics=[topics.raw],
+            add_config={"group.id": consumer_group},
+            batch_size=batch_size,
+        ),
+    )
+    envelopes = op.filter_map("decode", messages, decode_message)
+    parsed = op.map("parse", envelopes, deps.parse)
+    parsed_tap = op.map("parsed-msg", parsed, to_sink_message)
+    op.output("parsed-tap", parsed_tap, KafkaSink(brokers=[bootstrap], topic=topics.parsed))
+    categorized = op.map("categorize", parsed, deps.categorize)
+    injected = op.map("inject", categorized, deps.inject)
+    enriched_tap = op.map("enriched-msg", injected, to_sink_message)
+    op.output("enriched-tap", enriched_tap, KafkaSink(brokers=[bootstrap], topic=topics.enriched))
+    return flow
