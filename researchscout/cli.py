@@ -317,7 +317,7 @@ def stream_serve(
 @stream_app.command("tail")
 def stream_tail(
     topic: Annotated[
-        str, typer.Option(help="Which topic to watch: raw, parsed, or enriched.")
+        str, typer.Option(help="Which topic to watch: raw, fulltext, parsed, or enriched.")
     ] = "enriched",
     from_beginning: Annotated[
         bool, typer.Option("--from-beginning", help="Start at the oldest retained packet.")
@@ -330,9 +330,14 @@ def stream_tail(
 
     settings = get_settings()
     topics = StreamTopics.for_prefix(settings.kafka_topic_prefix)
-    names = {"raw": topics.raw, "parsed": topics.parsed, "enriched": topics.enriched}
+    names = {
+        "raw": topics.raw,
+        "fulltext": topics.raw_fulltext,
+        "parsed": topics.parsed,
+        "enriched": topics.enriched,
+    }
     if topic not in names:
-        typer.secho("topic must be raw, parsed, or enriched", fg=typer.colors.RED)
+        typer.secho("topic must be raw, fulltext, parsed, or enriched", fg=typer.colors.RED)
         raise typer.Exit(code=1)
     try:
         for line in iter_lines(
