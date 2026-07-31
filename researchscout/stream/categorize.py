@@ -77,6 +77,13 @@ class Categorized:
     vector: list[float] | None
 
 
+def _ready(
+    vector: list[float], candidates: list[str], candidate_vectors: list[list[float]]
+) -> Callable[[], tuple[list[float], list[str], list[list[float]]]]:
+    """Bind precomputed batch results into the compute-thunk shape (no loop-var capture)."""
+    return lambda: (vector, candidates, candidate_vectors)
+
+
 def load_labels(path: Path) -> list[LabelSpec]:
     """The configured custom label set ([] when the file is absent or empty)."""
     if not path.exists():
@@ -226,15 +233,11 @@ class Categorizer:
         phrases = [p.strip(" .-") for p in _LIST_SPLIT.split(reply)]
         return [p for p in phrases if p and len(p.split()) <= 6][:_KEYWORD_TOP_K]
 
-    def _keywords(self, title: str, abstract: str, vector: list[float]) -> tuple[list[str], str]:
+    def _finish_keywords(
+        self, title: str, abstract: str, extracted: list[tuple[str, float]]
+    ) -> tuple[list[str], str]:
+        """Apply the weakness heuristic to an extraction; fall back to the LLM when weak."""
         text = f"{title}\n\n{abstract}"
-        extracted = extract_keywords(
-            text,
-            vector,
-            self._embedder,
-            cap=self._keyword_candidate_cap,
-            min_similarity=self._keyword_min_similarity,
-        )
         weak = (
             len(text.split()) < _KEYWORD_MIN_DOC_WORDS
             or len(extracted) < _KEYWORD_LLM_MIN_COUNT
@@ -267,21 +270,38 @@ class Categorizer:
         names = [allowed.get(p.strip(" .").lower()) for p in _LIST_SPLIT.split(reply)]
         return list(dict.fromkeys(name for name in names if name is not None))
 
-    def run(self, envelope: Envelope) -> Categorized:
-        """Enrich a parsed paper packet; other kinds (and failed parses) pass through."""
+    def _passthrough(self, envelope: Envelope) -> Categorized | None:
+        """The non-paper (and failed-parse) short-circuit shared by run and run_batch."""
         if envelope.kind != "paper" or "paper" not in envelope.payload:
             if envelope.kind == "paper":
                 stamp = envelope.begin("categorize")
                 envelope.finish(stamp, "skipped", "parse did not produce a paper")
             return Categorized(envelope, None)
+        return None
 
+    def _categorize_one(
+        self,
+        envelope: Envelope,
+        compute: Callable[[], tuple[list[float], list[str], list[list[float]]]],
+    ) -> Categorized:
+        """Enrich one paper from (doc vector, candidates, candidate vectors) by ``compute``.
+
+        The thunk runs inside the try so embedding failures stamp the packet's lineage
+        exactly like any other stage error.
+        """
         stamp = envelope.begin("categorize")
         try:
             paper = envelope.payload["paper"]
             title, abstract = paper["title"], paper["abstract"]
-            vector = self._embedder.embed_documents([f"{title}\n\n{abstract}"])[0]
+            vector, candidates, candidate_vectors = compute()
             group = group_for(paper.get("primary_category"))
-            keywords, method = self._keywords(title, abstract, vector)
+            extracted = select_keywords(
+                candidates,
+                candidate_vectors,
+                vector,
+                min_similarity=self._keyword_min_similarity,
+            )
+            keywords, method = self._finish_keywords(title, abstract, extracted)
             envelope.payload["enrichment"] = {
                 "group": group.key if group else None,
                 "tech": group.tech if group else None,
@@ -295,3 +315,61 @@ class Categorizer:
             return Categorized(envelope, None)
         envelope.finish(stamp)
         return Categorized(envelope, vector)
+
+    def run(self, envelope: Envelope) -> Categorized:
+        """Enrich a parsed paper packet; other kinds (and failed parses) pass through."""
+        passthrough = self._passthrough(envelope)
+        if passthrough is not None:
+            return passthrough
+
+        def compute() -> tuple[list[float], list[str], list[list[float]]]:
+            paper = envelope.payload["paper"]
+            text = f"{paper['title']}\n\n{paper['abstract']}"
+            vector = self._embedder.embed_documents([text])[0]
+            candidates = keyword_candidates(text, cap=self._keyword_candidate_cap)
+            vectors = self._embedder.embed_documents(candidates) if candidates else []
+            return vector, candidates, vectors
+
+        return self._categorize_one(envelope, compute)
+
+    def run_batch(self, envelopes: list[Envelope]) -> list[Categorized]:
+        """Enrich a batch with two merged embed calls; per-item failures stay isolated.
+
+        All doc texts embed in one call and all candidate lists in a second, then each
+        paper is finished individually. A batch-wide embed failure degrades to the
+        per-item path, which is exactly the serial behavior.
+        """
+        outputs: list[Categorized | None] = [None] * len(envelopes)
+        papers: list[tuple[int, Envelope, str]] = []
+        for index, envelope in enumerate(envelopes):
+            passthrough = self._passthrough(envelope)
+            if passthrough is not None:
+                outputs[index] = passthrough
+                continue
+            paper = envelope.payload["paper"]
+            papers.append((index, envelope, f"{paper['title']}\n\n{paper['abstract']}"))
+
+        if papers:
+            try:
+                doc_vectors = self._embedder.embed_documents([text for _, _, text in papers])
+                candidate_lists = [
+                    keyword_candidates(text, cap=self._keyword_candidate_cap)
+                    for _, _, text in papers
+                ]
+                flat = [c for candidates in candidate_lists for c in candidates]
+                flat_vectors = self._embedder.embed_documents(flat) if flat else []
+            except Exception:  # noqa: BLE001 - model hiccup: the serial path re-embeds
+                logger.warning("batch embed failed; categorizing serially", exc_info=True)
+                for index, envelope, _ in papers:
+                    outputs[index] = self.run(envelope)
+            else:
+                offset = 0
+                for (index, envelope, _), candidates, vector in zip(
+                    papers, candidate_lists, doc_vectors, strict=True
+                ):
+                    candidate_vectors = flat_vectors[offset : offset + len(candidates)]
+                    offset += len(candidates)
+                    outputs[index] = self._categorize_one(
+                        envelope, _ready(vector, candidates, candidate_vectors)
+                    )
+        return [output for output in outputs if output is not None]
