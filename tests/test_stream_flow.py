@@ -126,6 +126,15 @@ def test_build_flow_taps_toggle() -> None:
     assert any("inject" in s for s in step_ids)  # the stages themselves remain
 
 
+def test_build_flow_merges_the_fulltext_lane() -> None:
+    topics = StreamTopics.for_prefix("rs")
+    flow = build_flow("localhost:9092", topics, "rs-stream", _null_deps())
+    step_ids = [step.step_id for step in flow.substeps]
+    assert any("raw-in" in s for s in step_ids)
+    assert any("fulltext-in" in s for s in step_ids)
+    assert any("merge-raw" in s for s in step_ids)
+
+
 def test_decode_message_drops_bad_bytes() -> None:
     envelope = _arxiv_envelope()
     good = KafkaSourceMessage(key=None, value=encode(envelope))
