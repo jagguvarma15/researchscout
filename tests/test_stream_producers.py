@@ -1,15 +1,21 @@
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 import researchscout.stream.producers as producers_mod
 from researchscout.config import Settings
+from researchscout.schema import Paper
 from researchscout.sources.base import RawItem
 from researchscout.stream.broker import InMemoryBroker, StreamTopics
 from researchscout.stream.envelope import decode
-from researchscout.stream.producers import build_producer_tasks, poll_fulltext, publish_source
+from researchscout.stream.producers import (
+    _should_publish,
+    build_producer_tasks,
+    poll_fulltext,
+    publish_source,
+)
 
 TOPICS = StreamTopics.for_prefix("rs")
 NOW = datetime(2026, 7, 30, 6, tzinfo=UTC)
@@ -29,6 +35,23 @@ class FakeSource:
 
     def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
         return self.pages[cursor]
+
+    def normalize(self, raw: RawItem) -> Paper:
+        arxiv_id = str(raw.payload["id"])
+        return Paper(
+            id=f"arxiv:{arxiv_id}",
+            external_ids={"arxiv": arxiv_id},
+            title="t",
+            abstract="a",
+            published_at=NOW,
+            updated_at=raw.payload.get("updated"),
+            source=self.name,
+        )
+
+
+class BrokenSource(FakeSource):
+    def normalize(self, raw: RawItem) -> Paper:
+        raise ValueError("malformed entry")
 
 
 @contextmanager
@@ -63,7 +86,7 @@ def test_publish_source_pages_and_lands_raw(_stub_store: dict[str, list]) -> Non
     broker = InMemoryBroker()
     count = publish_source(broker, TOPICS, FakeSource(), NOW, kind="paper")
 
-    assert count == 3
+    assert count == (3, 0)
     published = broker.messages[TOPICS.raw]
     assert len(published) == 3
     envelope = decode(published[0][1])
@@ -73,6 +96,39 @@ def test_publish_source_pages_and_lands_raw(_stub_store: dict[str, list]) -> Non
     assert envelope.lineage[0].outcome == "ok"
     assert len(_stub_store["raw"]) == 3  # replay parity: raw items still land
     assert _stub_store["state"] == [("fakearxiv", "page-2"), ("fakearxiv", None)]
+
+
+def test_publish_source_skips_known_enriched(_stub_store: dict[str, list]) -> None:
+    known = {
+        ("arxiv", "2607.00001"): (None, True),
+        ("arxiv", "2607.00002"): (None, True),
+        ("arxiv", "2607.00003"): (None, True),
+    }
+    broker = InMemoryBroker()
+    count = publish_source(broker, TOPICS, FakeSource(), NOW, kind="paper", known=known)
+
+    assert count == (0, 3)
+    assert TOPICS.raw not in broker.messages or broker.messages[TOPICS.raw] == []
+    assert _stub_store["raw"] == []  # skipped items land nothing
+    assert _stub_store["state"] == [("fakearxiv", "page-2"), ("fakearxiv", None)]  # cursor still
+
+
+def test_should_publish_covers_the_uncertainty_matrix() -> None:
+    source = FakeSource()
+    fresh = source._raw("2607.00001")
+    updated = RawItem(
+        source=source.name,
+        fetched_at=NOW,
+        payload={"id": "2607.00001", "updated": NOW + timedelta(days=1)},
+    )
+    enriched = {("arxiv", "2607.00001"): (NOW, True)}
+
+    assert _should_publish(source, fresh, {})  # unknown paper
+    assert not _should_publish(source, fresh, enriched)  # known, enriched, not newer
+    assert _should_publish(source, fresh, {("arxiv", "2607.00001"): (NOW, False)})  # unenriched
+    assert _should_publish(source, updated, enriched)  # newer version fetched
+    assert _should_publish(source, updated, {("arxiv", "2607.00001"): (None, True)})  # unknown age
+    assert _should_publish(BrokenSource(), fresh, enriched)  # normalize error -> parse decides
 
 
 def test_poll_fulltext_publishes_and_marks_unavailable(
