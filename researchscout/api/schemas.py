@@ -67,6 +67,10 @@ class AskRequest(BaseModel):
     k: int = Field(default=8, ge=1, le=50)
     days: int | None = Field(default=None, ge=1, le=365)
     agentic: bool = False
+    # "fast" answers extractively with no LLM call and skips the chat guardrail. The
+    # schema default stays "llm" so existing clients and the CLI are byte-identical; the
+    # chat drawer opts into fast explicitly.
+    mode: Literal["fast", "llm"] = "llm"
 
 
 class UsedPaper(BaseModel):
@@ -84,6 +88,8 @@ class AskResponse(BaseModel):
     cited: list[str]
     hallucinated: list[str]
     used: list[UsedPaper]
+    # False only for fast-mode answers under the relevance floor (nothing matched).
+    found: bool = True
 
 
 class DigestItem(BaseModel):
