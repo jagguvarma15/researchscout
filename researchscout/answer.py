@@ -57,12 +57,20 @@ class StreamDelta:
 
 # Keeps an 8-paper prompt inside Ollama's default 4096-token window even with excerpts.
 _EXCERPT_CHARS = 600
+# Sections are capped so an enriched prompt still fits the same window.
+_SECTIONS_IN_CONTEXT = 8
 
 
 def _context(papers: list[ScoredPaper], quotes: dict[str, str] | None = None) -> str:
     parts = []
     for item in papers:
         block = f"[{item.paper.id}] {item.paper.title}\n{item.paper.abstract}"
+        if item.paper.keywords:
+            block += "\nKeywords: " + ", ".join(item.paper.keywords)
+        if item.paper.sections:
+            block += "\nSections: " + "; ".join(item.paper.sections[:_SECTIONS_IN_CONTEXT])
+        if item.paper.labels:
+            block += "\nLabels: " + ", ".join(label.label for label in item.paper.labels)
         quote = (quotes or {}).get(item.paper.id)
         if quote:
             block += f"\nExcerpt: {quote[:_EXCERPT_CHARS]}"
