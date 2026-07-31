@@ -1,0 +1,445 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Packets by stage",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 12, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": true, "calcs": ["lastNotNull"], "fields": "/^packets$/"},
+        "orientation": "horizontal",
+        "textMode": "value_and_name",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT stage, count(*) AS packets FROM pipeline_lineage WHERE $__timeFilter(coalesce(exited_at, entered_at)) AND kind LIKE '$kind' AND source LIKE '$source' GROUP BY stage ORDER BY array_position(ARRAY['produce','parse','categorize','inject'], stage)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Error rate",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 5}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT 100.0 * count(*) FILTER (WHERE outcome = 'error') / nullif(count(*), 0) AS error_pct FROM pipeline_lineage WHERE $__timeFilter(coalesce(exited_at, entered_at)) AND kind LIKE '$kind' AND source LIKE '$source'"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Backlog",
+      "description": "Events with a produce stamp but no inject stamp yet in the selected range",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 1},
+              {"color": "red", "value": 50}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT count(*) AS backlog FROM pipeline_lineage p WHERE p.stage = 'produce' AND $__timeFilter(p.entered_at) AND p.kind LIKE '$kind' AND p.source LIKE '$source' AND NOT EXISTS (SELECT 1 FROM pipeline_lineage i WHERE i.event_id = p.event_id AND i.stage = 'inject')"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Since last inject",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 7200},
+              {"color": "red", "value": 21600}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT extract(epoch FROM now() - max(coalesce(exited_at, entered_at))) AS seconds FROM pipeline_lineage WHERE stage = 'inject' AND outcome = 'ok'"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Throughput by stage",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 4},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "barAlignment": 0,
+            "stacking": {"mode": "normal", "group": "A"}
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT bucket AS \"time\", stage AS metric, sum(packets) AS packets FROM pipeline_rollups_hourly WHERE $__timeFilter(bucket) AND kind LIKE '$kind' AND source LIKE '$source' GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Throughput by outcome",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 4},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "barAlignment": 0,
+            "stacking": {"mode": "normal", "group": "A"}
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "ok"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "green"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "error"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}]
+          },
+          {
+            "matcher": {"id": "byName", "options": "skipped"},
+            "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": "yellow"}}]
+          }
+        ]
+      },
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT bucket AS \"time\", outcome AS metric, sum(packets) AS packets FROM pipeline_rollups_hourly WHERE $__timeFilter(bucket) AND kind LIKE '$kind' AND source LIKE '$source' GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Stage latency",
+      "description": "Packet-weighted average seconds per stage",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 13},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineWidth": 2,
+            "stacking": {"mode": "none", "group": "A"}
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT bucket AS \"time\", stage AS metric, sum(packets * avg_seconds) / nullif(sum(packets), 0) AS avg_seconds FROM pipeline_rollups_hourly WHERE $__timeFilter(bucket) AND avg_seconds IS NOT NULL AND kind LIKE '$kind' AND source LIKE '$source' GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Error rate over time",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 13},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "fixed", "fixedColor": "red"},
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineWidth": 2,
+            "stacking": {"mode": "none", "group": "A"}
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT bucket AS \"time\", 100.0 * sum(packets) FILTER (WHERE outcome = 'error') / nullif(sum(packets), 0) AS error_pct FROM pipeline_rollups_hourly WHERE $__timeFilter(bucket) AND kind LIKE '$kind' AND source LIKE '$source' GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "piechart",
+      "title": "Packets by kind",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 22},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}, "overrides": []},
+      "options": {
+        "reduceOptions": {"values": true, "calcs": ["lastNotNull"], "fields": ""},
+        "pieType": "pie",
+        "legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+        "tooltip": {"mode": "single", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT kind, count(*) AS packets FROM pipeline_lineage WHERE $__timeFilter(coalesce(exited_at, entered_at)) GROUP BY 1 ORDER BY 2 DESC"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "piechart",
+      "title": "Packets by source",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 22},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}, "overrides": []},
+      "options": {
+        "reduceOptions": {"values": true, "calcs": ["lastNotNull"], "fields": ""},
+        "pieType": "pie",
+        "legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+        "tooltip": {"mode": "single", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT source, count(*) AS packets FROM pipeline_lineage WHERE $__timeFilter(coalesce(exited_at, entered_at)) GROUP BY 1 ORDER BY 2 DESC"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "piechart",
+      "title": "Categorized by group",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 22},
+      "fieldConfig": {"defaults": {"color": {"mode": "palette-classic"}, "unit": "short"}, "overrides": []},
+      "options": {
+        "reduceOptions": {"values": true, "calcs": ["lastNotNull"], "fields": ""},
+        "pieType": "pie",
+        "legend": {"displayMode": "list", "placement": "right", "showLegend": true},
+        "tooltip": {"mode": "single", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT category, count(*) AS packets FROM pipeline_lineage WHERE stage = 'categorize' AND category IS NOT NULL AND $__timeFilter(coalesce(exited_at, entered_at)) GROUP BY 1 ORDER BY 2 DESC"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "table",
+      "title": "Top errors",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 30},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": true}
+        },
+        "overrides": []
+      },
+      "options": {"showHeader": true, "sortBy": []},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT stage, left(error, 160) AS error, count(*) AS occurrences, max(coalesce(exited_at, entered_at)) AS last_seen FROM pipeline_lineage WHERE outcome = 'error' AND error IS NOT NULL AND $__timeFilter(coalesce(exited_at, entered_at)) GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 20"
+        }
+      ]
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": ["researchscout"],
+  "templating": {
+    "list": [
+      {
+        "name": "kind",
+        "label": "Kind",
+        "type": "query",
+        "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+        "query": "SELECT DISTINCT kind FROM pipeline_lineage ORDER BY 1",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": "%",
+        "multi": false,
+        "sort": 0,
+        "current": {"selected": true, "text": "All", "value": "$__all"},
+        "options": []
+      },
+      {
+        "name": "source",
+        "label": "Source",
+        "type": "query",
+        "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+        "query": "SELECT DISTINCT source FROM pipeline_lineage ORDER BY 1",
+        "refresh": 1,
+        "includeAll": true,
+        "allValue": "%",
+        "multi": false,
+        "sort": 0,
+        "current": {"selected": true, "text": "All", "value": "$__all"},
+        "options": []
+      }
+    ]
+  },
+  "time": {"from": "now-24h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Pipeline",
+  "uid": "rs-pipeline-overview",
+  "version": 1,
+  "weekStart": ""
+}
