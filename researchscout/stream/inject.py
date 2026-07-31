@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from typing import Any
 
 from sqlalchemy import update
 from sqlalchemy.orm import Session
@@ -83,11 +84,13 @@ class Injector:
         if signal.type is SignalType.citation:
             set_citation_count(session, signal.paper_id, int(signal.value))
 
-    def _inject_fulltext(self, session: Session, envelope: Envelope) -> str | None:
+    def _inject_fulltext(
+        self, session: Session, envelope: Envelope
+    ) -> tuple[str | None, dict[str, Any] | None]:
         paper_id = envelope.payload["paper_id"]
         row = session.get(PaperRow, paper_id)
         if row is None:
-            return "paper not stored yet"
+            return "paper not stored yet", None
         text = envelope.payload["text"]
         set_full_text(session, paper_id, text)
         sections = envelope.payload.get("sections")
@@ -99,11 +102,13 @@ class Injector:
                 session.execute(
                     update(PaperRow).where(PaperRow.id == paper_id).values(abstract=recovered)
                 )
-        index_chunks_for(session, self._embedder, paper_id, text)
-        return None
+        chunk_count = index_chunks_for(session, self._embedder, paper_id, text)
+        return None, {"chunk_count": chunk_count}
 
-    def _inject_one(self, session: Session, item: Categorized) -> str | None:
-        """Dispatch one packet's writes; returns a skip reason, or None when it landed."""
+    def _inject_one(
+        self, session: Session, item: Categorized
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """Dispatch one packet's writes; returns (skip reason or None, stamp detail)."""
         envelope = item.envelope
         if envelope.kind == "paper" and "paper" in envelope.payload:
             self._inject_paper(session, envelope, item.vector)
@@ -112,8 +117,8 @@ class Injector:
         elif envelope.kind == "fulltext" and "text" in envelope.payload:
             return self._inject_fulltext(session, envelope)
         else:
-            return "nothing parsed to inject"
-        return None
+            return "nothing parsed to inject", None
+        return None, None
 
     def run(self, item: Categorized) -> Envelope:
         """Land one packet; the lineage stamp records ok, skipped, or the failure."""
@@ -121,9 +126,9 @@ class Injector:
         stamp = envelope.begin("inject")
         try:
             with self._session_factory() as session:
-                skipped = self._inject_one(session, item)
+                skipped, detail = self._inject_one(session, item)
                 if skipped is None:
-                    envelope.finish(stamp)
+                    envelope.finish(stamp, detail=detail)
                 else:
                     envelope.finish(stamp, "skipped", skipped)
                 record_stages(session, envelope)
@@ -149,12 +154,12 @@ class Injector:
                     stamp = envelope.begin("inject")
                     try:
                         with session.begin_nested():
-                            skipped = self._inject_one(session, item)
+                            skipped, detail = self._inject_one(session, item)
                     except Exception as exc:  # noqa: BLE001 - isolate the one packet
                         envelope.finish(stamp, "error", f"{type(exc).__name__}: {exc}")
                     else:
                         if skipped is None:
-                            envelope.finish(stamp)
+                            envelope.finish(stamp, detail=detail)
                         else:
                             envelope.finish(stamp, "skipped", skipped)
                 record_stages_many(session, [item.envelope for item in items])
