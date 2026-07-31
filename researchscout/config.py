@@ -83,6 +83,14 @@ class Settings(BaseSettings):
     # Feed slots reserved for high-momentum papers outside every centroid (0 = off).
     foryou_explore_slots: int = 0
     foryou_half_life_days: float = 75.0
+    # Streaming categorize stage: minimum centroid cosine for tagging a paper with a live
+    # topic, the keyword extraction similarity floor, the LLM fallback for weak extractions,
+    # and the optional custom-label classifier over config/labels.yaml.
+    stream_topic_match_min: float = 0.55
+    stream_keyword_min_similarity: float = 0.35
+    stream_keywords_llm_fallback: bool = True
+    stream_labels_enabled: bool = False
+    labels_config_path: Path = Path("config/labels.yaml")
 
 
 def get_settings() -> Settings:
