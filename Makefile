@@ -11,8 +11,13 @@ RUN     := $(LOCAL)/run
 DB_USER := researchscout
 DB_NAME := researchscout
 
+KAFKA_BIN  := $(shell brew --prefix kafka 2>/dev/null)/bin
+KAFKA_DATA := $(LOCAL)/kafka-logs
+KAFKA_CONF := $(LOCAL)/kafka/server.properties
+KAFKA_HEAP ?= -Xmx512m -Xms128m
+
 .DEFAULT_GOAL := help
-.PHONY: help setup start stop status logs seed digest scheduler check clean
+.PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop check clean
 
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-10s\033[0m %s\n", $$1, $$2}'
@@ -25,10 +30,16 @@ setup: ## install toolchains, dependencies, and the local Postgres cluster
 	@[ -f "$$(brew --prefix)/share/postgresql@$(PG_VER)/extension/vector.control" ] || \
 	  { echo "pgvector is required: brew install pgvector"; exit 1; }
 	@command -v ollama >/dev/null || echo "note: no ollama — chat needs it (brew install ollama; ollama pull qwen2.5:3b-instruct) or a cloud key in .env"
+	@[ -x "$(KAFKA_BIN)/kafka-storage" ] || { echo "kafka is required: brew install kafka"; exit 1; }
 	uv sync
 	cd apps/web && pnpm install
 	@mkdir -p $(LOG) $(RUN)
 	@[ -d $(PGDATA) ] || { $(PG_BIN)/initdb -D $(PGDATA) -U $(DB_USER) --auth=trust --encoding=UTF8 >/dev/null && echo "initialized $(PGDATA)"; }
+	@mkdir -p $(LOCAL)/kafka $(KAFKA_DATA)
+	@sed "s|@KAFKA_DATA@|$(KAFKA_DATA)|" config/kafka/server.properties.template > $(KAFKA_CONF)
+	@[ -f $(KAFKA_DATA)/meta.properties ] || { \
+	  $(KAFKA_BIN)/kafka-storage format --standalone -t $$($(KAFKA_BIN)/kafka-storage random-uuid) -c $(KAFKA_CONF) >/dev/null && \
+	  echo "initialized $(KAFKA_DATA)"; }
 	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
 	@echo "setup complete — next: make start"
 
@@ -64,11 +75,13 @@ start: ## start postgres, migrate, then the API and web app in the background
 	@echo
 	@echo "  next: make seed   (chat needs 'ollama serve' + qwen2.5:3b-instruct, or a cloud key in .env)"
 
-stop: ## stop the web app, API, and postgres
+stop: ## stop the web app, API, kafka, and postgres
 	-@[ -f $(RUN)/web.pid ] && kill $$(cat $(RUN)/web.pid) 2>/dev/null; rm -f $(RUN)/web.pid
 	-@[ -f $(RUN)/api.pid ] && kill $$(cat $(RUN)/api.pid) 2>/dev/null; rm -f $(RUN)/api.pid
 	-@lsof -ti :4321 2>/dev/null | xargs kill -9 2>/dev/null; true
 	-@lsof -ti :8000 2>/dev/null | xargs kill -9 2>/dev/null; true
+	-@[ -f $(RUN)/kafka.pid ] && kill $$(cat $(RUN)/kafka.pid) 2>/dev/null; rm -f $(RUN)/kafka.pid
+	-@lsof -ti :9092 2>/dev/null | xargs kill 2>/dev/null; true
 	-@$(PG_BIN)/pg_ctl -D $(PGDATA) status >/dev/null 2>&1 && $(PG_BIN)/pg_ctl -D $(PGDATA) stop >/dev/null
 	@echo "stopped"
 
@@ -76,6 +89,7 @@ status: ## show what is running
 	@$(PG_BIN)/pg_ctl -D $(PGDATA) status >/dev/null 2>&1 && echo "postgres: up on :5432" || echo "postgres: stopped"
 	@lsof -ti :8000 >/dev/null 2>&1 && echo "api: up on :8000" || echo "api: stopped"
 	@lsof -ti :4321 >/dev/null 2>&1 && echo "web: up on :4321" || echo "web: stopped"
+	@lsof -ti :9092 >/dev/null 2>&1 && echo "kafka: up on :9092" || echo "kafka: stopped"
 
 logs: ## tail the local service logs
 	tail -f $(LOG)/*.log
@@ -89,6 +103,25 @@ digest: ## build and publish this week's digest (needs the LLM up)
 
 scheduler: ## run the refresh loop in the foreground (Ctrl-C to stop)
 	uv run scout serve scheduler
+
+kafka-start: ## start the kafka broker (KRaft single node) in the background
+	@mkdir -p $(LOG) $(RUN)
+	@[ -f $(KAFKA_CONF) ] || { echo "no kafka config — run: make setup"; exit 1; }
+	@if [ -f $(RUN)/kafka.pid ] && kill -0 $$(cat $(RUN)/kafka.pid) 2>/dev/null; then \
+	  echo "kafka: already running"; \
+	elif lsof -ti :9092 >/dev/null 2>&1; then \
+	  echo "error: another process owns port 9092 — stop it first"; exit 1; \
+	else \
+	  KAFKA_HEAP_OPTS="$(KAFKA_HEAP)" nohup $(KAFKA_BIN)/kafka-server-start $(KAFKA_CONF) >> $(LOG)/kafka.log 2>&1 & echo $$! > $(RUN)/kafka.pid; \
+	fi
+	@for i in $$(seq 1 30); do lsof -ti :9092 >/dev/null 2>&1 && break; sleep 1; done; \
+	  lsof -ti :9092 >/dev/null 2>&1 || { echo "kafka did not come up — check: make logs"; exit 1; }
+	@echo "kafka: up on :9092"
+
+kafka-stop: ## stop the kafka broker
+	-@[ -f $(RUN)/kafka.pid ] && kill $$(cat $(RUN)/kafka.pid) 2>/dev/null; rm -f $(RUN)/kafka.pid
+	-@lsof -ti :9092 2>/dev/null | xargs kill 2>/dev/null; true
+	@echo "kafka: stopped"
 
 check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run ruff check researchscout tests
