@@ -1,0 +1,345 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Papers",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "fieldConfig": {
+        "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT count(*) AS papers FROM papers"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "With keywords",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "fieldConfig": {
+        "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT count(*) AS with_keywords FROM papers WHERE keywords IS NOT NULL AND jsonb_array_length(keywords) > 0"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "With full text",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "fieldConfig": {
+        "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT count(*) AS with_full_text FROM papers WHERE full_text IS NOT NULL AND full_text <> ''"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Chunks",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "fieldConfig": {
+        "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT count(*) AS chunks FROM paper_chunks"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Signals",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 0},
+      "fieldConfig": {
+        "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT count(*) AS signals FROM signals"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Topics",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 0},
+      "fieldConfig": {
+        "defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}},
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""},
+        "textMode": "value",
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT count(*) AS topics FROM topics"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Papers per day",
+      "description": "Published is the arXiv publication date; ingested is when the paper first landed here",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 9, "w": 12, "x": 0, "y": 4},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 70,
+            "lineWidth": 1,
+            "barAlignment": 0,
+            "stacking": {"mode": "none", "group": "A"}
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT $__timeGroup(published_at, '1d') AS \"time\", count(*) AS published FROM papers WHERE $__timeFilter(published_at) GROUP BY 1 ORDER BY 1"
+        },
+        {
+          "refId": "B",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT $__timeGroup(created_at, '1d') AS \"time\", count(*) AS ingested FROM papers WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Signals per day by type",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 9, "w": 12, "x": 12, "y": 4},
+      "fieldConfig": {
+        "defaults": {
+          "color": {"mode": "palette-classic"},
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 80,
+            "lineWidth": 1,
+            "barAlignment": 0,
+            "stacking": {"mode": "normal", "group": "A"}
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {"displayMode": "list", "placement": "bottom", "showLegend": true},
+        "tooltip": {"mode": "multi", "sort": "none"}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT $__timeGroup(observed_at, '1d') AS \"time\", type AS metric, count(*) AS observations FROM signals WHERE $__timeFilter(observed_at) GROUP BY 1, 2 ORDER BY 1"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "bargauge",
+      "title": "Enrichment coverage",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 13},
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "decimals": 1,
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "red", "value": null},
+              {"color": "yellow", "value": 25},
+              {"color": "green", "value": 60}
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {"values": true, "calcs": ["lastNotNull"], "fields": "/^pct$/"},
+        "orientation": "horizontal",
+        "displayMode": "gradient",
+        "showUnfilled": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT 'keywords' AS what, 100.0 * count(*) FILTER (WHERE keywords IS NOT NULL AND jsonb_array_length(keywords) > 0) / nullif(count(*), 0) AS pct FROM papers UNION ALL SELECT 'full text', 100.0 * count(*) FILTER (WHERE full_text IS NOT NULL AND full_text <> '') / nullif(count(*), 0) FROM papers UNION ALL SELECT 'embeddings', 100.0 * (SELECT count(DISTINCT paper_id) FROM paper_embeddings) / nullif(count(*), 0) FROM papers"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Topics by size",
+      "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+      "gridPos": {"h": 8, "w": 16, "x": 8, "y": 13},
+      "fieldConfig": {
+        "defaults": {
+          "custom": {"align": "auto", "cellOptions": {"type": "auto"}, "filterable": false}
+        },
+        "overrides": [
+          {
+            "matcher": {"id": "byName", "options": "trend"},
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "new": {"color": "blue", "index": 0},
+                      "rising": {"color": "green", "index": 1},
+                      "steady": {"color": "text", "index": 2},
+                      "fading": {"color": "orange", "index": 3}
+                    }
+                  }
+                ]
+              },
+              {"id": "custom.cellOptions", "value": {"type": "color-text"}}
+            ]
+          }
+        ]
+      },
+      "options": {"showHeader": true, "sortBy": []},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {"type": "postgres", "uid": "researchscout-pg"},
+          "rawSql": "SELECT label, size, trend, round(score::numeric, 3) AS score, built_at FROM topics ORDER BY size DESC LIMIT 15"
+        }
+      ]
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": ["researchscout"],
+  "templating": {"list": []},
+  "time": {"from": "now-30d", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Corpus",
+  "uid": "rs-corpus",
+  "version": 1,
+  "weekStart": ""
+}
