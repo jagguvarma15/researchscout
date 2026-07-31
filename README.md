@@ -5,7 +5,7 @@ ResearchScout ingests new AI/ML papers and their surrounding signals (citations,
 
 Everything runs as plain host processes — no Docker. Needs Homebrew Postgres with pgvector
 plus Kafka (`brew install postgresql@17 pgvector kafka`), [uv](https://docs.astral.sh/uv/), and
-pnpm. Chat needs an LLM: the defaults target local [Ollama](https://ollama.com) (`brew install
+pnpm; add `grafana` to the brew line for the monitoring dashboards (optional, see Monitoring). Chat needs an LLM: the defaults target local [Ollama](https://ollama.com) (`brew install
 ollama`, run `ollama serve`, then `ollama pull qwen2.5:3b-instruct` — one-time ~2.3GB), or point
 `RS_LLM_*` in `.env` at any OpenAI-compatible provider.
 
@@ -36,12 +36,33 @@ Bytewax worker consuming them through three stages: parse (deterministic normali
 cleanup), categorize (taxonomy group, topic-centroid match, statistical keywords with a
 small-LLM fallback, optional custom labels), and inject (idempotent upserts, embeddings,
 chunks, signals). Every packet carries per-stage lineage into Postgres: `GET /v1/stream/stats`
-serves hourly rollups, the `pipeline_rollups_hourly` view is Grafana-ready, and
-`scout stream tail` watches packets live on the `rs.parsed.v1` / `rs.enriched.v1` taps.
-Delivery is at-least-once with natural-key upserts everywhere, so replays converge.
-`make scheduler` still drives the derived products (weekly digest, topics, the daily report
-with its must-read five). The batch commands below remain the manual fallback whenever the
-broker is down.
+serves hourly rollups, the `pipeline_rollups_hourly` view backs the Grafana dashboards (see
+Monitoring), and `scout stream tail` watches packets live on the `rs.parsed.v1` /
+`rs.enriched.v1` taps. Delivery is at-least-once with natural-key upserts everywhere, so
+replays converge. `make scheduler` still drives the derived products (weekly digest, topics,
+the daily report with its must-read five). The batch commands below remain the manual fallback
+whenever the broker is down.
+
+## Monitoring
+
+Grafana dashboards are provisioned as code: `brew install grafana` once, then `make setup`
+renders the config and `make start` (or `make grafana-start` on its own) serves
+http://localhost:3000 with no sign-in. Four dashboards land in a ResearchScout folder:
+
+- Pipeline: throughput by stage and outcome, error rate, packet-weighted stage latency,
+  backlog (produced but not yet injected), freshness, kind/source/category breakdowns, top errors.
+- Traces: pick any event and see its produce/parse/categorize/inject stamps with durations and
+  errors, plus a recent-traces table with one colored cell per stage.
+- Architecture: a live node graph of the pipeline with per-stage counts, latencies, and outcome
+  arcs, stage freshness, and a system map.
+- Corpus: paper/keyword/fulltext/chunk/signal/topic totals, papers and signals per day,
+  enrichment coverage, topics by size.
+
+Everything reads the `pipeline_lineage` table and corpus tables in Postgres — no exporters or
+extra agents, and metrics accrue while Grafana is down. The dashboard JSONs under
+`config/grafana/dashboards/` are the source of truth (UI edits are disabled); edits hot-reload
+within 30 seconds. Grafana runs anonymous with the Admin role, which is safe only because it
+binds to 127.0.0.1 — do not loosen `http_addr` in `config/grafana/grafana.ini.template`.
 
 ## Deep backfill
 
