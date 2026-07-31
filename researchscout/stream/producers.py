@@ -179,7 +179,7 @@ def poll_fulltext(settings: Settings, broker: Broker, topics: StreamTopics) -> N
                 },
             )
             envelope.finish(envelope.begin("produce"))
-            broker.publish(topics.raw, envelope.key(), encode(envelope))
+            broker.publish(topics.raw_fulltext, envelope.key(), encode(envelope))
             published += 1
     broker.flush()
     if published or unavailable:
