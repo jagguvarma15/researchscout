@@ -154,3 +154,53 @@ def test_chat_guardrail_flag_off_skips_classifier(monkeypatch: pytest.MonkeyPatc
     client = _client(monkeypatch)
     events = _events(client.post("/v1/chat", json={"question": "q"}).text)
     assert [name for name, _ in events] == ["meta", "token", "done"]
+
+
+def _boom_guardrail(*a: object, **k: object) -> bool:
+    raise AssertionError("the guardrail must never run in fast mode")
+
+
+def test_chat_fast_mode_streams_extractive_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    from researchscout.answer import FastAnswer
+
+    used = [_scored()]
+    fast = FastAnswer(
+        answer=Answer(
+            text="Found 1 recent paper matching your question. [arxiv:2401.00001]",
+            cited=["arxiv:2401.00001"],
+            hallucinated=[],
+            used=used,
+        ),
+        found=True,
+        best_relevance=0.9,
+    )
+    monkeypatch.setattr(chat_router, "answer_fast", lambda *a, **k: fast)
+    monkeypatch.setattr(chat_router, "is_research_question", _boom_guardrail)
+    client = _client(monkeypatch)
+    response = client.post("/v1/chat", json={"question": "q", "mode": "fast"})
+
+    assert response.status_code == 200
+    events = _events(response.text)
+    assert [name for name, _ in events] == ["meta", "token", "done"]
+    assert events[0][1] == {"retrieved": 1, "mode": "fast"}
+    assert "[arxiv:2401.00001]" in events[1][1]["delta"]
+    assert events[2][1]["cited"] == ["arxiv:2401.00001"]
+
+
+def test_chat_fast_mode_emits_notfound_below_the_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    from researchscout.answer import FastAnswer
+
+    fast = FastAnswer(
+        answer=Answer(text="No papers matched.", cited=[], hallucinated=[], used=[]),
+        found=False,
+        best_relevance=0.08,
+    )
+    monkeypatch.setattr(chat_router, "answer_fast", lambda *a, **k: fast)
+    monkeypatch.setattr(chat_router, "is_research_question", _boom_guardrail)
+    client = _client(monkeypatch)
+    response = client.post("/v1/chat", json={"question": "obscure thing", "mode": "fast"})
+
+    events = _events(response.text)
+    assert [name for name, _ in events] == ["meta", "notfound", "done"]
+    assert events[1][1] == {"query": "obscure thing", "web_search": False}
+    assert events[2][1] == {"cited": [], "hallucinated": [], "used": []}
