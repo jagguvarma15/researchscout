@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 
 from researchscout.api.deps import get_session
 from researchscout.api.main import create_app
-from researchscout.store.lineage import hourly_stats, prune_lineage, record_stages
+from researchscout.store.lineage import (
+    hourly_stats,
+    prune_lineage,
+    record_stages,
+    record_stages_many,
+)
 from researchscout.store.models import PipelineLineageRow
 from researchscout.stream.envelope import Envelope
 
@@ -52,6 +57,22 @@ def test_record_stages_converges_on_redelivery(session: Session) -> None:
     assert row.outcome == "error" and row.error == "db unavailable"
     assert row.paper_id == "arxiv:2607.1"
     assert row.category == "cs" and row.topic == "Efficient attention"
+
+
+def test_record_stages_many_batches_and_dedupes(session: Session) -> None:
+    first = _processed_envelope("m1")
+    second = _processed_envelope("m2")
+    retried = second.begin("inject")  # a serial retry stamps the same stage again
+    second.finish(retried)
+
+    assert record_stages_many(session, [first, second]) == 8  # deduped, one row per stage
+    session.flush()
+
+    assert _count(session) == 8
+    row = session.get(PipelineLineageRow, ("m2", "inject"))
+    assert row is not None and row.outcome == "ok"  # the later stamp won
+    unretried = session.get(PipelineLineageRow, ("m1", "inject"))
+    assert unretried is not None and unretried.outcome == "error"
 
 
 def test_hourly_stats_groups_by_bucket_and_stage(session: Session) -> None:
