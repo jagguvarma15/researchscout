@@ -79,14 +79,22 @@ def _context(papers: list[ScoredPaper], quotes: dict[str, str] | None = None) ->
 
 
 def _excerpts_for(
-    session: Session, embedder: Embedder, question: str, used: list[ScoredPaper]
+    session: Session,
+    embedder: Embedder,
+    question: str,
+    used: list[ScoredPaper],
+    query_vector: list[float] | None = None,
 ) -> dict[str, str]:
-    """Best-chunk excerpts when chunk retrieval is on (empty when off or nothing indexed)."""
+    """Best-chunk excerpts when chunk retrieval is on (empty when off or nothing indexed).
+
+    ``query_vector`` reuses the embed retrieval already paid for; without it (the agentic
+    path) the question embeds once more here.
+    """
     if not used or not get_settings().chunk_retrieval:
         return {}
     return best_chunk_texts(
         session,
-        embedder.embed_query(question),
+        query_vector if query_vector is not None else embedder.embed_query(question),
         [item.paper.id for item in used],
         model_id=embedder.model_id,
     )
@@ -110,13 +118,14 @@ def _retrieve_for(
     k: int,
     days: int | None,
     agentic: bool,
+    query_vector: list[float] | None = None,
 ) -> list[ScoredPaper]:
     """Agentic multi-hop retrieval when asked, otherwise the single-shot hybrid search."""
     if agentic:
         from researchscout.agentic import agentic_retrieve
 
         return agentic_retrieve(session, embedder, llm, question, k=k, days=days)
-    return retrieve(session, embedder, question, k=k, days=days)
+    return retrieve(session, embedder, question, k=k, days=days, query_vector=query_vector)
 
 
 def answer_stream(
@@ -137,7 +146,17 @@ def answer_stream(
     with trace_span(
         "ask", question=question, k=k, days=days, streaming=True, agentic=agentic
     ) as span:
-        used = _retrieve_for(session, embedder, llm, question, k=k, days=days, agentic=agentic)
+        query_vector = None if agentic else embedder.embed_query(question)
+        used = _retrieve_for(
+            session,
+            embedder,
+            llm,
+            question,
+            k=k,
+            days=days,
+            agentic=agentic,
+            query_vector=query_vector,
+        )
         span["retrieved"] = len(used)
         yield StreamMeta(retrieved=len(used), used=used)
         if not used:
@@ -146,7 +165,7 @@ def answer_stream(
             yield Answer(text=empty, cited=[], hallucinated=[], used=[])
             return
 
-        quotes = _excerpts_for(session, embedder, question, used)
+        quotes = _excerpts_for(session, embedder, question, used, query_vector)
         user_prompt = f"Question: {question}\n\nPapers:\n{_context(used, quotes)}"
         parts: list[str] = []
         for delta in llm.stream(_SYSTEM_PROMPT, user_prompt):
@@ -172,14 +191,24 @@ def answer(
 ) -> Answer:
     """Retrieve recent papers and synthesize a grounded, cited answer."""
     with trace_span("ask", question=question, k=k, days=days, agentic=agentic) as span:
-        used = _retrieve_for(session, embedder, llm, question, k=k, days=days, agentic=agentic)
+        query_vector = None if agentic else embedder.embed_query(question)
+        used = _retrieve_for(
+            session,
+            embedder,
+            llm,
+            question,
+            k=k,
+            days=days,
+            agentic=agentic,
+            query_vector=query_vector,
+        )
         span["retrieved"] = len(used)
         if not used:
             return Answer(
                 text="No recent papers match this question.", cited=[], hallucinated=[], used=[]
             )
 
-        quotes = _excerpts_for(session, embedder, question, used)
+        quotes = _excerpts_for(session, embedder, question, used, query_vector)
         user_prompt = f"Question: {question}\n\nPapers:\n{_context(used, quotes)}"
         text = llm.complete(_SYSTEM_PROMPT, user_prompt)
         span["model"] = llm.model
