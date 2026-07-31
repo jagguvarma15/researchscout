@@ -92,6 +92,35 @@ class AskResponse(BaseModel):
     found: bool = True
 
 
+class WebSearchHit(BaseModel):
+    provider: Literal["arxiv", "s2"]
+    title: str
+    authors: list[str]
+    year: int | None = None
+    snippet: str
+    arxiv_id: str | None = None
+    url: str | None = None
+    already_known: bool = False
+    paper_id: str | None = None
+
+
+class WebSearchResponse(BaseModel):
+    query: str
+    hits: list[WebSearchHit]
+    providers_failed: list[str]
+
+
+class ImportRequest(BaseModel):
+    arxiv_id: str = Field(min_length=1, max_length=64)
+
+
+class ImportResponse(BaseModel):
+    id: str
+    title: str
+    already_known: bool
+    enrichment_queued: bool
+
+
 class DigestItem(BaseModel):
     paper_id: str
     title: str
