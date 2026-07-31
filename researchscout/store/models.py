@@ -203,3 +203,24 @@ class CitationFetchRow(Base):
         ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
     )
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class PipelineLineageRow(Base):
+    __tablename__ = "pipeline_lineage"
+    __table_args__ = (
+        Index("ix_pipeline_lineage_exited", "exited_at"),
+        Index("ix_pipeline_lineage_stage_outcome", "stage", "outcome"),
+    )
+
+    event_id: Mapped[str] = mapped_column(String, primary_key=True)
+    stage: Mapped[str] = mapped_column(String, primary_key=True)
+    kind: Mapped[str] = mapped_column(String)
+    source: Mapped[str] = mapped_column(String)
+    # No FK: a packet can fail before its paper exists.
+    paper_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
+    topic: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    exited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    outcome: Mapped[str] = mapped_column(String)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
