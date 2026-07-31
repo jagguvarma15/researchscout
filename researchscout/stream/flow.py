@@ -22,11 +22,15 @@ from bytewax.connectors.kafka import (
 )
 from bytewax.dataflow import Dataflow
 
-from researchscout.stream.broker import StreamTopics
+from researchscout.stream.broker import PRODUCER_TUNING, StreamTopics
 from researchscout.stream.categorize import Categorized
 from researchscout.stream.envelope import Envelope, decode, encode
 
 logger = logging.getLogger(__name__)
+
+# The tap sinks flush once per write batch; the same linger/compression tuning as the
+# producers keeps those flushes cheap.
+_SINK_TUNING = dict(PRODUCER_TUNING)
 
 
 @dataclass(frozen=True)
@@ -66,8 +70,13 @@ def build_flow(
     deps: FlowDeps,
     *,
     batch_size: int = 100,
+    taps: bool = True,
 ) -> Dataflow:
-    """Wire the production graph: Kafka in, three stages, two observability taps."""
+    """Wire the production graph: Kafka in, three stages, two observability taps.
+
+    ``taps=False`` drops the parsed/enriched tap topics (and their per-batch producer
+    flushes); scout stream tail goes dark in that mode.
+    """
     flow = Dataflow("researchscout-stream")
     messages = op.input(
         "raw-in",
@@ -81,10 +90,20 @@ def build_flow(
     )
     envelopes = op.filter_map("decode", messages, decode_message)
     parsed = op.map("parse", envelopes, deps.parse)
-    parsed_tap = op.map("parsed-msg", parsed, to_sink_message)
-    op.output("parsed-tap", parsed_tap, KafkaSink(brokers=[bootstrap], topic=topics.parsed))
+    if taps:
+        parsed_tap = op.map("parsed-msg", parsed, to_sink_message)
+        op.output(
+            "parsed-tap",
+            parsed_tap,
+            KafkaSink(brokers=[bootstrap], topic=topics.parsed, add_config=_SINK_TUNING),
+        )
     categorized = op.map("categorize", parsed, deps.categorize)
     injected = op.map("inject", categorized, deps.inject)
-    enriched_tap = op.map("enriched-msg", injected, to_sink_message)
-    op.output("enriched-tap", enriched_tap, KafkaSink(brokers=[bootstrap], topic=topics.enriched))
+    if taps:
+        enriched_tap = op.map("enriched-msg", injected, to_sink_message)
+        op.output(
+            "enriched-tap",
+            enriched_tap,
+            KafkaSink(brokers=[bootstrap], topic=topics.enriched, add_config=_SINK_TUNING),
+        )
     return flow
