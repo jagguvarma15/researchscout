@@ -62,6 +62,12 @@ def test_stream_yields_meta_deltas_then_answer(monkeypatch: pytest.MonkeyPatch) 
     assert final.hallucinated == ["arxiv:9999.99999"]
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_chunk_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hermetic against a local .env that enables chunk retrieval (tests opt in explicitly)."""
+    monkeypatch.setenv("RS_CHUNK_RETRIEVAL", "0")
+
+
 def test_stream_citation_split_across_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
     used = [_scored("arxiv:2401.00001")]
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: used)
