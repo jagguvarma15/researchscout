@@ -11,9 +11,10 @@ import researchscout.stream.categorize as categorize_mod
 from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
 from researchscout.sources.arxiv import _entry_payload
+from researchscout.stream.broker import StreamTopics
 from researchscout.stream.categorize import Categorized, Categorizer
 from researchscout.stream.envelope import Envelope, decode, encode
-from researchscout.stream.flow import decode_message, to_sink_message
+from researchscout.stream.flow import FlowDeps, build_flow, decode_message, to_sink_message
 from researchscout.stream.parse import parse_stage
 
 FIXTURE = Path(__file__).parent / "fixtures" / "arxiv_query.atom"
@@ -93,6 +94,27 @@ def test_stages_compose_under_run_main(monkeypatch: pytest.MonkeyPatch) -> None:
     assert [s.outcome for s in ok.lineage] == ["ok", "ok", "ok"]
     assert ok.payload["enrichment"]["group"] == "cs"
     assert [s.outcome for s in bad.lineage] == ["error", "skipped", "ok"]
+
+
+def _null_deps() -> FlowDeps:
+    return FlowDeps(
+        parse=lambda envelope: envelope,
+        categorize=lambda envelope: Categorized(envelope, None),
+        inject=lambda item: item.envelope,
+    )
+
+
+def test_build_flow_taps_toggle() -> None:
+    topics = StreamTopics.for_prefix("rs")
+    with_taps = build_flow("localhost:9092", topics, "rs-stream", _null_deps())
+    step_ids = [step.step_id for step in with_taps.substeps]
+    assert any("parsed-tap" in s for s in step_ids)
+    assert any("enriched-tap" in s for s in step_ids)
+
+    without = build_flow("localhost:9092", topics, "rs-stream", _null_deps(), taps=False)
+    step_ids = [step.step_id for step in without.substeps]
+    assert not any("tap" in s for s in step_ids)
+    assert any("inject" in s for s in step_ids)  # the stages themselves remain
 
 
 def test_decode_message_drops_bad_bytes() -> None:
