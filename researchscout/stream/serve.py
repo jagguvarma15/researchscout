@@ -66,6 +66,11 @@ def _run_worker(settings: Settings, topics: StreamTopics) -> None:
     """Run the parse/categorize/inject worker until interrupted."""
     embedder = default_embedder()
     labels = load_labels(settings.labels_config_path) if settings.stream_labels_enabled else []
+    keyword_embedder = None
+    if settings.stream_keyword_embedder == "static":
+        from researchscout.embed.static import StaticKeywordEmbedder
+
+        keyword_embedder = StaticKeywordEmbedder()
     categorizer = Categorizer(
         embedder,
         OpenAICompatLLM(),
@@ -75,6 +80,7 @@ def _run_worker(settings: Settings, topics: StreamTopics) -> None:
         keywords_llm_fallback=settings.stream_keywords_llm_fallback,
         labels=labels,
         keyword_candidate_cap=settings.stream_keyword_candidates,
+        keyword_embedder=keyword_embedder,
     )
     injector = Injector(embedder, session_scope)
     deps = FlowDeps(
