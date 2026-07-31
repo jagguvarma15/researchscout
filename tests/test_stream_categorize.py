@@ -156,6 +156,11 @@ def test_run_enriches_a_paper_packet(monkeypatch: pytest.MonkeyPatch) -> None:
     assert enrichment["labels"] == []
     assert llm.calls == 0
     assert envelope.lineage[-1].outcome == "ok"
+    detail = envelope.lineage[-1].detail
+    assert detail is not None
+    assert detail["keyword_method"] == "statistical"
+    assert detail["candidate_count"] > 0
+    assert detail["topic_score"] == 1.0
 
 
 def _doc_only_table(envelope: Envelope) -> dict[str, list[float]]:
