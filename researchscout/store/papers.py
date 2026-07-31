@@ -14,13 +14,19 @@ from researchscout.schema import Author, Paper
 from researchscout.store.facets import PaperFacets, SortKey, facets_where
 from researchscout.store.models import ExternalIdRow, PaperRow, SignalRow
 
+# Columns written after ingest (scout fulltext, the streaming inject stage). A content
+# re-ingest carries None for these, so the conflict update must never touch them --
+# the same contract that keeps citation_count out of the values dict entirely.
+_ENRICHED_AFTER_INGEST = frozenset({"full_text"})
+
 
 def upsert_paper(session: Session, paper: Paper) -> str:
     """Insert or update a paper by canonical id (never duplicates); returns the id.
 
     ``citation_count`` is deliberately absent: it is materialized from signals via
-    :func:`set_citation_count`, and a content re-ingest must never reset it. Any future
-    enriched-after-ingest column needs the same exclusion.
+    :func:`set_citation_count`, and a content re-ingest must never reset it. Columns in
+    ``_ENRICHED_AFTER_INGEST`` are inserted but excluded from the conflict update for
+    the same reason.
     """
     values = {
         "id": paper.id,
@@ -41,7 +47,11 @@ def upsert_paper(session: Session, paper: Paper) -> str:
     stmt = insert(PaperRow).values(**values)
     stmt = stmt.on_conflict_do_update(
         index_elements=["id"],
-        set_={key: stmt.excluded[key] for key in values if key != "id"},
+        set_={
+            key: stmt.excluded[key]
+            for key in values
+            if key != "id" and key not in _ENRICHED_AFTER_INGEST
+        },
     )
     session.execute(stmt)
     link_external_ids(session, paper.id, paper.external_ids)
