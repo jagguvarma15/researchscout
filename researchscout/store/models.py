@@ -210,6 +210,7 @@ class PipelineLineageRow(Base):
     __table_args__ = (
         Index("ix_pipeline_lineage_exited", "exited_at"),
         Index("ix_pipeline_lineage_stage_outcome", "stage", "outcome"),
+        Index("ix_pipeline_lineage_stage_entered", "stage", "entered_at"),
     )
 
     event_id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -224,3 +225,5 @@ class PipelineLineageRow(Base):
     exited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     outcome: Mapped[str] = mapped_column(String)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Small per-stage facts (keyword method, candidate counts, chunk counts) for dashboards.
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
