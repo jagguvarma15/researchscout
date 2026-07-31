@@ -4,6 +4,7 @@ from researchscout.stream.broker import InMemoryBroker, StreamTopics
 def test_topic_names_follow_the_prefix() -> None:
     topics = StreamTopics.for_prefix("rs")
     assert topics.raw == "rs.raw.v1"
+    assert topics.raw_fulltext == "rs.raw.fulltext.v1"
     assert topics.parsed == "rs.parsed.v1"
     assert topics.enriched == "rs.enriched.v1"
 
@@ -12,6 +13,7 @@ def test_topic_configs_size_raw_for_fulltext() -> None:
     configs = StreamTopics.for_prefix("rs").configs()
     assert configs["rs.raw.v1"]["max.message.bytes"] == "5242880"
     assert configs["rs.raw.v1"]["retention.ms"] == str(168 * 3_600_000)
+    assert configs["rs.raw.fulltext.v1"] == configs["rs.raw.v1"]  # the slow lane matches raw
     assert configs["rs.parsed.v1"]["retention.ms"] == str(72 * 3_600_000)
     assert "max.message.bytes" not in configs["rs.enriched.v1"]
 
