@@ -103,10 +103,12 @@ class Settings(BaseSettings):
     stream_publish_dedup: bool = True
     stream_dedup_overlap_days: int = 1
     # Streaming categorize stage: minimum centroid cosine for tagging a paper with a live
-    # topic, the keyword extraction similarity floor, the LLM fallback for weak extractions,
+    # topic, the keyword extraction similarity floor, the candidate cap (top-N n-grams by
+    # in-document frequency actually embedded), the LLM fallback for weak extractions,
     # and the optional custom-label classifier over config/labels.yaml.
     stream_topic_match_min: float = 0.55
     stream_keyword_min_similarity: float = 0.35
+    stream_keyword_candidates: int = 80
     stream_keywords_llm_fallback: bool = True
     stream_labels_enabled: bool = False
     labels_config_path: Path = Path("config/labels.yaml")
