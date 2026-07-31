@@ -83,6 +83,18 @@ def test_query_prefix_is_bge_only() -> None:
     assert query_prefix_for("BAAI/bge-m3") == ""  # multilingual family: no english prefix
 
 
+def test_default_embedder_honors_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    from researchscout.embed.factory import default_embedder
+
+    default_embedder.cache_clear()
+    monkeypatch.setenv("RS_EMBEDDING_MODEL", "intfloat/e5-small-v2")
+    try:
+        assert default_embedder().model_id == "intfloat/e5-small-v2"
+        assert default_embedder() is default_embedder()  # one model per process
+    finally:
+        default_embedder.cache_clear()
+
+
 def test_local_embedder_contract() -> None:
     from researchscout.embed.local import LocalEmbedder
 
