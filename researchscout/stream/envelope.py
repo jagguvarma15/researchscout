@@ -26,6 +26,9 @@ class LineageStamp(BaseModel):
     exited_at: datetime | None = None
     outcome: Outcome = "ok"
     error: str | None = None
+    # Small per-stage facts for the dashboards (keyword method, candidate counts, chunk
+    # counts). Additive and optional, so envelope version 1 packets stay decodable.
+    detail: dict[str, Any] | None = None
 
 
 class Envelope(BaseModel):
@@ -44,12 +47,18 @@ class Envelope(BaseModel):
         return stamp
 
     def finish(
-        self, stamp: LineageStamp, outcome: Outcome = "ok", error: str | None = None
+        self,
+        stamp: LineageStamp,
+        outcome: Outcome = "ok",
+        error: str | None = None,
+        *,
+        detail: dict[str, Any] | None = None,
     ) -> None:
-        """Close a lineage stamp with its outcome."""
+        """Close a lineage stamp with its outcome and optional per-stage detail."""
         stamp.exited_at = datetime.now(UTC)
         stamp.outcome = outcome
         stamp.error = error
+        stamp.detail = detail
 
     def key(self) -> str:
         """The Kafka message key: the canonical paper id when known, else the event id."""
