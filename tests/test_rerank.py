@@ -19,7 +19,7 @@ def _cand(key: str, *, prior: float, first_stage: float, text: str | None = None
 
 def test_no_reranker_is_passthrough() -> None:
     cands = [_cand("a", prior=1.0, first_stage=0.3), _cand("b", prior=1.0, first_stage=0.9)]
-    assert rerank("q", cands, None, top_n=10) == [("b", 0.9), ("a", 0.3)]
+    assert rerank("q", cands, None, top_n=10) == [("b", 0.9, None), ("a", 0.3, None)]
 
 
 def test_top_n_truncates_before_reranking() -> None:
@@ -37,7 +37,8 @@ def test_relevance_reorders_within_the_selected_set() -> None:
     ]
     stub = StubReranker({"ta": 0.1, "tb": 0.95})  # but b is far more relevant
     out = rerank("q", cands, stub, top_n=10)
-    assert [key for key, _ in out] == ["b", "a"]
+    assert [key for key, _, _ in out] == ["b", "a"]
+    assert [relevance for _, _, relevance in out] == [0.95, 0.1]  # raw relevance rides along
 
 
 def test_prior_breaks_ties_in_relevance() -> None:
@@ -47,7 +48,7 @@ def test_prior_breaks_ties_in_relevance() -> None:
     ]
     stub = StubReranker({"tf": 0.5, "ts": 0.5})  # equally relevant
     out = rerank("q", cands, stub, top_n=10)
-    assert [key for key, _ in out] == ["fresh", "stale"]  # recency/momentum prior wins
+    assert [key for key, _, _ in out] == ["fresh", "stale"]  # recency/momentum prior wins
 
 
 def test_cross_encoder_empty_documents_needs_no_model() -> None:
