@@ -23,12 +23,14 @@ signals_app = typer.Typer(help="Inspect the signal time series.", no_args_is_hel
 topics_app = typer.Typer(help="Build and inspect emerging topics.", no_args_is_help=True)
 serve_app = typer.Typer(help="Run ResearchScout services.", no_args_is_help=True)
 eval_app = typer.Typer(help="Evaluate retrieval quality and embedding speed.", no_args_is_help=True)
+stream_app = typer.Typer(help="Run and observe the streaming pipeline.", no_args_is_help=True)
 app.add_typer(sources_app, name="sources")
 app.add_typer(db_app, name="db")
 app.add_typer(signals_app, name="signals")
 app.add_typer(topics_app, name="topics")
 app.add_typer(serve_app, name="serve")
 app.add_typer(eval_app, name="eval")
+app.add_typer(stream_app, name="stream")
 
 
 @app.command()
@@ -290,6 +292,43 @@ def digest(
         f"published {result.slug}: {len(result.items)} papers, {len(result.cited)} cited",
         fg=typer.colors.GREEN,
     )
+
+
+@stream_app.command("serve")
+def stream_serve() -> None:
+    """Run the streaming worker: consume raw packets, parse, categorize, inject."""
+    from researchscout.stream.serve import run_worker
+
+    run_worker()
+
+
+@stream_app.command("tail")
+def stream_tail(
+    topic: Annotated[
+        str, typer.Option(help="Which topic to watch: raw, parsed, or enriched.")
+    ] = "enriched",
+    from_beginning: Annotated[
+        bool, typer.Option("--from-beginning", help="Start at the oldest retained packet.")
+    ] = False,
+) -> None:
+    """Watch packets flow through a pipeline topic (Ctrl-C to stop)."""
+    from researchscout.config import get_settings
+    from researchscout.stream.broker import StreamTopics
+    from researchscout.stream.tail import iter_lines
+
+    settings = get_settings()
+    topics = StreamTopics.for_prefix(settings.kafka_topic_prefix)
+    names = {"raw": topics.raw, "parsed": topics.parsed, "enriched": topics.enriched}
+    if topic not in names:
+        typer.secho("topic must be raw, parsed, or enriched", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    try:
+        for line in iter_lines(
+            names[topic], bootstrap=settings.kafka_bootstrap, from_beginning=from_beginning
+        ):
+            typer.echo(line)
+    except KeyboardInterrupt:  # a clean stop, not an error
+        pass
 
 
 @app.command()
