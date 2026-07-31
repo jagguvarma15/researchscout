@@ -155,3 +155,19 @@ class InterestList(BaseModel):
 
 class InterestUpdate(BaseModel):
     interests: list[Annotated[str, Field(min_length=1, max_length=40)]] = Field(max_length=20)
+
+
+class StreamStatBucket(BaseModel):
+    bucket: datetime
+    stage: str
+    kind: str
+    source: str
+    outcome: str
+    category: str | None
+    packets: int
+    avg_seconds: float | None
+
+
+class StreamStats(BaseModel):
+    hours: int
+    buckets: list[StreamStatBucket]
