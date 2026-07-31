@@ -170,6 +170,8 @@ def test_fulltext_packet_stores_text_sections_chunks_and_recovers_abstract(
     assert row.full_text == text
     assert row.sections == ["Abstract", "Method"]
     assert row.abstract == "Recovered abstract text."
+    lineage = session.get(PipelineLineageRow, ("f1", "inject"))
+    assert lineage is not None and lineage.detail == {"chunk_count": counts[0]}
     # The chunker is section-aware (one chunk per section here); what matters is that the
     # redelivery replaced the set instead of appending to it.
     assert counts[0] > 0 and counts[1] == counts[0]
