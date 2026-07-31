@@ -190,6 +190,28 @@ def test_fulltext_for_unknown_paper_is_skipped(session: Session) -> None:
     assert lineage is not None and lineage.outcome == "skipped"
 
 
+def test_batch_lands_all_and_isolates_a_poisoned_packet(session: Session) -> None:
+    poisoned = Categorized(
+        Envelope(
+            event_id="b2",
+            kind="paper",
+            source="arxiv",
+            fetched_at=datetime.now(UTC),
+            payload={"paper": {"id": "arxiv:2607.3"}},  # missing required fields
+        ),
+        None,
+    )
+    out = _injector().run_batch([_paper_envelope("b1"), poisoned, _paper_envelope("b3")])
+
+    assert [envelope.lineage[-1].outcome for envelope in out] == ["ok", "error", "ok"]
+    session.expire_all()
+    for event_id, outcome in (("b1", "ok"), ("b2", "error"), ("b3", "ok")):
+        lineage = session.get(PipelineLineageRow, (event_id, "inject"))
+        assert lineage is not None and lineage.outcome == outcome
+    assert session.get(PaperRow, PID) is not None  # the good packets landed
+    assert session.get(PaperRow, "arxiv:2607.3") is None  # the poisoned one rolled back alone
+
+
 def test_failed_injection_still_records_lineage(session: Session) -> None:
     envelope = Envelope(
         event_id="bad1",
