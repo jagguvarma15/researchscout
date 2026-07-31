@@ -77,7 +77,11 @@ def _run_worker(settings: Settings, topics: StreamTopics) -> None:
         keyword_candidate_cap=settings.stream_keyword_candidates,
     )
     injector = Injector(embedder, session_scope)
-    deps = FlowDeps(parse=parse_stage, categorize=categorizer.run, inject=injector.run)
+    deps = FlowDeps(
+        parse=parse_stage,
+        categorize_batch=categorizer.run_batch,
+        inject_batch=injector.run_batch,
+    )
     flow = build_flow(
         settings.kafka_bootstrap,
         topics,
