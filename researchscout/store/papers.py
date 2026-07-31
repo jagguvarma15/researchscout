@@ -88,6 +88,28 @@ def find_by_external_id(session: Session, scheme: str, value: str) -> str | None
     ).scalar_one_or_none()
 
 
+def enrichment_watermarks(
+    session: Session, *, published_after: datetime
+) -> dict[tuple[str, str], tuple[datetime | None, bool]]:
+    """Map ``(scheme, value)`` to ``(updated_at, enriched)`` for papers after the cutoff.
+
+    The stream producers consult this to skip re-publishing papers the pipeline has
+    already enriched (enriched = the categorize stage wrote keywords). Batch-ingested
+    papers report False, so the stream still enriches them exactly once.
+    """
+    rows = session.execute(
+        select(
+            ExternalIdRow.scheme,
+            ExternalIdRow.value,
+            PaperRow.updated_at,
+            PaperRow.keywords.is_not(None),
+        )
+        .join(PaperRow, PaperRow.id == ExternalIdRow.paper_id)
+        .where(PaperRow.published_at >= published_after)
+    ).all()
+    return {(scheme, value): (updated, enriched) for scheme, value, updated, enriched in rows}
+
+
 def _apply_sort(stmt: Select[tuple[PaperRow]], sort: SortKey) -> Select[tuple[PaperRow]]:
     if sort == "citations":
         return stmt.order_by(PaperRow.citation_count.desc(), PaperRow.published_at.desc())
