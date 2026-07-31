@@ -16,9 +16,15 @@ _HOUR_MS = 3_600_000
 
 @dataclass(frozen=True)
 class StreamTopics:
-    """The three pipeline topics for a prefix."""
+    """The pipeline topics for a prefix.
+
+    Fulltext packets ride their own raw topic (the slow lane): the worker reads it one
+    packet at a time, so a burst of chunk-heavy fulltext can never form a contiguous
+    batch ahead of paper packets.
+    """
 
     raw: str
+    raw_fulltext: str
     parsed: str
     enriched: str
 
@@ -26,14 +32,17 @@ class StreamTopics:
     def for_prefix(cls, prefix: str) -> StreamTopics:
         return cls(
             raw=f"{prefix}.raw.v1",
+            raw_fulltext=f"{prefix}.raw.fulltext.v1",
             parsed=f"{prefix}.parsed.v1",
             enriched=f"{prefix}.enriched.v1",
         )
 
     def configs(self) -> dict[str, dict[str, str]]:
-        """Creation configs: 7d retention and 5MB messages on raw (fulltext packets), 3d taps."""
+        """Creation configs: 7d retention, 5MB messages on both raw lanes, 3d taps."""
+        raw_config = {"retention.ms": str(168 * _HOUR_MS), "max.message.bytes": "5242880"}
         return {
-            self.raw: {"retention.ms": str(168 * _HOUR_MS), "max.message.bytes": "5242880"},
+            self.raw: dict(raw_config),
+            self.raw_fulltext: dict(raw_config),
             self.parsed: {"retention.ms": str(72 * _HOUR_MS)},
             self.enriched: {"retention.ms": str(72 * _HOUR_MS)},
         }
