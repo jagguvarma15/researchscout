@@ -4,6 +4,8 @@
 
   import { MessageCircle, Send, X } from 'lucide-svelte';
 
+  import ScoutMascot from './ScoutMascot.svelte';
+
   interface UsedPaper {
     id: string;
     title: string;
@@ -46,7 +48,42 @@
   let scroller: HTMLElement | undefined = $state();
   let fab: HTMLButtonElement | undefined = $state();
   let inputEl: HTMLInputElement | undefined = $state();
+  let drawer: HTMLElement | undefined = $state();
   let everOpened = false;
+
+  // The "Ask Scout!" bubble shows until the drawer is opened once, then never again.
+  // Storage failures (private mode) degrade to showing it each load - never a crash.
+  const HINT_KEY = 'rs-scout-hint-dismissed';
+  let showHint = $state(false);
+
+  $effect(() => {
+    // Decide after hydration so server rendering never touches storage.
+    try {
+      showHint = localStorage.getItem(HINT_KEY) !== '1';
+    } catch {
+      showHint = true;
+    }
+  });
+
+  function openDrawer() {
+    open = true;
+    if (showHint) {
+      showHint = false;
+      try {
+        localStorage.setItem(HINT_KEY, '1');
+      } catch {
+        // Private mode: the bubble returns next load, nothing breaks.
+      }
+    }
+  }
+
+  function handleWindowKey(event: KeyboardEvent) {
+    // Close on Escape only while focus is inside the drawer, so the filter sidebar and
+    // reader overlays (which have their own Escape handling) never double-close.
+    if (event.key === 'Escape' && open && drawer?.contains(document.activeElement)) {
+      open = false;
+    }
+  }
 
   $effect(() => {
     // Hand focus to the composer on open and back to the FAB on close; the guard keeps the
@@ -137,7 +174,7 @@
       });
       if (response.status === 429) {
         const wait = response.headers.get('Retry-After');
-        current.text = `Slow down a little — try again in ${wait ?? 'a few'} seconds.`;
+        current.text = `Slow down a little - try again in ${wait ?? 'a few'} seconds.`;
         current.error = true;
         return;
       }
@@ -161,7 +198,7 @@
         }
       }
     } catch {
-      current.text = 'Connection lost mid-answer — try again.';
+      current.text = 'Connection lost mid-answer - try again.';
       current.error = true;
     } finally {
       current.phase = 'done';
@@ -205,15 +242,26 @@
   }
 </script>
 
+<svelte:window onkeydown={handleWindowKey} />
+
 {#if !open}
-  <button class="fab" bind:this={fab} onclick={() => (open = true)} aria-label="Ask about papers">
+  {#if showHint}
+    <span class="bubble" aria-hidden="true">Ask Scout!</span>
+  {/if}
+  <button class="fab" bind:this={fab} onclick={openDrawer} aria-label="Ask Scout">
     <MessageCircle size={22} aria-hidden="true" />
   </button>
 {/if}
 
-<aside class="drawer" class:open aria-label="Ask about research papers" aria-hidden={!open}>
+<!-- Deliberately non-modal, unlike the overlay.ts consumers: it is a side panel, the page
+     stays usable behind it, so no focus trap, scroll lock, or backdrop. inert keeps the
+     closed drawer out of the tab order. -->
+<aside class="drawer" class:open bind:this={drawer} aria-label="Scout research chat" inert={!open}>
   <header>
-    <strong>Ask about papers</strong>
+    <span class="title">
+      <ScoutMascot size={20} />
+      <strong>Scout</strong>
+    </span>
     <button class="close" onclick={() => (open = false)} aria-label="Close">
       <X size={18} aria-hidden="true" />
     </button>
@@ -221,9 +269,12 @@
 
   <div class="messages" bind:this={scroller}>
     {#if messages.length === 0}
-      <p class="hint">
-        Ask anything about the papers on the radar — answers cite what they rely on.
-      </p>
+      <div class="empty">
+        <ScoutMascot size={64} />
+        <p class="hint">
+          Ask anything about the papers on the radar - answers cite what they rely on.
+        </p>
+      </div>
     {/if}
     {#each messages as message}
       <div class="msg {message.role}" class:error={message.error}>
@@ -234,7 +285,7 @@
             >
           </p>
         {:else}
-          <p>{message.text}{#if message.role === 'assistant' && busy && message === messages[messages.length - 1]}<span class="cursor">▍</span>{/if}</p>
+          <p>{message.text}{#if message.role === 'assistant' && busy && message === messages[messages.length - 1]}<span class="cursor" aria-hidden="true"></span>{/if}</p>
         {/if}
         {#if message.cited && message.cited.length > 0}
           <p class="citations">
@@ -306,7 +357,7 @@
   <form onsubmit={send}>
     <input
       type="text"
-      placeholder="What's new in reinforcement learning?"
+      placeholder="Type keywords or use /web for quick web search"
       bind:this={inputEl}
       bind:value={input}
       disabled={busy}
@@ -315,6 +366,7 @@
       <Send size={17} aria-hidden="true" />
     </button>
   </form>
+  <p class="disclaimer">Scout can make mistakes, double check responses.</p>
 </aside>
 
 <style>
@@ -344,20 +396,59 @@
     outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
+  .bubble {
+    position: fixed;
+    right: 4.9rem;
+    bottom: 1.85rem;
+    z-index: 30;
+    /* Never intercepts clicks; the FAB is the dismiss control. */
+    pointer-events: none;
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--line, #e6e1d5);
+    border-radius: 999px;
+    background: var(--surface, #fff);
+    color: var(--ink, #17191c);
+    font-size: 0.8rem;
+    font-weight: 600;
+    box-shadow: var(--shadow-sm, 0 1px 3px rgb(23 25 28 / 0.08));
+    animation: bubble-in 0.25s ease-out 0.6s backwards;
+  }
+  .bubble::after {
+    content: '';
+    position: absolute;
+    right: -0.3rem;
+    top: 50%;
+    width: 0.55rem;
+    height: 0.55rem;
+    background: var(--surface, #fff);
+    border-right: 1px solid var(--line, #e6e1d5);
+    border-top: 1px solid var(--line, #e6e1d5);
+    transform: translateY(-50%) rotate(45deg);
+  }
+  @keyframes bubble-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
   .drawer {
     position: fixed;
     top: 0;
     right: 0;
     z-index: 20;
     height: 100dvh;
-    width: min(420px, 100vw);
+    width: min(560px, 100vw);
     display: flex;
     flex-direction: column;
     background: var(--surface, #fff);
-    border-left: 1px solid var(--line, #e4e7eb);
+    border-left: 1px solid var(--line, #e6e1d5);
     box-shadow: -8px 0 24px rgb(23 25 28 / 0.06);
     transform: translateX(100%);
-    transition: transform 0.2s ease;
+    transition: transform 0.25s cubic-bezier(0.2, 0, 0, 1);
   }
   .drawer.open {
     transform: translateX(0);
@@ -367,16 +458,30 @@
     .fab {
       transition: none;
     }
+    .bubble {
+      animation: none;
+    }
   }
   header {
+    position: relative;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.55rem;
     padding: 1rem 1.25rem;
-    border-bottom: 1px solid var(--line, #e4e7eb);
+    border-bottom: 1px solid var(--line, #e6e1d5);
+  }
+  .title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    color: var(--ink, #17191c);
   }
   .close {
-    margin-left: auto;
+    position: absolute;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -390,7 +495,7 @@
     transition: background-color 0.15s ease;
   }
   .close:hover {
-    background: var(--surface-2, #f5f7fa);
+    background: var(--surface-2, #f4f0e8);
     color: var(--ink, #17191c);
   }
   .close:focus-visible {
@@ -405,9 +510,19 @@
     flex-direction: column;
     gap: 0.75rem;
   }
+  .empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 2.5rem;
+    text-align: center;
+    color: var(--ink, #17191c);
+  }
   .hint {
     color: var(--muted, #5d6570);
     font-size: 0.9rem;
+    max-width: 24rem;
   }
   .msg p {
     margin: 0;
@@ -424,8 +539,8 @@
     border-bottom-right-radius: 4px;
   }
   .msg.assistant p {
-    background: var(--surface-2, #f5f7fa);
-    border: 1px solid var(--line, #e4e7eb);
+    background: var(--surface-2, #f4f0e8);
+    border: 1px solid var(--line, #e6e1d5);
     margin-right: 2rem;
     border-bottom-left-radius: 4px;
   }
@@ -433,6 +548,12 @@
     background: #fdecec;
     border-color: #f5c8c8;
     color: #8b1d1d;
+  }
+  /* The design system has no error tokens, so the dark values live here. */
+  :global([data-theme='dark']) .msg.error p {
+    background: #3a2020;
+    border-color: #5c3434;
+    color: #f2b8b8;
   }
   .citations {
     display: flex;
@@ -456,6 +577,12 @@
     background: var(--chip-hover, #fde68a);
   }
   .cursor {
+    display: inline-block;
+    width: 3px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background: currentColor;
     animation: blink 1s step-start infinite;
   }
   @keyframes blink {
@@ -472,7 +599,7 @@
     border: none !important;
   }
   .ghost {
-    border: 1px solid var(--line, #e4e7eb);
+    border: 1px solid var(--line, #e6e1d5);
     border-radius: 999px;
     background: var(--surface, #fff);
     color: var(--ink, #17191c);
@@ -484,7 +611,7 @@
     transition: background-color 0.15s ease;
   }
   .ghost:hover:not(:disabled) {
-    background: var(--surface-2, #f5f7fa);
+    background: var(--surface-2, #f4f0e8);
   }
   .ghost:disabled {
     opacity: 0.55;
@@ -501,7 +628,7 @@
     margin-right: 2rem;
   }
   .webhit {
-    border: 1px solid var(--line, #e4e7eb);
+    border: 1px solid var(--line, #e6e1d5);
     border-radius: 10px;
     padding: 0.55rem 0.75rem;
     background: var(--surface, #fff);
@@ -543,7 +670,7 @@
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--muted, #5d6570);
-    border: 1px solid var(--line, #e4e7eb);
+    border: 1px solid var(--line, #e6e1d5);
     border-radius: 999px;
     padding: 0.05rem 0.45rem;
   }
@@ -557,6 +684,9 @@
   .weberror {
     font-size: 0.78rem;
     color: #8b1d1d;
+  }
+  :global([data-theme='dark']) .weberror {
+    color: #f2b8b8;
   }
   .dots span {
     display: inline-block;
@@ -589,13 +719,13 @@
     display: flex;
     gap: 0.5rem;
     padding: 0.9rem 1.25rem;
-    border-top: 1px solid var(--line, #e4e7eb);
+    border-top: 1px solid var(--line, #e6e1d5);
   }
   input {
     flex: 1;
     min-width: 0;
     padding: 0.55rem 0.9rem;
-    border: 1px solid var(--line, #e4e7eb);
+    border: 1px solid var(--line, #e6e1d5);
     border-radius: 999px;
     background: var(--surface, #fff);
     color: var(--ink, #17191c);
@@ -634,5 +764,24 @@
   form button:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  .disclaimer {
+    margin: 0;
+    padding: 0 1.25rem 0.7rem;
+    text-align: center;
+    font-size: 0.72rem;
+    color: var(--muted, #5d6570);
+  }
+  /* Keep bubbles and cards usable when the 560px panel collapses to the viewport. */
+  @media (max-width: 480px) {
+    .msg.user p {
+      margin-left: 1.25rem;
+    }
+    .msg.assistant p {
+      margin-right: 1.25rem;
+    }
+    .webfallback {
+      margin-right: 1.25rem;
+    }
   }
 </style>
