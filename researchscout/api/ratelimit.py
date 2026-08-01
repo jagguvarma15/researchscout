@@ -14,23 +14,28 @@ import time
 from fastapi import HTTPException, Request
 
 from researchscout.api.auth import User
+from researchscout.api.service_auth import CLIENT_IP_HEADER
 
 _windows: dict[str, tuple[int, int]] = {}
 
 
 def client_ip(request: Request) -> str:
-    """The caller's address as the edge reports it.
+    """Who to hold responsible for this request.
 
-    ``CF-Connecting-IP`` is set by Cloudflare and cannot be forged by the client, so it wins.
-    ``X-Forwarded-For`` is a fallback for other proxies and is only as trustworthy as whatever
-    sits in front of the app; a direct connection falls back to the socket address.
+    Every browser request reaches the API through the site's own server, so the socket address
+    is that server's, not the visitor's - taken at face value it would put every signed-out
+    visitor in one bucket, which is the same as having no limit at all. The proxy therefore
+    forwards the visitor's address, and it is believed only for a request that proved it came
+    from the site (see api/service_auth.py). Anything else falls back to the socket address,
+    because a header anyone can set is a fresh bucket for the asking.
     """
-    forwarded = request.headers.get("cf-connecting-ip")
-    if forwarded:
-        return forwarded.strip()
-    chain = request.headers.get("x-forwarded-for")
-    if chain:
-        return chain.split(",")[0].strip()
+    if getattr(request.state, "trusted_proxy", False):
+        forwarded = request.headers.get(CLIENT_IP_HEADER)
+        if forwarded:
+            return forwarded.strip()
+        chain = request.headers.get("x-forwarded-for")
+        if chain:
+            return chain.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 
