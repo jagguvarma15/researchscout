@@ -9,7 +9,11 @@
 
   import { flushEvents, logEvent } from '../lib/events';
 
-  let { surface, paperId = null }: { surface: string; paperId?: string | null } = $props();
+  let {
+    surface,
+    paperId = null,
+    enabled = true,
+  }: { surface: string; paperId?: string | null; enabled?: boolean } = $props();
 
   const DWELL_THRESHOLD_MS = 20_000;
 
@@ -52,6 +56,10 @@
   }
 
   onMount(() => {
+    // Nothing to record for a signed-out visitor: reading signals belong to an account, the
+    // events route requires one, and beacons that 401 are just noise in the log.
+    if (!enabled) return;
+
     const seen = new WeakSet<Element>();
     const observer = new IntersectionObserver(
       (entries) => {
