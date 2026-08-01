@@ -375,7 +375,7 @@ function pageLink(target: number): string {
     )
   }
 
-  <Telemetry client:idle surface={q ? 'search' : 'feed'} />
+  <Telemetry client:idle surface={q ? 'search' : 'feed'} enabled={Astro.locals.user !== null} />
   <FilterSidebar
     client:load
     initial={{
