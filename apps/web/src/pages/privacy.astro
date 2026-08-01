@@ -76,10 +76,14 @@ import { CONTACT_URL, MINIMUM_AGE, TERMS_EFFECTIVE } from '../lib/legal';
       <ul>
         <li><strong>Auth0</strong> handles registration, sign-in and password resets.</li>
         <li><strong>Vercel</strong> serves the web pages.</li>
-        <li><strong>Cloudflare</strong> carries traffic to the backend and filters abuse.</li>
+        <li>
+          <strong>Tailscale</strong> relays traffic between the web pages and the operator's
+          machine, where the database lives.
+        </li>
       </ul>
       <p>
-        Those three see what they need to do their job, under their own terms. Nobody else does.
+        Those three see what they need to do their job, under their own terms. Nobody else
+        does.
         Your saved papers, interests and reading history live in a database on the operator's own
         machine, along with its backups, and are not shared with anyone.
       </p>
