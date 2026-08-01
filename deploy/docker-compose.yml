@@ -12,6 +12,9 @@
 #     containerised model would run on CPU at a fraction of the speed. The API reaches it at
 #     host.docker.internal.
 #   - The web app, which is deployed to Vercel.
+#   - The tunnel. Tailscale runs on the host rather than in a container: one command
+#     (`tailscale funnel --bg 8001`), no auth key to store, no userspace networking to debug,
+#     and it keeps working across `make deploy-down`. See deploy/PUBLISHING.md.
 #   - Kafka and the stream worker by default. They are a profile because the ingest path also
 #     works from the scheduler, and on 8 GB the broker is the first thing worth giving up.
 
@@ -31,6 +34,7 @@ x-backend: &backend
     RS_LLM_BASE_URL: ${RS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
     RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
     RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
+    RS_SERVICE_TOKEN: ${RS_SERVICE_TOKEN:-}
     RS_OIDC_ISSUER: ${RS_OIDC_ISSUER:-}
     RS_OIDC_AUDIENCE: ${RS_OIDC_AUDIENCE:-api}
     RS_TERMS_VERSION: ${RS_TERMS_VERSION:-2026-08-01}
@@ -118,17 +122,6 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-
-  # The outbound-only tunnel that puts the API on a public hostname. No inbound port is opened
-  # on this machine; Cloudflare terminates TLS and enforces the Access policy in front of it.
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    restart: unless-stopped
-    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
-    profiles: ["tunnel"]
-    depends_on:
-      api:
-        condition: service_healthy
 
   # Lets Grafana Cloud query this Postgres over an outbound tunnel, so the dashboards keep
   # working without exposing the database.
