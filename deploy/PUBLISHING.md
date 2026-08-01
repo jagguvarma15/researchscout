@@ -1,6 +1,6 @@
-# Publishing: the tunnel, Vercel, Auth0, Grafana Cloud
+# Publishing: Funnel, Auth0, Vercel, Grafana Cloud
 
-The compose stack in this directory runs the backend. This is everything outside it - the four
+The compose stack in this directory runs the backend. This is everything outside it - the three
 accounts that make the site public, in the order they need to happen. Each step ends with
 something you can check, because a half-configured deployment fails in ways that look like code
 bugs.
@@ -8,35 +8,51 @@ bugs.
 Nothing here can be scripted from the repository: every step needs credentials only you can
 create.
 
-## 1. The domain and the tunnel
+## 1. Publishing the API with Tailscale Funnel
 
-The backend runs at home. Cloudflare Tunnel publishes it without opening a port: `cloudflared`
-makes an outbound connection, Cloudflare terminates TLS, and the origin stays unreachable
-otherwise.
+The backend runs at home. Funnel gives it a public HTTPS hostname without a domain, without an
+inbound firewall rule, and without exposing this machine's address: the daemon holds an
+outbound connection and Tailscale relays to it.
 
-1. Put the domain on Cloudflare's nameservers (Cloudflare dashboard, Add a site).
-2. Zero Trust -> Networks -> Tunnels -> Create a tunnel (Cloudflared). Copy the token into
-   `CLOUDFLARE_TUNNEL_TOKEN` in `deploy/.env`. It is shown once.
-3. Add a public hostname on the tunnel: `api.<domain>` -> `HTTP` -> `api:8000`. The service
-   name resolves inside the compose network, which is why the API itself is only bound to
-   loopback on the host.
-4. Start it: `docker compose -f deploy/docker-compose.yml --profile tunnel up -d`.
+1. Install Tailscale on this Mac and sign in (`brew install --cask tailscale`).
+2. Enable HTTPS and Funnel for the tailnet: admin console -> DNS -> enable MagicDNS and HTTPS
+   certificates, then Access controls -> add `funnel` to the node attributes for this machine.
+   The admin console prompts for both the first time you run the command below.
+3. Publish the API, which compose binds to `127.0.0.1:8001`:
 
-Check: `curl https://api.<domain>/healthz` returns `{"status":"ok"}` from another network.
+   ```bash
+   tailscale funnel --bg 8001
+   tailscale funnel status        # prints the public https://<machine>.<tailnet>.ts.net
+   ```
 
-### Lock it to the frontend
+Check: `curl https://<machine>.<tailnet>.ts.net/healthz` from a phone off wifi returns
+`{"status":"ok"}`.
 
-Anyone who learns the hostname can otherwise call the API directly. Zero Trust -> Access ->
-Applications -> Add a self-hosted application for `api.<domain>`, with one policy:
-`Service Auth` -> `Service Token is <your token>`. Create the token under Access -> Service
-Auth, and put its two halves into Vercel as `CF_ACCESS_CLIENT_ID` and
-`CF_ACCESS_CLIENT_SECRET`; the proxy already sends them on every request.
+Funnel listens only on 443, 8443 and 10000, only over TLS, and its bandwidth is capped at a
+level Tailscale does not publish. For a personal research radar that is fine; it is not a CDN.
 
-Check: `curl https://api.<domain>/v1/papers` now returns 403, and the site still works.
+### Close the front door
 
-Also add one WAF rate-limiting rule (Security -> WAF -> Rate limiting rules) on
-`api.<domain>`: something like 300 requests per minute per IP. The application limiter is
-per-process and cannot see a flood before it arrives.
+That hostname is public, so anyone who learns it can call the API - including the routes open
+to signed-out visitors. One shared secret separates the site's own server from everyone else:
+
+```bash
+openssl rand -base64 36        # put it in deploy/.env as RS_SERVICE_TOKEN
+                               # and in Vercel as API_SERVICE_TOKEN
+```
+
+The frontend proxies every browser request server-side, so the token never reaches a browser.
+Requests without it get a 404 rather than a 403 - there is no reason to confirm to a scanner
+that an API lives there. `/healthz` stays open so the container healthcheck works.
+
+That token is also what makes rate limiting mean anything. Every request arrives from the same
+place (the site's server), so the socket address is useless for telling visitors apart; the
+proxy forwards each visitor's address, and the API believes it only because the token proved
+where the request came from.
+
+With no edge in front of the API any more, that in-process limiter is the only limiter. It is
+per process and resets on restart - adequate for this scale, and worth remembering before
+posting the link somewhere busy.
 
 ## 2. Auth0
 
@@ -44,8 +60,9 @@ per-process and cannot see a flood before it arrives.
    - Allowed Callback URLs: `https://<site>/callback`
    - Allowed Logout URLs: `https://<site>`
    - Note the domain, client id and client secret.
-2. APIs -> Create API. Identifier (the audience) is what the backend validates - use something
-   stable like `https://api.<domain>`. Set `RS_OIDC_AUDIENCE` to exactly that string, and
+2. APIs -> Create API. Identifier (the audience) is what the backend validates - it is a
+   name, not a URL that has to resolve, so something stable like `https://researchscout.api`
+   is fine. Set `RS_OIDC_AUDIENCE` to exactly that string, and
    `RS_OIDC_ISSUER` to `https://<tenant>/` (with the trailing slash).
 3. Applications -> Create -> Machine to Machine, authorized for the Auth0 Management API with
    the `delete:users` scope. Its credentials go in `RS_AUTH0_DOMAIN`,
@@ -53,7 +70,8 @@ per-process and cannot see a flood before it arrives.
    deletion refuses rather than deleting rows and leaving the login behind.
 4. Restart the backend so it picks up the issuer: `make deploy-down && make deploy-up`.
 
-Check: `curl https://api.<domain>/v1/me` returns 401, and `/v1/papers` still returns papers.
+Check: with the service token header, `/v1/me` returns 401 without a bearer token, and
+`/v1/papers` still returns papers.
 
 ## 3. Vercel
 
@@ -76,15 +94,14 @@ Project settings: root directory `apps/web`, framework Astro. Environment variab
 
 | Variable | Value |
 | --- | --- |
-| `API_URL` | `https://api.<domain>` |
+| `API_URL` | `https://<machine>.<tailnet>.ts.net` |
 | `SITE_URL` | `https://<site>` |
 | `AUTH0_DOMAIN` | `<tenant>.us.auth0.com` |
 | `AUTH0_CLIENT_ID` | the regular web application's id |
 | `AUTH0_CLIENT_SECRET` | its secret |
 | `AUTH0_AUDIENCE` | the API identifier from step 2 |
 | `SESSION_SECRET` | `openssl rand -base64 48` |
-| `CF_ACCESS_CLIENT_ID` | the service token id |
-| `CF_ACCESS_CLIENT_SECRET` | the service token secret |
+| `API_SERVICE_TOKEN` | the same value as `RS_SERVICE_TOKEN` in `deploy/.env` |
 
 Keep the Hobby plan's terms in view: non-commercial personal use only, and that includes
 donation links and advertising.
