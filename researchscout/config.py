@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     auth0_domain: str = ""
     auth0_mgmt_client_id: str = ""
     auth0_mgmt_client_secret: str = ""
+    # Signed-out callers get the extractive answer path only, on a tighter budget than an
+    # account: no model call, and a bucket keyed by address rather than by account.
+    chat_rate_limit_anonymous: int = 5
+    # Concurrent model generations, and how long a caller waits for a slot before being told
+    # the service is busy. The model shares this machine with Postgres and the API.
+    llm_max_concurrency: int = 2
+    llm_queue_timeout_seconds: float = 20.0
     # Chat rate limiting (in-process fixed window).
     # Web search fallback (arXiv + Semantic Scholar cards on not-found answers). Default
     # ON deliberately (a documented deviation like the guardrail): user-triggered, zero
