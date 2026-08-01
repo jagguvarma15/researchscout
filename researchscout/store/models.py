@@ -142,10 +142,29 @@ class TopicRow(Base):
     built_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class UserRow(Base):
+    """An account. Identity still comes from the token's ``sub``; this row is what the site
+    knows about it - the terms version accepted, the name to show, when it was last seen."""
+
+    __tablename__ = "users"
+
+    sub: Mapped[str] = mapped_column(String, primary_key=True)
+    email: Mapped[str | None] = mapped_column(String, nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    tos_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    tos_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class SavedPaperRow(Base):
     __tablename__ = "saved_papers"
 
-    user_sub: Mapped[str] = mapped_column(String, primary_key=True)
+    user_sub: Mapped[str] = mapped_column(
+        ForeignKey("users.sub", ondelete="CASCADE"), primary_key=True
+    )
     paper_id: Mapped[str] = mapped_column(
         ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
     )
@@ -155,7 +174,9 @@ class SavedPaperRow(Base):
 class UserInterestRow(Base):
     __tablename__ = "user_interests"
 
-    user_sub: Mapped[str] = mapped_column(String, primary_key=True)
+    user_sub: Mapped[str] = mapped_column(
+        ForeignKey("users.sub", ondelete="CASCADE"), primary_key=True
+    )
     interest: Mapped[str] = mapped_column(String, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -191,7 +212,7 @@ class EventRow(Base):
     __table_args__ = (Index("ix_events_paper_event", "paper_id", "event"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_sub: Mapped[str] = mapped_column(String)
+    user_sub: Mapped[str] = mapped_column(ForeignKey("users.sub", ondelete="CASCADE"))
     event: Mapped[str] = mapped_column(String)
     paper_id: Mapped[str] = mapped_column(ForeignKey("papers.id", ondelete="CASCADE"))
     # Impression position in the surfaced list; position-bias correction needs it later.
