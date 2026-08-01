@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from researchscout.schema import Signal, SignalType
 from researchscout.sources.base import HealthStatus, RawItem, Source, register
+from researchscout.useragent import default_headers
 
 _SEARCH = "https://api2.openreview.net/notes/search"
 _REQUEST_TIMEOUT = 30.0
@@ -104,6 +105,7 @@ class OpenReviewSource(Source):
                 resp = httpx.get(
                     _SEARCH,
                     params={"term": title, "type": "terms"},
+                    headers=default_headers(),
                     timeout=_REQUEST_TIMEOUT,
                     follow_redirects=True,
                 )
@@ -140,6 +142,7 @@ class OpenReviewSource(Source):
             resp = httpx.get(
                 _SEARCH,
                 params={"term": "attention", "type": "terms"},
+                headers=default_headers(),
                 timeout=_REQUEST_TIMEOUT,
                 follow_redirects=True,
             )
