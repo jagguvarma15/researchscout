@@ -169,7 +169,7 @@ def _boom_guardrail(*a: object, **k: object) -> bool:
 
 
 def test_chat_fast_mode_streams_extractive_answer(monkeypatch: pytest.MonkeyPatch) -> None:
-    from researchscout.answer import FastAnswer
+    from researchscout.answer import FastAnswer, FastEntry
 
     used = [_scored()]
     fast = FastAnswer(
@@ -181,6 +181,18 @@ def test_chat_fast_mode_streams_extractive_answer(monkeypatch: pytest.MonkeyPatc
         ),
         found=True,
         best_relevance=0.9,
+        entries=[
+            FastEntry(
+                id="arxiv:2401.00001",
+                title="T",
+                published_at=datetime(2024, 1, 1, tzinfo=UTC),
+                venue=None,
+                matches=["attention"],
+                keywords=["sparse attention"],
+                excerpt=None,
+                relevance=0.9,
+            )
+        ],
     )
     monkeypatch.setattr(chat_router, "answer_fast", lambda *a, **k: fast)
     monkeypatch.setattr(chat_router, "is_research_question", _boom_guardrail)
@@ -189,10 +201,18 @@ def test_chat_fast_mode_streams_extractive_answer(monkeypatch: pytest.MonkeyPatc
 
     assert response.status_code == 200
     events = _events(response.text)
-    assert [name for name, _ in events] == ["meta", "token", "done"]
+    assert [name for name, _ in events] == ["meta", "results", "token", "done"]
     assert events[0][1] == {"retrieved": 1, "mode": "fast"}
-    assert "[arxiv:2401.00001]" in events[1][1]["delta"]
-    assert events[2][1]["cited"] == ["arxiv:2401.00001"]
+    items = events[1][1]["items"]
+    assert len(items) == 1
+    assert items[0]["id"] == "arxiv:2401.00001"
+    assert items[0]["published_at"].startswith("2024-01-01T00:00:00")  # ISO 8601
+    assert items[0]["matches"] == ["attention"]
+    assert items[0]["keywords"] == ["sparse attention"]
+    assert items[0]["venue"] is None and items[0]["excerpt"] is None
+    assert items[0]["relevance"] == 0.9
+    assert "[arxiv:2401.00001]" in events[2][1]["delta"]
+    assert events[3][1]["cited"] == ["arxiv:2401.00001"]
 
 
 def test_chat_fast_mode_emits_notfound_below_the_floor(monkeypatch: pytest.MonkeyPatch) -> None:
