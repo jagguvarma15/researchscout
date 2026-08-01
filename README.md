@@ -100,6 +100,24 @@ Configuration is via environment variables (prefix `RS_`) or a local `.env` — 
 to `.env` to start. The canonical data model lives in `researchscout/schema.py`; the source
 registry stub is `config/sources.yaml`.
 
+## Deploying
+
+The public site is the frontend on Vercel plus this backend in Docker, published through an
+outbound Cloudflare tunnel - no inbound port. `deploy/README.md` is the runbook for the
+container stack (including moving the development database into it and the nightly backup);
+`deploy/PUBLISHING.md` is the account-by-account setup for the tunnel, Auth0, Vercel and
+Grafana Cloud.
+
+```bash
+cp deploy/.env.example deploy/.env   # fill in, then
+make deploy-build && make deploy-up  # postgres, migrations, api, scheduler on :8001
+make backup                          # nightly dump, keeps a week, verifies the file
+```
+
+The development stack is unchanged and independent: `make start` still runs everything as host
+processes against the repo-local Postgres, and with no identity provider configured the API and
+the site behave exactly as they always have, as a single built-in user.
+
 ## Data sources and attribution
 
 Every connector in `config/sources.yaml` carries an `attribution` block naming the upstream, its
