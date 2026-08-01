@@ -3,8 +3,9 @@
 Event order: ``meta`` (what retrieval found) -> ``token`` deltas -> ``done`` with the citation
 post-check, or ``error``. Guardrail refusals skip ``meta``: one ``token`` carrying the refusal
 text, then an empty ``done``. Fast mode (``mode: "fast"``) answers extractively with no LLM
-call and no guardrail: ``meta`` (with ``mode``) -> one ``token`` -> ``done`` when something
-matched, or ``meta`` -> ``notfound`` -> empty ``done`` below the relevance floor. The
+call and no guardrail: ``meta`` (with ``mode``) -> ``results`` (the structured entries the
+drawer renders as cards) -> one ``token`` carrying the same content as text -> ``done`` when
+something matched, or ``meta`` -> ``notfound`` -> empty ``done`` below the relevance floor. The
 generator is synchronous; Starlette drives it from a threadpool, and the request-scoped
 session stays open until the stream finishes.
 """
@@ -26,7 +27,7 @@ from researchscout.answer import Answer, StreamDelta, StreamMeta, answer_fast, a
 from researchscout.api.auth import User, require_user
 from researchscout.api.deps import get_embedder, get_llm, get_session
 from researchscout.api.ratelimit import check_rate_limit
-from researchscout.api.schemas import AskRequest, UsedPaper
+from researchscout.api.schemas import AskRequest, FastResultItem, UsedPaper
 from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
 from researchscout.guardrail import REFUSAL_TEXT, is_research_question
@@ -154,6 +155,17 @@ def _fast_events(session: Session, embedder: Embedder, body: AskRequest) -> Iter
         )
         yield _sse("done", {"cited": [], "hallucinated": [], "used": []})
     else:
+        # results precedes token so legacy consumers that only read token/done see
+        # identical content while the drawer renders the structured cards instead.
+        yield _sse(
+            "results",
+            {
+                "items": [
+                    FastResultItem.from_entry(entry).model_dump(mode="json")
+                    for entry in fast.entries
+                ]
+            },
+        )
         yield _sse("token", {"delta": result.text})
         yield _sse(
             "done",
