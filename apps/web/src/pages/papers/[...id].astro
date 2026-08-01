@@ -18,7 +18,7 @@ if (paper === null) {
 
 let saved = false;
 if (paper !== null) {
-  saved = ((await fetchSaved()) ?? []).some((p) => p.id === paper.id);
+  saved = ((await fetchSaved(Astro.locals.accessToken)) ?? []).some((p) => p.id === paper.id);
 }
 
 // Related papers ride the hybrid search with the title as the query — no new backend.
