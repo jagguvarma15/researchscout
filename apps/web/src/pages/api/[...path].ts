@@ -1,13 +1,18 @@
-// Same-origin proxy to the API. The API runs in local no-auth mode, so no credentials are
-// attached; the proxy still shields the API origin from the browser.
+// Same-origin proxy to the API. Credentials are attached here, on the server: the caller's
+// access token never reaches the browser, and the service-token headers that let this
+// deployment through the API's edge policy never appear in client code either.
 
 import type { APIRoute } from 'astro';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:8000';
 const SITE_URL = process.env.SITE_URL ?? 'http://localhost:4321';
+// Cloudflare Access service token for the API hostname. Unset locally, where the API is
+// reachable directly.
+const ACCESS_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID ?? '';
+const ACCESS_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET ?? '';
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-export const ALL: APIRoute = async ({ params, request, url }) => {
+export const ALL: APIRoute = async ({ locals, params, request, url }) => {
   if (MUTATING.has(request.method)) {
     const origin = request.headers.get('origin');
     const fetchSite = request.headers.get('sec-fetch-site');
@@ -20,6 +25,11 @@ export const ALL: APIRoute = async ({ params, request, url }) => {
   for (const name of ['accept', 'content-type']) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
+  }
+  if (locals.accessToken) headers.set('authorization', `Bearer ${locals.accessToken}`);
+  if (ACCESS_CLIENT_ID && ACCESS_CLIENT_SECRET) {
+    headers.set('cf-access-client-id', ACCESS_CLIENT_ID);
+    headers.set('cf-access-client-secret', ACCESS_CLIENT_SECRET);
   }
 
   const response = await fetch(`${API_URL}/v1/${params.path}${url.search}`, {
