@@ -117,7 +117,8 @@ gunzip -c ~/backups/researchscout/researchscout-20260801-033000.sql.gz |
 
 ## What this machine owes the site
 
-The backend is a laptop. When it sleeps, reboots or travels, the API is unreachable: the
-frontend keeps serving cached pages with a banner saying so, and the terms disclaim
-availability. That is the honest arrangement, not a bug to be surprised by later. Moving
-Postgres and the API to a small always-on host is the fix when it stops being acceptable.
+The backend is a desktop at home, which is a better arrangement than a laptop - it is not
+going to close its lid mid-request - but it is still one machine on one domestic connection.
+Reboots, updates, power cuts and outages all reach the site. The frontend keeps serving cached
+pages with a banner saying so, and the terms disclaim availability. Moving Postgres and the API
+to a hosted machine is the fix when that stops being acceptable.
