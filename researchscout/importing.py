@@ -27,6 +27,7 @@ from researchscout.store.saved import save_paper
 from researchscout.stream.broker import KafkaBroker, StreamTopics
 from researchscout.stream.envelope import Envelope, encode
 from researchscout.stream.parse import clean_text, strip_structural_tex
+from researchscout.useragent import default_headers
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ def fetch_arxiv_entry(arxiv_id: str, *, timeout: float = _TIMEOUT) -> dict[str, 
     resp = httpx.get(
         _API_URL,
         params={"id_list": arxiv_id, "max_results": "1"},
+        headers=default_headers(),
         timeout=timeout,
         follow_redirects=True,
     )
