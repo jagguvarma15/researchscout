@@ -100,6 +100,17 @@ Configuration is via environment variables (prefix `RS_`) or a local `.env` — 
 to `.env` to start. The canonical data model lives in `researchscout/schema.py`; the source
 registry stub is `config/sources.yaml`.
 
+## Data sources and attribution
+
+Every connector in `config/sources.yaml` carries an `attribution` block naming the upstream, its
+terms, the license its data arrives under, and what this app takes from it. `GET /v1/sources`
+serves those blocks (never the `api_key`/`token`/`mailto` beside them) and the web `/about` page
+renders them alongside the copyright, API-usage and privacy notices. Adding a source means
+adding its attribution: `tests/test_sources.py` fails otherwise.
+
+arXiv metadata is CC0; papers stay under their authors' licenses and are never redistributed
+here. Semantic Scholar's API license requires the visible credit that `/about` carries.
+
 ## HTTP API
 
 The `api` extra adds a FastAPI service over the same core the CLI uses (the dev group already
@@ -111,8 +122,8 @@ uv run scout serve api    # http://127.0.0.1:8000, OpenAPI docs at /docs
 
 Endpoints: `GET /healthz`, `GET /v1/papers` (recency feed; `?q=` switches to semantic ranking),
 `GET /v1/papers/{id}`, `GET /v1/topics` (emerging topics), `GET /v1/keywords` (corpus keyword
-dictionary with paper counts), `GET /v1/me/feed` (personalized), and `POST /v1/ask` (grounded,
-cited answer). With `RS_OIDC_ISSUER` unset (the default) the API
+dictionary with paper counts), `GET /v1/sources` (the registry with its attribution),
+`GET /v1/me/feed` (personalized), and `POST /v1/ask` (grounded, cited answer). With `RS_OIDC_ISSUER` unset (the default) the API
 runs in local no-auth mode as a built-in user; set an issuer to require OIDC Bearer tokens.
 The LLM defaults to local Ollama; point `RS_LLM_BASE_URL` / `RS_LLM_MODEL` / `RS_LLM_API_KEY`
 at any OpenAI-compatible provider to swap it.
