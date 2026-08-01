@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, ClassVar, Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from researchscout.config import get_settings
 from researchscout.schema import Paper, Signal
@@ -28,6 +28,29 @@ class RawItem(BaseModel):
     source: str
     fetched_at: datetime
     payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceAttribution(BaseModel):
+    """Where a source's data comes from and what its terms allow.
+
+    Declared per source in ``config/sources.yaml`` next to ``enabled``, so a connector
+    cannot be added without saying who it credits; the /about page reads it back.
+    """
+
+    name: str
+    homepage: str
+    terms: str
+    data_license: str
+    provides: str
+
+
+class SourceDescription(BaseModel):
+    """A registered source with its config state and attribution (None when undeclared)."""
+
+    name: str
+    kind: SourceKind
+    enabled: bool
+    attribution: SourceAttribution | None = None
 
 
 class Source(ABC):
@@ -87,6 +110,36 @@ def get_source(name: str) -> Source:
     if name not in _REGISTRY:
         raise KeyError(f"unknown source {name!r}; registered: {sorted(_REGISTRY)}")
     return _REGISTRY[name]()
+
+
+def describe_sources() -> list[SourceDescription]:
+    """Every registered source with its enabled state and attribution, sorted by name.
+
+    Reads config directly rather than instantiating connectors: this feeds an HTTP route
+    and must not touch the network or a database. Malformed attribution reads as missing
+    so the page shows the gap instead of failing the whole listing.
+    """
+    config = _load_config()
+    out: list[SourceDescription] = []
+    for cls in registered_sources():
+        cfg = config.get(cls.name, {})
+        cfg = cfg if isinstance(cfg, dict) else {}
+        block = cfg.get("attribution")
+        attribution = None
+        if isinstance(block, dict):
+            try:
+                attribution = SourceAttribution.model_validate(block)
+            except ValidationError:
+                attribution = None
+        out.append(
+            SourceDescription(
+                name=cls.name,
+                kind=cls.kind,
+                enabled=bool(cfg.get("enabled", False)),
+                attribution=attribution,
+            )
+        )
+    return out
 
 
 def enabled_sources(kind: SourceKind | None = None) -> list[Source]:
