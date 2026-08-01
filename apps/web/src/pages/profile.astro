@@ -1,25 +1,58 @@
 ---
+import AccountSettings from '../components/AccountSettings.svelte';
 import InterestsEditor from '../components/InterestsEditor.svelte';
 import Base from '../layouts/Base.astro';
-import { fetchInterests } from '../lib/api';
+import { fetchAccount, fetchInterests } from '../lib/api';
 
 const user = Astro.locals.user;
-const interests = await fetchInterests();
+const token = Astro.locals.accessToken;
+const interests = user ? await fetchInterests(token) : null;
+const account = user ? await fetchAccount(token) : null;
+// Deleting an account only means anything when there is an identity provider behind it; a
+// local install has one built-in user that other rows point at.
+const canDelete = account !== null && account.sub !== 'local';
 ---
 
 <Base title="Profile">
   <h1 class="page-title">Profile</h1>
 
-  <p class="who">
-    Browsing as <strong>{user.username}</strong>.
-  </p>
-  <section class="interests">
-    <h2>Research interests</h2>
-    <p class="blurb">
-      Topics you care about — up to 20, each a short phrase. Changes save as you go.
-    </p>
-    <InterestsEditor client:load initial={interests} />
-  </section>
+  {
+    user === null ? (
+      <p class="who">
+        <a href="/login?next=/profile">Sign in</a> to keep interests, a reading list and a feed
+        that learns what you care about.
+      </p>
+    ) : (
+      <>
+        <p class="who">
+          Browsing as <strong>{account?.display_name || user.username}</strong>
+          {account?.email && <span class="email">{account.email}</span>}
+        </p>
+
+        <section class="panel">
+          <h2>Research interests</h2>
+          <p class="blurb">
+            Topics you care about - up to 20, each a short phrase. Changes save as you go.
+          </p>
+          <InterestsEditor client:load initial={interests} />
+        </section>
+
+        <section class="panel">
+          <h2>Account</h2>
+          <p class="blurb">
+            Your display name, a copy of everything stored about you, and the way out. What each
+            of these means is spelled out in the <a href="/privacy">privacy notice</a>.
+          </p>
+          <AccountSettings
+            client:load
+            displayName={account?.display_name ?? ''}
+            termsVersion={account?.terms_accepted_version ?? null}
+            canDelete={canDelete}
+          />
+        </section>
+      </>
+    )
+  }
 </Base>
 
 <style>
@@ -32,10 +65,13 @@ const interests = await fetchInterests();
     color: var(--ink);
     font-weight: 600;
   }
-  .interests {
+  .email {
+    margin-left: 0.5rem;
+  }
+  .panel {
     margin-top: var(--space-6);
   }
-  .interests h2 {
+  .panel h2 {
     font-size: var(--text-lg);
     letter-spacing: -0.01em;
     margin: 0 0 0.35rem;
