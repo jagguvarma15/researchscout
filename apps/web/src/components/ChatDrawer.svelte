@@ -167,13 +167,14 @@
     // fallback rendering and one-click import flow as the notfound path.
     busy = true;
     controller = new AbortController();
-    const current: Message = {
+    // $state for the same reason as in ask(): the retained reference must be the proxy.
+    const current: Message = $state({
       role: 'assistant',
       text: '',
       phase: 'searching',
       question: query,
       webBusy: true,
-    };
+    });
     messages.push(current);
     try {
       const response = await fetch(`/api/search/web?q=${encodeURIComponent(query)}`, {
@@ -218,7 +219,17 @@
   async function ask(question: string, mode: 'fast' | 'llm') {
     busy = true;
     controller = new AbortController();
-    const current: Message = { role: 'assistant', text: '', phase: 'searching', mode, question };
+    // The message MUST be created with $state: a plain object pushed into a $state array
+    // gets proxied on insert, and mutations through the retained raw reference fire no
+    // signals and are invisible on later proxy reads (svelte caches per-property sources
+    // on first read). $state here makes this local reference the live proxy itself.
+    const current: Message = $state({
+      role: 'assistant',
+      text: '',
+      phase: 'searching',
+      mode,
+      question,
+    });
     if (mode === 'fast' && dictionary) {
       // The loader line names the dictionary keywords the question hit.
       current.matched = loaderMatches(question, dictionary);
