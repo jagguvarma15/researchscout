@@ -2,19 +2,24 @@
 
 The public site is two halves: the Astro frontend on Vercel, and this - the API, the database
 and the refresh loop - running in Docker on the machine you are reading this on, published
-through an outbound Cloudflare tunnel. No inbound port is opened.
+through Tailscale Funnel. No inbound port is opened and this machine's address stays hidden.
 
 ```
-visitor -> researchscout.<domain>   Vercel, Astro SSR, holds the session cookie
-              |  server-side proxy attaches the access token
+visitor -> researchscout.vercel.app   Vercel, Astro SSR, holds the session cookie
+              |  server-side proxy attaches the account token, the service
+              |  token, and the visitor's address
               v
-           api.<domain>             Cloudflare: TLS, WAF rate limit, Access service token
-              |  outbound tunnel only
+           <machine>.<tailnet>.ts.net Tailscale Funnel: TLS, outbound only
+              |
               v
-           cloudflared -> api:8000  this compose stack
-                          postgres, scheduler, [stream], [pdc-agent]
-                          Ollama stays on the host
+           api:8001                   this compose stack
+                                      postgres, scheduler, [stream], [pdc-agent]
+                                      Ollama stays on the host
 ```
+
+The API is open on localhost and closed to everyone else by one shared secret
+(`RS_SERVICE_TOKEN`); requests without it get a 404. Setting up Funnel, the token and the rest
+is `deploy/PUBLISHING.md`.
 
 ## Before the first run
 
@@ -44,8 +49,8 @@ Optional profiles:
 
 ```bash
 make deploy-up-stream       # adds kafka and the streaming worker
-docker compose -f deploy/docker-compose.yml --profile tunnel up -d      # publishes the API
 docker compose -f deploy/docker-compose.yml --profile monitoring up -d  # Grafana Cloud PDC
+tailscale funnel --bg 8001  # publishes the API (on the host, not in compose)
 ```
 
 ## Moving the existing data in
