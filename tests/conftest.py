@@ -37,10 +37,13 @@ def session(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
             text(
                 "TRUNCATE papers, paper_external_ids, raw_items, ingest_state, ask_metrics, "
                 "paper_embeddings, paper_chunks, signals, digests, topics, saved_papers, "
-                "user_interests, citation_edges, citation_fetches, events, pipeline_lineage "
-                "RESTART IDENTITY CASCADE"
+                "user_interests, citation_edges, citation_fetches, events, pipeline_lineage, "
+                "users RESTART IDENTITY CASCADE"
             )
         )
+        # Migration 0019 guarantees the built-in local user exists; truncating users removes
+        # it, so restore it here or every no-auth write hits the new foreign key.
+        s.execute(text("INSERT INTO users (sub) VALUES ('local')"))
         # Commit before yielding: code under test opens its own session, and an uncommitted
         # TRUNCATE holds ACCESS EXCLUSIVE on these tables, so that session would block forever.
         s.commit()
