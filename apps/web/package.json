@@ -10,6 +10,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
+    "test": "vitest run",
     "astro": "astro"
   },
   "dependencies": {
@@ -28,7 +29,8 @@
     "@types/katex": "^0.16.8",
     "@types/node": "^26.1.0",
     "astro-icon": "^1.1.5",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   },
   "pnpm": {
     "overrides": {
