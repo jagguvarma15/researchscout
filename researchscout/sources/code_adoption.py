@@ -22,6 +22,7 @@ from sqlalchemy import select
 
 from researchscout.schema import Signal, SignalType
 from researchscout.sources.base import HealthStatus, RawItem, Source, register, source_config
+from researchscout.useragent import default_headers
 
 _GH_SEARCH = "https://api.github.com/search/repositories"
 _REQUEST_TIMEOUT = 30.0
@@ -41,7 +42,7 @@ class GitHubCodeAdoptionSource(Source):
         headers = {"Accept": "application/vnd.github+json"}
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
-        return headers
+        return default_headers(headers)
 
     def _target_papers(self, offset: int, limit: int) -> list[tuple[str, str]]:
         """(canonical_id, arxiv_id) for stored papers with an arXiv external id — the match set."""
