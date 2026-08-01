@@ -22,7 +22,7 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
         <a href="#data">Data sources</a>
         <a href="#licensing">Copyright</a>
         <a href="#apis">API use</a>
-        <a href="#privacy">Privacy</a>
+        <a href="#local">What stays local</a>
       </nav>
     </header>
 
@@ -189,7 +189,7 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
       </ul>
     </section>
 
-    <section class="block" id="privacy">
+    <section class="block" id="local">
       <h2>What stays on this machine</h2>
       <ul class="facts">
         <li>
@@ -210,6 +210,10 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
           library does not have yet.
         </li>
       </ul>
+      <p class="after-list">
+        The <a href="/privacy">privacy notice</a> says the same thing in full, including what an
+        account stores and how to delete it.
+      </p>
     </section>
 
     <section class="block">
@@ -257,23 +261,27 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
     font-size: var(--text-md);
     line-height: 1.6;
   }
+  /* Inline text links rather than chips: hairline separators are drawn in CSS so no
+     punctuation characters sit between them. */
   .jump {
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 0.4rem;
-    margin-top: 1.1rem;
+    gap: 0.5rem 0.9rem;
+    margin-top: 1rem;
+    font-size: var(--text-sm);
   }
   .jump a {
-    padding: 0.2rem 0.7rem;
-    border-radius: var(--radius-full);
-    background: var(--surface-2);
     color: var(--muted);
-    font-size: var(--text-xs);
     text-decoration: none;
+  }
+  .jump a + a {
+    padding-left: 0.9rem;
+    border-left: 1px solid var(--line);
   }
   .jump a:hover {
     color: var(--ink);
+    text-decoration: underline;
   }
   .block {
     margin-bottom: var(--space-6);
@@ -298,6 +306,9 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
     color: var(--muted);
     font-size: var(--text-sm);
     text-align: center;
+  }
+  .after-list {
+    margin-top: 0.9rem;
   }
   .steps,
   .facts {
