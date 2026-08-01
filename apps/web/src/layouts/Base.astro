@@ -7,9 +7,11 @@ import { Icon } from 'astro-icon/components';
 import AvatarMenu from '../components/AvatarMenu.svelte';
 import ChatDrawer from '../components/ChatDrawer.svelte';
 import CommandPalette from '../components/CommandPalette.svelte';
+import StaleBanner from '../components/StaleBanner.svelte';
 import TermsGate from '../components/TermsGate.svelte';
 import ThemeToggle from '../components/ThemeToggle.svelte';
 import { fetchAccount } from '../lib/api';
+import { THEME_SCRIPT } from '../lib/theme-script.js';
 
 interface Props {
   title?: string;
@@ -23,6 +25,9 @@ const user = Astro.locals.user;
 // browser) means the dialog is either in the first paint or absent - never a flash.
 const account = user ? await fetchAccount(Astro.locals.accessToken) : null;
 const termsOutstanding = account !== null && !account.terms_accepted;
+// When this page was built. A public page can be served from the edge cache long after, and
+// the banner below is how the reader finds out.
+const renderedAt = new Date().toISOString();
 ---
 
 <!doctype html>
@@ -35,18 +40,10 @@ const termsOutstanding = account !== null && !account.terms_accepted;
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 64x64" />
     <title>{pageTitle}</title>
-    <script is:inline>
-      // Theme before first paint: stored choice wins, otherwise the OS preference.
-      const stored = localStorage.getItem('rs-theme');
-      document.documentElement.dataset.theme =
-        stored === 'dark' || stored === 'light'
-          ? stored
-          : window.matchMedia('(prefers-color-scheme: dark)').matches
-            ? 'dark'
-            : 'light';
-    </script>
+    <script is:inline set:html={THEME_SCRIPT} />
   </head>
   <body>
+    <StaleBanner client:idle renderedAt={renderedAt} />
     <header class="site-header">
       <div class="site-header-inner container">
         <a class="brand" href="/">
