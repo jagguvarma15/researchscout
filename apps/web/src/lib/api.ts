@@ -51,6 +51,21 @@ export interface PaperPage {
 export const PAGE_SIZE = 20;
 
 const API_URL = process.env.API_URL ?? 'http://localhost:8000';
+// Cloudflare Access service token for the API hostname: unset locally, required once the API
+// sits behind the edge. Server-side only - these never reach a browser.
+const ACCESS_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID ?? '';
+const ACCESS_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET ?? '';
+
+/** Headers for a server-side API call: the caller's token, plus the edge service token. */
+export function apiHeaders(token?: string | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (token) headers.authorization = `Bearer ${token}`;
+  if (ACCESS_CLIENT_ID && ACCESS_CLIENT_SECRET) {
+    headers['cf-access-client-id'] = ACCESS_CLIENT_ID;
+    headers['cf-access-client-secret'] = ACCESS_CLIENT_SECRET;
+  }
+  return headers;
+}
 
 export async function fetchPapers(params: FeedParams): Promise<PaperPage | null> {
   const search = new URLSearchParams({ limit: String(PAGE_SIZE) });
@@ -69,7 +84,7 @@ export async function fetchPapers(params: FeedParams): Promise<PaperPage | null>
     search.set('offset', String((params.page - 1) * PAGE_SIZE));
   }
   try {
-    const response = await fetch(`${API_URL}/v1/papers?${search}`);
+    const response = await fetch(`${API_URL}/v1/papers?${search}`, { headers: apiHeaders() });
     if (!response.ok) return null;
     const body = (await response.json()) as { items: PaperSummary[]; total: number | null };
     return { items: body.items, total: body.total };
@@ -78,9 +93,9 @@ export async function fetchPapers(params: FeedParams): Promise<PaperPage | null>
   }
 }
 
-export async function fetchSaved(): Promise<PaperSummary[] | null> {
+export async function fetchSaved(token?: string | null): Promise<PaperSummary[] | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/me/saved`);
+    const response = await fetch(`${API_URL}/v1/me/saved`, { headers: apiHeaders(token) });
     if (!response.ok) return null;
     const body = (await response.json()) as { items: PaperSummary[] };
     return body.items;
@@ -89,9 +104,9 @@ export async function fetchSaved(): Promise<PaperSummary[] | null> {
   }
 }
 
-export async function fetchForYou(): Promise<PaperSummary[] | null> {
+export async function fetchForYou(token?: string | null): Promise<PaperSummary[] | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/me/feed`);
+    const response = await fetch(`${API_URL}/v1/me/feed`, { headers: apiHeaders(token) });
     if (!response.ok) return null;
     const body = (await response.json()) as { items: PaperSummary[] };
     return body.items;
@@ -100,9 +115,9 @@ export async function fetchForYou(): Promise<PaperSummary[] | null> {
   }
 }
 
-export async function fetchInterests(): Promise<string[] | null> {
+export async function fetchInterests(token?: string | null): Promise<string[] | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/me/interests`);
+    const response = await fetch(`${API_URL}/v1/me/interests`, { headers: apiHeaders(token) });
     if (!response.ok) return null;
     const body = (await response.json()) as { interests: string[] };
     return body.interests;
@@ -113,7 +128,7 @@ export async function fetchInterests(): Promise<string[] | null> {
 
 export async function fetchPaper(id: string): Promise<PaperSummary | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/papers/${id}`);
+    const response = await fetch(`${API_URL}/v1/papers/${id}`, { headers: apiHeaders() });
     if (!response.ok) return null;
     return (await response.json()) as PaperSummary;
   } catch {
@@ -136,10 +151,32 @@ export interface SourceInfo {
 
 export async function fetchSources(): Promise<SourceInfo[] | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/sources`);
+    const response = await fetch(`${API_URL}/v1/sources`, { headers: apiHeaders() });
     if (!response.ok) return null;
     const body = (await response.json()) as { items: SourceInfo[] };
     return body.items;
+  } catch {
+    return null;
+  }
+}
+
+// The signed-in account and whether it still owes a terms acceptance. The server decides
+// which version is current; the site just reports it back when the visitor accepts.
+export interface Account {
+  sub: string;
+  username: string;
+  email: string | null;
+  display_name: string | null;
+  terms_required: string;
+  terms_accepted_version: string | null;
+  terms_accepted: boolean;
+}
+
+export async function fetchAccount(token?: string | null): Promise<Account | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/me`, { headers: apiHeaders(token) });
+    if (!response.ok) return null;
+    return (await response.json()) as Account;
   } catch {
     return null;
   }
@@ -163,7 +200,7 @@ export interface DigestDetail extends DigestSummary {
 
 export async function fetchDigests(): Promise<DigestSummary[] | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/digests`);
+    const response = await fetch(`${API_URL}/v1/digests`, { headers: apiHeaders() });
     if (!response.ok) return null;
     const body = (await response.json()) as { items: DigestSummary[] };
     return body.items;
@@ -174,7 +211,7 @@ export async function fetchDigests(): Promise<DigestSummary[] | null> {
 
 export async function fetchDigest(slug: string): Promise<DigestDetail | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/digests/${slug}`);
+    const response = await fetch(`${API_URL}/v1/digests/${slug}`, { headers: apiHeaders() });
     if (!response.ok) return null;
     return (await response.json()) as DigestDetail;
   } catch {
@@ -200,7 +237,7 @@ export interface TopicDetail {
 
 export async function fetchTopics(): Promise<TopicDetail[] | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/topics`);
+    const response = await fetch(`${API_URL}/v1/topics`, { headers: apiHeaders() });
     if (!response.ok) return null;
     const body = (await response.json()) as { items: TopicDetail[] };
     return body.items;
