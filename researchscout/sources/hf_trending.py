@@ -23,6 +23,7 @@ from sqlalchemy import select
 
 from researchscout.schema import Signal, SignalType, normalize_arxiv_id
 from researchscout.sources.base import HealthStatus, RawItem, Source, register
+from researchscout.useragent import default_headers
 
 _HF_DAILY = "https://huggingface.co/api/daily_papers"
 _HF_PAPER = "https://huggingface.co/api/papers/{arxiv_id}"
@@ -53,7 +54,12 @@ class HuggingFaceTrendingSource(Source):
         return {value: paper_id for value, paper_id in rows}
 
     def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
-        resp = httpx.get(_HF_DAILY, timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+        resp = httpx.get(
+            _HF_DAILY,
+            headers=default_headers(),
+            timeout=_REQUEST_TIMEOUT,
+            follow_redirects=True,
+        )
         resp.raise_for_status()
         entries: Any = resp.json()
         fetched_at = datetime.now(UTC)
@@ -111,6 +117,7 @@ class HuggingFaceTrendingSource(Source):
             try:
                 resp = httpx.get(
                     _HF_PAPER.format(arxiv_id=arxiv_id),
+                    headers=default_headers(),
                     timeout=_REQUEST_TIMEOUT,
                     follow_redirects=True,
                 )
@@ -172,7 +179,12 @@ class HuggingFaceTrendingSource(Source):
 
     def health(self) -> HealthStatus:
         try:
-            resp = httpx.get(_HF_DAILY, timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+            resp = httpx.get(
+                _HF_DAILY,
+                headers=default_headers(),
+                timeout=_REQUEST_TIMEOUT,
+                follow_redirects=True,
+            )
         except httpx.HTTPError:
             return "error"
         if resp.status_code == 429:
