@@ -217,15 +217,45 @@ def ask(
         typer.secho(f"Dropped (not retrieved): {dropped}", fg=typer.colors.YELLOW)
 
 
+def _warm_models() -> None:
+    """Load the retrieval models before serving so no request pays the lazy loads.
+
+    The first ask otherwise stacks the embedder weights, the sklearn import, and (when
+    reranking is on) the cross-encoder into one multi-second stall that reads as the chat
+    hanging. Everything touched here is a process-wide singleton, so the serving process
+    reuses exactly these instances.
+    """
+    import time
+
+    from researchscout.config import get_settings
+    from researchscout.embed.factory import default_embedder
+
+    started = time.perf_counter()
+    default_embedder().embed_query("warmup")
+    from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS  # noqa: F401
+
+    if get_settings().rerank_enabled:
+        from researchscout.rerank import get_reranker
+
+        get_reranker()
+    typer.echo(f"models warm in {time.perf_counter() - started:.1f}s")
+
+
 @serve_app.command("api")
 def serve_api(
     host: Annotated[str, typer.Option(help="Bind address.")] = "127.0.0.1",
     port: Annotated[int, typer.Option(help="Port.")] = 8000,
     reload: Annotated[bool, typer.Option(help="Auto-reload on code changes (dev).")] = False,
 ) -> None:
-    """Run the HTTP API with uvicorn (requires the `api` extra)."""
+    """Run the HTTP API with uvicorn (requires the `api` extra).
+
+    Models are warmed first; under ``--reload`` uvicorn re-imports the app in a child
+    process, so dev runs still pay the loads there.
+    """
     import uvicorn
 
+    if not reload:
+        _warm_models()
     uvicorn.run("researchscout.api.main:app", host=host, port=port, reload=reload)
 
 
