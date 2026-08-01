@@ -26,10 +26,13 @@
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
     "@iconify-json/lucide": "^1.2.116",
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@types/katex": "^0.16.8",
     "@types/node": "^26.1.0",
     "astro-icon": "^1.1.5",
+    "jsdom": "^30.0.1",
     "typescript": "^6.0.3",
+    "vite": "^8.2.0",
     "vitest": "^4.1.10"
   },
   "pnpm": {
