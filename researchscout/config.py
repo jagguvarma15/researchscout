@@ -66,10 +66,19 @@ class Settings(BaseSettings):
     score_velocity_weight: float = 2.0
     score_acceleration_weight: float = 1.0
     # Optional cross-encoder reranking of the top retrieval candidates (see researchscout.rerank).
-    # The fast-answer found/not-found floor. With reranking on this compares against the
-    # cross-encoder sigmoid (clear positives 0.7-0.99, hard negatives under 0.1); with it
-    # off, against cosine similarity (on-topic pairs roughly 0.3 and up on bge).
+    # The fast-answer found/not-found floor against the cross-encoder sigmoid (clear
+    # positives 0.7-0.99, hard negatives under 0.1). When the evidence is cosine-only,
+    # ask_min_similarity below applies instead.
     ask_min_relevance: float = 0.30
+    # The same floor for the cosine scale (rerank off or skipped): bge-small compresses
+    # similarities, so off-topic questions still reach about 0.62 while on-topic hits
+    # start around 0.76 (calibrated live 2026-07-31); 0.68 splits the gap with margin.
+    ask_min_similarity: float = 0.68
+    # Run the cross-encoder inside fast extractive answers. The pass costs about 600ms
+    # warm and seconds under memory pressure - most of a fast answer's latency - while
+    # cosine plus the calibrated floor keeps the found gate honest. Off skips it for
+    # fast mode only; LLM answers keep whatever RS_RERANK_ENABLED says.
+    ask_fast_rerank: bool = True
     rerank_enabled: bool = False
     rerank_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     rerank_top_n: int = 40
