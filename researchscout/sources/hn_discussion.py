@@ -19,6 +19,7 @@ from sqlalchemy import select
 
 from researchscout.schema import Signal, SignalType, normalize_arxiv_id
 from researchscout.sources.base import HealthStatus, RawItem, Source, register
+from researchscout.useragent import default_headers
 
 _HN_SEARCH = "https://hn.algolia.com/api/v1/search_by_date"
 _REQUEST_TIMEOUT = 30.0
@@ -63,6 +64,7 @@ class HackerNewsDiscussionSource(Source):
                     "hitsPerPage": _PAGE_SIZE,
                     "page": page,
                 },
+                headers=default_headers(),
                 timeout=_REQUEST_TIMEOUT,
                 follow_redirects=True,
             )
@@ -128,6 +130,7 @@ class HackerNewsDiscussionSource(Source):
             resp = httpx.get(
                 _HN_SEARCH,
                 params={"query": "arxiv.org", "tags": "story", "hitsPerPage": 1},
+                headers=default_headers(),
                 timeout=_REQUEST_TIMEOUT,
                 follow_redirects=True,
             )
