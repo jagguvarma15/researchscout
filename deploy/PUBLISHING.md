@@ -75,20 +75,9 @@ Check: with the service token header, `/v1/me` returns 401 without a bearer toke
 
 ## 3. Vercel
 
-The frontend is `apps/web`. It needs the Vercel adapter instead of the Node one - a one-line
-change kept out of the repository until you are ready, because the Node adapter is what the
-local stack runs on:
-
-```js
-// apps/web/astro.config.mjs
-import vercel from '@astrojs/vercel';
-// adapter: node({ mode: 'standalone' })  ->
-adapter: vercel(),
-```
-
-```bash
-cd apps/web && pnpm add @astrojs/vercel
-```
+The frontend is `apps/web`. Nothing to change before deploying: the config picks its adapter
+from the environment, so Vercel's builds (where `VERCEL=1` is set) get the serverless adapter
+and everything local keeps the standalone Node server.
 
 Project settings: root directory `apps/web`, framework Astro. Environment variables:
 
