@@ -244,7 +244,10 @@ const termsOutstanding = account !== null && !account.terms_accepted;
     display: flex;
     flex-wrap: wrap;
     gap: 1rem;
+    /* Clear of the chat button, which is fixed in the bottom right corner and would otherwise
+       sit on top of the last link. */
     margin-left: auto;
+    margin-right: 4.5rem;
     text-align: right;
   }
   .footer-legal a {
