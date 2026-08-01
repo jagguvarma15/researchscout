@@ -42,6 +42,7 @@
     <div class="menu" role="menu" aria-label="Account">
       <span class="menu-user" role="presentation">{username}</span>
       <a role="menuitem" href="/profile">Profile settings</a>
+      <a role="menuitem" href="/logout">Sign out</a>
     </div>
   {/if}
 </div>
