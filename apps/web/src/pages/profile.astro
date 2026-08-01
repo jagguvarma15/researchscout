@@ -14,48 +14,72 @@ const canDelete = account !== null && account.sub !== 'local';
 ---
 
 <Base title="Profile">
-  <h1 class="page-title">Profile</h1>
-
-  {
-    user === null ? (
-      <p class="who">
-        <a href="/login?next=/profile">Sign in</a> to keep interests, a reading list and a feed
-        that learns what you care about.
-      </p>
-    ) : (
-      <>
-        <p class="who">
-          Browsing as <strong>{account?.display_name || user.username}</strong>
-          {account?.email && <span class="email">{account.email}</span>}
-        </p>
-
-        <section class="panel">
-          <h2>Research interests</h2>
-          <p class="blurb">
-            Topics you care about - up to 20, each a short phrase. Changes save as you go.
+  <div class="profile">
+    <header class="hero">
+      <h1 class="page-title">Profile</h1>
+      {
+        user === null ? (
+          <p class="who">
+            <a href="/login?next=/profile">Sign in</a> to keep interests, a reading list and a
+            feed that learns what you care about.
           </p>
-          <InterestsEditor client:load initial={interests} />
-        </section>
-
-        <section class="panel">
-          <h2>Account</h2>
-          <p class="blurb">
-            Your display name, a copy of everything stored about you, and the way out. What each
-            of these means is spelled out in the <a href="/privacy">privacy notice</a>.
+        ) : (
+          <p class="who">
+            Browsing as <strong>{account?.display_name || user.username}</strong>
+            {account?.email && <span class="email">{account.email}</span>}
           </p>
-          <AccountSettings
-            client:load
-            displayName={account?.display_name ?? ''}
-            termsVersion={account?.terms_accepted_version ?? null}
-            canDelete={canDelete}
-          />
-        </section>
-      </>
-    )
-  }
+        )
+      }
+    </header>
+
+    {
+      user !== null && (
+        <>
+          <section class="panel">
+            <h2>Research interests</h2>
+            <p class="blurb">
+              Topics you care about - up to 20, each a short phrase. Changes save as you go.
+            </p>
+            <div class="panel-body">
+              <InterestsEditor client:load initial={interests} />
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Account</h2>
+            <p class="blurb">
+              Your display name, a copy of everything stored about you, and the way out. What
+              each of these means is spelled out in the <a href="/privacy">privacy notice</a>.
+            </p>
+            <div class="panel-body">
+              <AccountSettings
+                client:load
+                displayName={account?.display_name ?? ''}
+                termsVersion={account?.terms_accepted_version ?? null}
+                canDelete={canDelete}
+              />
+            </div>
+          </section>
+        </>
+      )
+    }
+  </div>
 </Base>
 
 <style>
+  /* Centered column, like the about and legal pages: headings and prose center, the controls
+     sit in a comfortable measure rather than stretching across the window. */
+  .profile {
+    max-width: 46rem;
+    margin: 0 auto;
+  }
+  .hero {
+    text-align: center;
+    margin-bottom: var(--space-6);
+  }
+  .hero .page-title {
+    margin-bottom: 0.5rem;
+  }
   .who {
     margin: 0;
     color: var(--muted);
@@ -69,7 +93,10 @@ const canDelete = account !== null && account.sub !== 'local';
     margin-left: 0.5rem;
   }
   .panel {
-    margin-top: var(--space-6);
+    margin-bottom: var(--space-6);
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--line);
+    text-align: center;
   }
   .panel h2 {
     font-size: var(--text-lg);
@@ -77,9 +104,17 @@ const canDelete = account !== null && account.sub !== 'local';
     margin: 0 0 0.35rem;
   }
   .blurb {
-    max-width: 70ch;
-    margin: 0 0 1.1rem;
+    max-width: 62ch;
+    margin: 0 auto 1.2rem;
     color: var(--muted);
     font-size: 0.9rem;
+    line-height: 1.6;
+  }
+  /* The controls themselves read left to right; only the block is centered. */
+  .panel-body {
+    display: inline-block;
+    width: 100%;
+    max-width: 34rem;
+    text-align: left;
   }
 </style>
