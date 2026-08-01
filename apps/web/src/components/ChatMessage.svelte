@@ -27,6 +27,7 @@
   function statusLabel(current: Message): string | null {
     if (current.role !== 'assistant' || current.text || current.results) return null;
     if (current.phase === 'searching') {
+      if (current.webBusy) return 'Searching the web';
       if (current.matched && current.matched.keywords.length > 0) {
         const plural = current.matched.papers === 1 ? 'paper' : 'papers';
         return `Matching: ${current.matched.keywords.join(', ')} across ${current.matched.papers} ${plural}`;
@@ -102,7 +103,8 @@
       </div>
     {:else if formatted}
       <div class="bubble prose">{@html formatted}</div>
-    {:else}
+    {:else if message.text || streamingCaret}
+      <!-- A /web message carries no text of its own; skip the empty bubble. -->
       <p class="bubble">
         {message.text}{#if streamingCaret}<span class="cursor" aria-hidden="true"></span>{/if}
       </p>
