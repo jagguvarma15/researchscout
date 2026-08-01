@@ -166,6 +166,27 @@ class KeywordList(BaseModel):
     total: int
 
 
+class SourceInfo(BaseModel):
+    """One registered source as the /about page shows it.
+
+    Flat by design: the attribution fields are null together when a source has not declared
+    them, and the page renders that gap rather than hiding the source.
+    """
+
+    name: str
+    kind: str
+    enabled: bool
+    display_name: str | None = None
+    homepage: str | None = None
+    terms_url: str | None = None
+    data_license: str | None = None
+    provides: str | None = None
+
+
+class SourceList(BaseModel):
+    items: list[SourceInfo]
+
+
 class DigestItem(BaseModel):
     paper_id: str
     title: str
