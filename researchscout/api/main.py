@@ -12,6 +12,7 @@ from researchscout.api.routers import (
     events,
     feed,
     keywords,
+    me,
     papers,
     profile,
     saved,
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(keywords.router, prefix="/v1")
     app.include_router(sources.router, prefix="/v1")
     app.include_router(profile.router, prefix="/v1")
+    app.include_router(me.router, prefix="/v1")
     app.include_router(events.router, prefix="/v1")
     app.include_router(stream.router, prefix="/v1")
     app.include_router(webimport.router, prefix="/v1")
