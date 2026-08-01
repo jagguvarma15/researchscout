@@ -157,9 +157,12 @@ def answer_fast(
 ) -> FastAnswer:
     """A deterministic extractive answer with no LLM call: papers, matches, excerpts.
 
-    ``found`` is False when nothing clears ``RS_ASK_MIN_RELEVANCE`` — the router turns
-    that into the not-found event that offers a web search. When every hit's relevance is
-    unknowable (rerank off and lexical-only), emptiness is the only honest test.
+    ``found`` is False when nothing clears the relevance floor — the router turns that
+    into the not-found event that offers a web search. Cross-encoder scores and cosine
+    similarities live on different scales, so the floor follows the evidence:
+    ``RS_ASK_MIN_RELEVANCE`` when the reranker scored the hits, ``RS_ASK_MIN_SIMILARITY``
+    when cosine did (rerank off, or skipped here via ``RS_ASK_FAST_RERANK=false``). When
+    every hit's relevance is unknowable (lexical-only), emptiness is the only honest test.
     """
     with trace_span("ask-fast", question=question, k=k, days=days) as span:
         settings = get_settings()
@@ -170,6 +173,7 @@ def answer_fast(
             question,
             k=k,
             days=days,
+            use_rerank=settings.ask_fast_rerank,
             query_vector=query_vector,
             timings=timings,
         )
@@ -177,9 +181,9 @@ def answer_fast(
         relevances = [_relevance(item) for item in used]
         known = [rel for rel in relevances if rel is not None]
         best = max(known) if known else None
-        found = (best is not None and best >= settings.ask_min_relevance) or (
-            not known and bool(used)
-        )
+        calibrated = any(item.relevance is not None for item in used)
+        floor = settings.ask_min_relevance if calibrated else settings.ask_min_similarity
+        found = (best is not None and best >= floor) or (not known and bool(used))
         span["found"] = found
         span["best_relevance"] = best
         if not found:
@@ -192,7 +196,7 @@ def answer_fast(
         kept = [
             (item, rel)
             for item, rel in zip(used, relevances, strict=True)
-            if rel is None or rel >= settings.ask_min_relevance
+            if rel is None or rel >= floor
         ][:_FAST_SHOWN]
         keep = [item for item, _ in kept]
         quotes = _excerpts_for(session, embedder, question, keep, query_vector)
