@@ -19,6 +19,7 @@ import httpx
 
 from researchscout.schema import normalize_arxiv_id
 from researchscout.sources.arxiv import _API_URL, _arxiv_id_from_url, _entry_payload
+from researchscout.useragent import default_headers
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,13 @@ def search_arxiv(
         "max_results": str(limit),
         "sortBy": "relevance",
     }
-    resp = httpx.get(_API_URL, params=params, timeout=timeout, follow_redirects=True)
+    resp = httpx.get(
+        _API_URL,
+        params=params,
+        headers=default_headers(),
+        timeout=timeout,
+        follow_redirects=True,
+    )
     resp.raise_for_status()
     feed = feedparser.parse(resp.text)
     hits = []
@@ -82,7 +89,7 @@ def search_s2(
     api_key: str | None = None,
 ) -> list[WebHit]:
     """Semantic Scholar paper search (better semantic ranking; strict free-tier limits)."""
-    headers = {"x-api-key": api_key} if api_key else {}
+    headers = default_headers({"x-api-key": api_key} if api_key else None)
     resp = httpx.get(
         _S2_SEARCH_URL,
         params={"query": query, "limit": str(limit), "fields": _S2_FIELDS},
