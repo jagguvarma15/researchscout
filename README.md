@@ -102,11 +102,11 @@ registry stub is `config/sources.yaml`.
 
 ## Deploying
 
-The public site is the frontend on Vercel plus this backend in Docker, published through an
-outbound Cloudflare tunnel - no inbound port. `deploy/README.md` is the runbook for the
+The public site is the frontend on Vercel plus this backend in Docker, published through
+Tailscale Funnel - no inbound port, no domain to buy. `deploy/README.md` is the runbook for the
 container stack (including moving the development database into it and the nightly backup);
-`deploy/PUBLISHING.md` is the account-by-account setup for the tunnel, Auth0, Vercel and
-Grafana Cloud.
+`deploy/PUBLISHING.md` is the account-by-account setup for Funnel, Auth0, Vercel and Grafana
+Cloud.
 
 ```bash
 cp deploy/.env.example deploy/.env   # fill in, then
