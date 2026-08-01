@@ -18,8 +18,10 @@ htmlcov/
 
 # Local environment
 .env
-# Deployment secrets: the tunnel token, the database password, the Auth0 management client.
+# Deployment secrets: the database password, the service token, the Auth0 management client.
 deploy/.env
+# Vercel build output and local project link.
+apps/web/.vercel/
 # Database dumps, if anyone points BACKUP_DIR at the repo.
 deploy/backups/
 .local/
