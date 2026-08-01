@@ -3,6 +3,8 @@ import { defineConfig } from 'astro/config';
 
 import node from '@astrojs/node';
 
+import vercel from '@astrojs/vercel';
+
 import svelte from '@astrojs/svelte';
 
 import icon from 'astro-icon';
@@ -10,11 +12,15 @@ import icon from 'astro-icon';
 import { THEME_SCRIPT_HASH } from './src/lib/csp.js';
 
 // SSR everywhere: the feed reflects the live database, so nothing is prerendered.
-// The standalone Node server runs the app directly on the host.
+//
+// Two adapters, chosen by where the build runs. Vercel sets VERCEL=1 in its build
+// environment, so its deployments get the serverless adapter and everything local - `make
+// start`, `pnpm build`, the production smoke test on a port - keeps the standalone Node
+// server. Nobody has to remember to swap a line before deploying, or to swap it back.
 export default defineConfig({
   output: 'server',
 
-  adapter: node({ mode: 'standalone' }),
+  adapter: process.env.VERCEL ? vercel() : node({ mode: 'standalone' }),
 
   integrations: [svelte(), icon()],
 
