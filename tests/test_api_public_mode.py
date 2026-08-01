@@ -56,7 +56,18 @@ def _isolated_limiter(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ratelimit_mod, "_windows", {})
 
 
+# The site's own server is the only caller in production, so these tests speak the same way it
+# does: the service token proves where the request came from, which is what lets the API
+# believe the visitor address that follows it.
+_SERVICE_TOKEN = "test-service-token"
+
+
+def _from_site(**extra: str) -> dict[str, str]:
+    return {"x-rs-service-token": _SERVICE_TOKEN, **extra}
+
+
 def _client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setenv("RS_SERVICE_TOKEN", _SERVICE_TOKEN)
     monkeypatch.setenv("RS_OIDC_ISSUER", _ISSUER)
     monkeypatch.setenv("RS_OIDC_AUDIENCE", "api")
     monkeypatch.setattr(auth_mod, "_jwk_client", lambda: _FakeJWKClient())
@@ -72,21 +83,24 @@ def _client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_anonymous_gets_the_fast_answer(monkeypatch: pytest.MonkeyPatch) -> None:
-    response = _client(monkeypatch).post("/v1/chat", json={"question": "q", "mode": "fast"})
+    response = _client(monkeypatch).post(
+        "/v1/chat", json={"question": "q", "mode": "fast"}, headers=_from_site()
+    )
     assert response.status_code == 200
     assert "event: meta" in response.text
 
 
 def test_anonymous_is_refused_a_generated_answer(monkeypatch: pytest.MonkeyPatch) -> None:
-    response = _client(monkeypatch).post("/v1/chat", json={"question": "q"})
+    response = _client(monkeypatch).post("/v1/chat", json={"question": "q"}, headers=_from_site())
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
 
 
 def test_ask_follows_the_same_rule(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client(monkeypatch)
-    assert client.post("/v1/ask", json={"question": "q", "mode": "fast"}).status_code == 200
-    assert client.post("/v1/ask", json={"question": "q"}).status_code == 401
+    fast = client.post("/v1/ask", json={"question": "q", "mode": "fast"}, headers=_from_site())
+    assert fast.status_code == 200
+    assert client.post("/v1/ask", json={"question": "q"}, headers=_from_site()).status_code == 401
 
 
 def test_a_signed_in_caller_may_ask_for_a_generated_answer(
@@ -100,7 +114,7 @@ def test_a_signed_in_caller_may_ask_for_a_generated_answer(
         lambda *a, **k: Answer(text="ok", cited=[], hallucinated=[], used=[]),
     )
     response = client.post(
-        "/v1/ask", json={"question": "q"}, headers={"Authorization": f"Bearer {_token()}"}
+        "/v1/ask", json={"question": "q"}, headers=_from_site(Authorization=f"Bearer {_token()}")
     )
     assert response.status_code == 200
 
@@ -110,8 +124,8 @@ def test_anonymous_limits_are_per_address(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("RS_CHAT_RATE_LIMIT_ANONYMOUS", "2")
     client = _client(monkeypatch)
     body = {"question": "q", "mode": "fast"}
-    first = {"CF-Connecting-IP": "203.0.113.1"}
-    second = {"CF-Connecting-IP": "203.0.113.2"}
+    first = _from_site(**{"x-rs-client-ip": "203.0.113.1"})
+    second = _from_site(**{"x-rs-client-ip": "203.0.113.2"})
 
     assert client.post("/v1/chat", json=body, headers=first).status_code == 200
     assert client.post("/v1/chat", json=body, headers=first).status_code == 200
@@ -126,12 +140,12 @@ def test_signed_in_limits_follow_the_account_not_the_address(
     monkeypatch.setenv("RS_CHAT_RATE_LIMIT", "2")
     client = _client(monkeypatch)
     body = {"question": "q", "mode": "fast"}
-    auth = {"Authorization": f"Bearer {_token()}"}
+    auth = _from_site(Authorization=f"Bearer {_token()}")
 
     assert client.post("/v1/chat", json=body, headers=auth).status_code == 200
     assert client.post("/v1/chat", json=body, headers=auth).status_code == 200
     # Same account, different address: still the same bucket.
-    moved = {**auth, "CF-Connecting-IP": "203.0.113.9"}
+    moved = {**auth, "x-rs-client-ip": "203.0.113.9"}
     assert client.post("/v1/chat", json=body, headers=moved).status_code == 429
 
 
@@ -139,8 +153,8 @@ def test_pipeline_stats_need_an_account(monkeypatch: pytest.MonkeyPatch) -> None
     """Throughput and failure detail about the machine behind the site are not public."""
     monkeypatch.setattr(stream_router, "hourly_stats", lambda *a, **k: [])
     client = _client(monkeypatch)
-    assert client.get("/v1/stream/stats").status_code == 401
-    authed = client.get("/v1/stream/stats", headers={"Authorization": f"Bearer {_token()}"})
+    assert client.get("/v1/stream/stats", headers=_from_site()).status_code == 401
+    authed = client.get("/v1/stream/stats", headers=_from_site(Authorization=f"Bearer {_token()}"))
     assert authed.status_code == 200
 
 
