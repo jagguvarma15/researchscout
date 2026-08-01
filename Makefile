@@ -182,7 +182,7 @@ deploy-up-stream: ## the same, plus kafka and the streaming worker
 	docker compose -f $(COMPOSE) --profile stream up -d
 
 deploy-down: ## stop the deployed backend, keeping the data volume
-	docker compose -f $(COMPOSE) --profile stream --profile tunnel --profile monitoring down
+	docker compose -f $(COMPOSE) --profile stream --profile monitoring down
 
 deploy-ps: ## what the deployment stack is running
 	docker compose -f $(COMPOSE) ps
