@@ -22,7 +22,10 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Both files carry the brand mark below (.brand-mark); the ico covers browsers
+         that will not take an SVG icon. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 64x64" />
     <title>{pageTitle}</title>
     <script is:inline>
       // Theme before first paint: stored choice wins, otherwise the OS preference.
