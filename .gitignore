@@ -18,6 +18,10 @@ htmlcov/
 
 # Local environment
 .env
+# Deployment secrets: the tunnel token, the database password, the Auth0 management client.
+deploy/.env
+# Database dumps, if anyone points BACKUP_DIR at the repo.
+deploy/backups/
 .local/
 
 # Eval query sets reference local-corpus paper ids (see scout eval draft).
