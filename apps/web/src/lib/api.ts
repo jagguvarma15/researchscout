@@ -51,19 +51,15 @@ export interface PaperPage {
 export const PAGE_SIZE = 20;
 
 const API_URL = process.env.API_URL ?? 'http://localhost:8000';
-// Cloudflare Access service token for the API hostname: unset locally, required once the API
-// sits behind the edge. Server-side only - these never reach a browser.
-const ACCESS_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID ?? '';
-const ACCESS_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET ?? '';
+// The shared secret that gets this deployment past the API's front door: unset locally, where
+// the API is open. Server-side only - it never reaches a browser.
+const SERVICE_TOKEN = process.env.API_SERVICE_TOKEN ?? '';
 
-/** Headers for a server-side API call: the caller's token, plus the edge service token. */
+/** Headers for a server-side API call: the caller's account token, plus the service token. */
 export function apiHeaders(token?: string | null): Record<string, string> {
   const headers: Record<string, string> = {};
   if (token) headers.authorization = `Bearer ${token}`;
-  if (ACCESS_CLIENT_ID && ACCESS_CLIENT_SECRET) {
-    headers['cf-access-client-id'] = ACCESS_CLIENT_ID;
-    headers['cf-access-client-secret'] = ACCESS_CLIENT_SECRET;
-  }
+  if (SERVICE_TOKEN) headers['x-rs-service-token'] = SERVICE_TOKEN;
   return headers;
 }
 
