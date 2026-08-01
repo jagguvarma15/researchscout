@@ -1,0 +1,199 @@
+---
+import Base from '../layouts/Base.astro';
+import { CONTACT_URL, MINIMUM_AGE, TERMS_EFFECTIVE, TERMS_VERSION } from '../lib/legal';
+---
+
+<Base title="Terms of Use">
+  <div class="legal">
+    <header class="hero">
+      <h1 class="page-title">Terms of Use</h1>
+      <p class="version">Version {TERMS_VERSION}, effective {TERMS_EFFECTIVE}</p>
+      <p class="lede">
+        ResearchScout is a personal, non-commercial research radar run by one person. These
+        terms were written from what the software actually does. They are not legal advice, and
+        they are deliberately short.
+      </p>
+    </header>
+
+    <section class="block">
+      <h2>1. Accepting these terms</h2>
+      <p>
+        Using the site means accepting these terms. Creating an account means accepting them
+        explicitly, which the site asks you to do once, and again if they change in a way that
+        needs a new version.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>2. Who may use it</h2>
+      <p>
+        You must be at least {MINIMUM_AGE} years old. One account per person. Keep your login
+        credentials to yourself; anything done through your account is treated as done by you.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>3. What you may and may not do</h2>
+      <p>
+        Read, search, save papers, and ask questions. That is what it is for. Please do not:
+      </p>
+      <ul>
+        <li>
+          extract the catalogue in bulk, or use automated tools to page through it beyond
+          ordinary reading;
+        </li>
+        <li>
+          work around rate limits, access controls, or the sign-in requirement on any feature;
+        </li>
+        <li>
+          resell, redistribute or republish the data this site collects from its sources, which
+          the sources' own licenses do not permit;
+        </li>
+        <li>use the site to break the law, or to attack, overload or probe the systems behind it.</li>
+      </ul>
+      <p>
+        The upstream data is available directly from arXiv, Semantic Scholar and the other
+        sources listed on the <a href="/about">about page</a>, under their own terms. Go to them
+        rather than scraping this site.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>4. The papers are not ours</h2>
+      <p>
+        Paper metadata comes from arXiv under a CC0 public domain dedication. The papers
+        themselves stay under their authors' copyright and whichever license each author chose.
+        This site links to originals, quotes at most a few hundred characters with attribution,
+        and never redistributes PDFs or source files. Citation data comes from Semantic Scholar
+        and is used non-commercially with attribution, as its license requires.
+      </p>
+      <p>
+        If you are an author or rights holder and something here is wrong or should not be here,{' '}
+        <a href={CONTACT_URL} rel="noopener noreferrer" target="_blank">open an issue</a> and it
+        will be corrected or removed.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>5. Machine-generated text</h2>
+      <p>
+        Summaries, topic labels, digests and Scout's answers are produced by a language model
+        from stored abstracts and short excerpts. They can be wrong, incomplete or misleading,
+        and a momentum score measures attention rather than quality. Nothing here is research,
+        medical, legal or financial advice. Read the paper before relying on anything.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>6. Availability</h2>
+      <p>
+        The backend runs on personal hardware. The site will be unavailable at times, sometimes
+        without warning, and it may be discontinued. There is no service level, no support
+        commitment, and no guarantee that data you store here will survive. Export anything you
+        care about.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>7. Your account and your data</h2>
+      <p>
+        You keep your own interests, saved lists and reading history; the site uses them only to
+        run the service and personalize what it shows you, as described in the{' '}
+        <a href="/privacy">privacy notice</a>. You can export or delete everything from your
+        profile at any time. Deleting your account removes your login and every row tied to it.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>8. Ending it</h2>
+      <p>
+        You may delete your account whenever you like. Accounts that abuse the site, break these
+        terms, or endanger the systems behind it may be suspended or removed without notice.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>9. No warranty, and limits on liability</h2>
+      <p>
+        The site is provided as is, without warranties of any kind, to the fullest extent the
+        law allows. The operator is not liable for any indirect, incidental or consequential
+        loss arising from using it, or from relying on anything it says. Nothing here limits
+        liability that cannot lawfully be limited.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>10. Changes</h2>
+      <p>
+        These terms carry a version. Substantive changes get a new version and the site asks
+        you to accept it on your next visit; the current one is shown at the top of this page.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>11. Law and contact</h2>
+      <p>
+        These terms are governed by the law of the United States and of the state where the
+        operator resides, without regard to conflict-of-law rules. Questions, corrections and
+        complaints go to{' '}
+        <a href={CONTACT_URL} rel="noopener noreferrer" target="_blank">the project's issue
+        tracker</a>.
+      </p>
+    </section>
+  </div>
+</Base>
+
+<style>
+  .legal {
+    max-width: 58rem;
+    margin: 0 auto;
+  }
+  .hero {
+    text-align: center;
+    margin-bottom: var(--space-6);
+  }
+  .hero .page-title {
+    margin-bottom: 0.35rem;
+  }
+  .version {
+    margin: 0 0 0.9rem;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .lede {
+    max-width: 60ch;
+    margin: 0 auto;
+    color: var(--muted);
+    font-size: var(--text-md);
+    line-height: 1.6;
+  }
+  .block {
+    margin-bottom: var(--space-6);
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--line);
+  }
+  .block h2 {
+    margin: 0 0 0.9rem;
+    font-size: var(--text-lg);
+    letter-spacing: -0.01em;
+    text-align: center;
+  }
+  .block p,
+  .block ul {
+    max-width: 62ch;
+    margin: 0 auto 0.8rem;
+    line-height: 1.65;
+  }
+  .block ul {
+    padding-left: 1.2rem;
+  }
+  .block li {
+    margin-bottom: 0.45rem;
+  }
+  .block p:last-child,
+  .block ul:last-child {
+    margin-bottom: 0;
+  }
+</style>
