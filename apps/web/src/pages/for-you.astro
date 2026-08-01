@@ -4,7 +4,7 @@ import Base from '../layouts/Base.astro';
 import { fetchForYou } from '../lib/api';
 import { renderMathHTML } from '../lib/math';
 
-const items = await fetchForYou();
+const items = await fetchForYou(Astro.locals.accessToken);
 ---
 
 <Base title="For you">
