@@ -21,11 +21,16 @@ GRAFANA_HOME  := $(shell brew --prefix grafana 2>/dev/null)/share/grafana
 GRAFANA_LOCAL := $(LOCAL)/grafana
 GRAFANA_CONF  := $(GRAFANA_LOCAL)/grafana.ini
 
+# The deployment stack: containers, its own database volume, separate from everything above.
+COMPOSE := deploy/docker-compose.yml
+
 .DEFAULT_GOAL := help
-.PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop grafana-start grafana-stop check clean
+.PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop \
+        grafana-start grafana-stop deploy-build deploy-up deploy-up-stream deploy-down \
+        deploy-ps deploy-logs backup check clean
 
 help: ## list targets
-	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-10s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
 
 setup: ## install toolchains, dependencies, and the local Postgres cluster
 	@command -v brew >/dev/null || { echo "Homebrew is required: https://brew.sh"; exit 1; }
@@ -165,6 +170,28 @@ grafana-stop: ## stop grafana
 	-@[ -f $(RUN)/grafana.pid ] && kill $$(cat $(RUN)/grafana.pid) 2>/dev/null; rm -f $(RUN)/grafana.pid
 	-@lsof -ti :3000 2>/dev/null | xargs kill 2>/dev/null; true
 	@echo "grafana: stopped"
+
+deploy-build: ## build the backend image used by the deployment stack
+	docker compose -f $(COMPOSE) build
+
+deploy-up: ## start the deployed backend (postgres, migrations, api, scheduler)
+	docker compose -f $(COMPOSE) up -d
+	@echo "api on http://127.0.0.1:8001 (the dev stack keeps :8000)"
+
+deploy-up-stream: ## the same, plus kafka and the streaming worker
+	docker compose -f $(COMPOSE) --profile stream up -d
+
+deploy-down: ## stop the deployed backend, keeping the data volume
+	docker compose -f $(COMPOSE) --profile stream --profile tunnel --profile monitoring down
+
+deploy-ps: ## what the deployment stack is running
+	docker compose -f $(COMPOSE) ps
+
+deploy-logs: ## follow the deployment logs
+	docker compose -f $(COMPOSE) logs -f
+
+backup: ## dump the deployed database, keep a week, verify the file
+	./deploy/backup.sh
 
 check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run ruff check researchscout tests
