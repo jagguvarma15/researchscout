@@ -21,11 +21,14 @@ from researchscout.api.routers import (
     topics,
     webimport,
 )
+from researchscout.api.service_auth import service_token_middleware
 
 
 def create_app() -> FastAPI:
     """Build the API app: routers under ``/v1``, liveness probe at ``/healthz``."""
     app = FastAPI(title="ResearchScout API", version=__version__)
+    # Before routing: with RS_SERVICE_TOKEN set, only callers carrying it get past the door.
+    app.middleware("http")(service_token_middleware)
     app.include_router(papers.router, prefix="/v1")
     app.include_router(ask.router, prefix="/v1")
     app.include_router(chat.router, prefix="/v1")
