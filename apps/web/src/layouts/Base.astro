@@ -82,6 +82,11 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
           Copyright (c) 2026 Jagadesh Varma. MIT licensed. Paper metadata from arXiv under CC0;
           data from Semantic Scholar. Papers stay under their authors' copyright.
         </p>
+        <p class="footer-links">
+          <a href="/about">About</a>
+          <a href="/terms">Terms</a>
+          <a href="/privacy">Privacy</a>
+        </p>
       </div>
     </footer>
     <ChatDrawer client:load />
@@ -210,6 +215,12 @@ const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
     margin-top: 0.4rem;
     font-size: 0.8rem;
     line-height: 1.6;
+  }
+  .footer-inner .footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 0.6rem;
   }
   .footer-legal a {
     white-space: nowrap;
