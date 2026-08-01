@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import httpx
 
+from researchscout.useragent import default_headers
+
 _ARXIV_HTML = "https://arxiv.org/html/{arxiv_id}"
 _AR5IV_HTML = "https://ar5iv.labs.arxiv.org/html/{arxiv_id}"
 _REQUEST_TIMEOUT = 60.0
@@ -61,7 +63,12 @@ def fetch_full_text(arxiv_id: str) -> str | None:
     """The extracted article text, arXiv HTML first and ar5iv second; None when neither has it."""
     for url in (_ARXIV_HTML.format(arxiv_id=arxiv_id), _AR5IV_HTML.format(arxiv_id=arxiv_id)):
         try:
-            resp = httpx.get(url, timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+            resp = httpx.get(
+                url,
+                headers=default_headers(),
+                timeout=_REQUEST_TIMEOUT,
+                follow_redirects=True,
+            )
         except httpx.HTTPError:
             continue
         if resp.status_code != 200:
