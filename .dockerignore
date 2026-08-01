@@ -1,0 +1,20 @@
+# Keep the build context small and free of anything host-specific or secret.
+.git
+.github
+.venv
+.local
+.env
+.env.*
+!.env.example
+**/__pycache__
+**/*.pyc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+apps/web/node_modules
+apps/web/dist
+apps/web/.astro
+node_modules
+tests
+docs
+deploy/backups
