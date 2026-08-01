@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from researchscout.schema import Signal, SignalType, normalize_arxiv_id
 from researchscout.sources.base import HealthStatus, RawItem, Source, register, source_config
+from researchscout.useragent import default_headers
 
 _WORKS = "https://api.openalex.org/works"
 _REQUEST_TIMEOUT = 30.0
@@ -65,7 +66,13 @@ class OpenAlexSource(Source):
             }
             if mailto:
                 params["mailto"] = str(mailto)
-            resp = httpx.get(_WORKS, params=params, timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+            resp = httpx.get(
+                _WORKS,
+                params=params,
+                headers=default_headers(),
+                timeout=_REQUEST_TIMEOUT,
+                follow_redirects=True,
+            )
             resp.raise_for_status()
             for work in resp.json().get("results") or []:
                 match = _DOI_ARXIV_RE.search(str(work.get("doi") or ""))
@@ -104,6 +111,7 @@ class OpenAlexSource(Source):
             resp = httpx.get(
                 _WORKS,
                 params={"filter": "doi:10.48550/arXiv.1706.03762", "select": "doi"},
+                headers=default_headers(),
                 timeout=_REQUEST_TIMEOUT,
                 follow_redirects=True,
             )
