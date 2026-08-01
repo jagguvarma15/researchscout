@@ -8,6 +8,7 @@ pagination offset), and normalizes each entry into a canonical ``Paper``. ``fetc
 from __future__ import annotations
 
 import re
+import threading
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -20,10 +21,18 @@ import httpx
 from researchscout.config import get_settings
 from researchscout.schema import Author, Paper, canonical_id, normalize_arxiv_id
 from researchscout.sources.base import HealthStatus, RawItem, Source, register, source_config
+from researchscout.useragent import default_headers
 
 _API_URL = "https://export.arxiv.org/api/query"
 _DEFAULT_CATEGORIES = ("cs.LG", "cs.AI", "cs.CL")
 _REQUEST_TIMEOUT = 30.0
+
+# arXiv asks for no more than one request every three seconds on a single connection. The
+# floor is per process, not per fetch: paging, a second category's first page and a health
+# probe all pass through here, and the lock is held across the wait so concurrent callers
+# queue rather than burst. Tests reset _last_request_at directly.
+_pace_lock = threading.Lock()
+_last_request_at: float | None = None
 
 
 def _to_utc(dt: datetime) -> datetime:
@@ -40,11 +49,26 @@ class ArxivSource(Source):
         categories: list[str] | None = None,
         page_size: int = 100,
         sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         cfg_categories = source_config(self.name).get("categories")
         self.categories: list[str] = categories or cfg_categories or list(_DEFAULT_CATEGORIES)
         self.page_size = page_size
         self._sleep = sleep
+        self._clock = clock
+
+    def _pace(self) -> None:
+        """Wait out the remaining request floor, then claim the slot for this request."""
+        global _last_request_at
+        delay = get_settings().arxiv_page_delay_sec
+        with _pace_lock:
+            now = self._clock()
+            if _last_request_at is not None and delay > 0:
+                wait = delay - (now - _last_request_at)
+                if wait > 0:
+                    self._sleep(wait)
+                    now = self._clock()
+            _last_request_at = now
 
     def _search_query(self, since: datetime) -> str:
         cats = " OR ".join(f"cat:{c}" for c in self.categories)
@@ -54,11 +78,7 @@ class ArxivSource(Source):
 
     def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
         start = int(cursor) if cursor else 0
-        if start > 0:
-            # arXiv asks for a pause between requests; the first page never waits.
-            delay = get_settings().arxiv_page_delay_sec
-            if delay > 0:
-                self._sleep(delay)
+        self._pace()
         params = {
             "search_query": self._search_query(since),
             "start": str(start),
@@ -66,7 +86,13 @@ class ArxivSource(Source):
             "sortBy": "submittedDate",
             "sortOrder": "descending",
         }
-        resp = httpx.get(_API_URL, params=params, timeout=_REQUEST_TIMEOUT, follow_redirects=True)
+        resp = httpx.get(
+            _API_URL,
+            params=params,
+            headers=default_headers(),
+            timeout=_REQUEST_TIMEOUT,
+            follow_redirects=True,
+        )
         resp.raise_for_status()
         feed = feedparser.parse(resp.text)
         fetched_at = datetime.now(UTC)
@@ -81,10 +107,12 @@ class ArxivSource(Source):
         return _normalize_payload(raw.payload)
 
     def health(self) -> HealthStatus:
+        self._pace()
         try:
             resp = httpx.get(
                 _API_URL,
                 params={"search_query": "all", "max_results": "1"},
+                headers=default_headers(),
                 timeout=_REQUEST_TIMEOUT,
                 follow_redirects=True,
             )
