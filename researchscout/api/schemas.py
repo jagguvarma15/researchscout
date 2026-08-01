@@ -166,6 +166,30 @@ class KeywordList(BaseModel):
     total: int
 
 
+class MeResponse(BaseModel):
+    """The signed-in account, and whether it still owes a terms acceptance."""
+
+    sub: str
+    username: str
+    email: str | None = None
+    display_name: str | None = None
+    terms_required: str
+    terms_accepted_version: str | None = None
+    terms_accepted: bool
+
+
+class MeUpdate(BaseModel):
+    display_name: str = Field(min_length=1, max_length=80)
+
+
+class TermsAcceptance(BaseModel):
+    version: str
+
+
+class AccountDeleted(BaseModel):
+    deleted: bool
+
+
 class SourceInfo(BaseModel):
     """One registered source as the /about page shows it.
 
