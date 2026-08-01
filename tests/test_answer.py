@@ -171,13 +171,38 @@ def test_answer_fast_below_floor_reports_not_found(monkeypatch: pytest.MonkeyPat
 
 
 def test_answer_fast_cosine_fallback_thresholds(monkeypatch: pytest.MonkeyPatch) -> None:
-    close = [_scored_rel("arxiv:2401.00001", distance=0.4)]  # similarity 0.6
+    monkeypatch.setenv("RS_ASK_MIN_SIMILARITY", "0.68")
+    close = [_scored_rel("arxiv:2401.00001", distance=0.2)]  # similarity 0.8
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: close)
     assert answer_mod.answer_fast(None, _StubEmbedder(), "q").found
 
-    far = [_scored_rel("arxiv:2401.00001", distance=0.9)]  # similarity 0.1
+    far = [_scored_rel("arxiv:2401.00001", distance=0.38)]  # similarity 0.62
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: far)
     assert not answer_mod.answer_fast(None, _StubEmbedder(), "q").found
+
+
+def test_answer_fast_floor_follows_the_evidence_scale(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 0.35 clears the cross-encoder floor (0.30) even though it would fail the cosine one;
+    # the calibrated scale wins because the reranker actually scored the hit.
+    monkeypatch.setenv("RS_ASK_MIN_SIMILARITY", "0.68")
+    scored = [_scored_rel("arxiv:2401.00001", relevance=0.35)]
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: scored)
+    assert answer_mod.answer_fast(None, _StubEmbedder(), "q").found
+
+
+def test_answer_fast_rerank_flag_reaches_retrieve(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[object] = []
+
+    def capture(*a: object, **k: object) -> list[ScoredPaper]:
+        seen.append(k["use_rerank"])
+        return []
+
+    monkeypatch.setattr(answer_mod, "retrieve", capture)
+    monkeypatch.setenv("RS_ASK_FAST_RERANK", "1")
+    answer_mod.answer_fast(None, _StubEmbedder(), "q")
+    monkeypatch.setenv("RS_ASK_FAST_RERANK", "0")
+    answer_mod.answer_fast(None, _StubEmbedder(), "q")
+    assert seen == [True, False]
 
 
 def test_answer_fast_never_false_negatives_on_unknowable_evidence(
