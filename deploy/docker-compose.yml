@@ -1,0 +1,197 @@
+# The deployed backend: what serves the public site from this machine.
+#
+# Deliberately separate from the development stack, which runs as host processes under the
+# Makefile (`make start`) against the repo-local Postgres in .local/pgdata. This one owns its
+# own database volume, so the two never share state and neither can surprise the other.
+#
+#   make deploy-up        postgres, migrations, api, scheduler
+#   make deploy-up-stream  the same plus kafka and the streaming worker
+#
+# What is deliberately NOT in here:
+#   - Ollama, which stays on the host: Docker on macOS has no Metal passthrough, so a
+#     containerised model would run on CPU at a fraction of the speed. The API reaches it at
+#     host.docker.internal.
+#   - The web app, which is deployed to Vercel.
+#   - Kafka and the stream worker by default. They are a profile because the ingest path also
+#     works from the scheduler, and on 8 GB the broker is the first thing worth giving up.
+
+name: researchscout
+
+x-backend: &backend
+  build:
+    context: ..
+    dockerfile: docker/api.Dockerfile
+  image: researchscout-backend:latest
+  restart: unless-stopped
+  environment:
+    # Inside the network the database is a service name, not localhost - this must not be
+    # inherited from the host .env.
+    RS_DATABASE_URL: postgresql+psycopg://researchscout:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/researchscout
+    # Same reason: the host's Ollama, seen from inside a container.
+    RS_LLM_BASE_URL: ${RS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+    RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
+    RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
+    RS_OIDC_ISSUER: ${RS_OIDC_ISSUER:-}
+    RS_OIDC_AUDIENCE: ${RS_OIDC_AUDIENCE:-api}
+    RS_TERMS_VERSION: ${RS_TERMS_VERSION:-2026-08-01}
+    RS_AUTH0_DOMAIN: ${RS_AUTH0_DOMAIN:-}
+    RS_AUTH0_MGMT_CLIENT_ID: ${RS_AUTH0_MGMT_CLIENT_ID:-}
+    RS_AUTH0_MGMT_CLIENT_SECRET: ${RS_AUTH0_MGMT_CLIENT_SECRET:-}
+    RS_RERANK_ENABLED: ${RS_RERANK_ENABLED:-true}
+    RS_ASK_FAST_RERANK: ${RS_ASK_FAST_RERANK:-false}
+    RS_CHUNK_RETRIEVAL: ${RS_CHUNK_RETRIEVAL:-true}
+    RS_CLUSTER_ALGO: ${RS_CLUSTER_ALGO:-hdbscan}
+    RS_CHAT_RATE_LIMIT: ${RS_CHAT_RATE_LIMIT:-20}
+    RS_CHAT_RATE_LIMIT_ANONYMOUS: ${RS_CHAT_RATE_LIMIT_ANONYMOUS:-5}
+    RS_LLM_MAX_CONCURRENCY: ${RS_LLM_MAX_CONCURRENCY:-2}
+    S2_API_KEY: ${S2_API_KEY:-}
+    GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+  volumes:
+    # Model weights are downloaded once and kept; without this every restart refetches them.
+    - models:/home/scout/.cache/huggingface
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: researchscout
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+      POSTGRES_DB: researchscout
+    ports:
+      # Loopback only, and not 5432: the development cluster owns that port. This is here for
+      # psql and for restores, not for anything outside the machine.
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U researchscout"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # A public site's database gets more than the container default.
+    shm_size: 256mb
+
+  # Runs to completion before the API starts, so a deploy never serves against a schema it
+  # does not match.
+  migrate:
+    <<: *backend
+    restart: "no"
+    command: ["scout", "db", "upgrade"]
+
+  api:
+    <<: *backend
+    command: ["scout", "serve", "api", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')",
+        ]
+      interval: 30s
+      timeout: 5s
+      # The first start loads the embedder and the cross-encoder, which takes a while on a cold
+      # cache; do not let the healthcheck kill it before the models are down.
+      start_period: 300s
+      retries: 3
+
+  # Ingest, indexing, signals, digests, topics and the daily report on their intervals.
+  scheduler:
+    <<: *backend
+    command: ["scout", "serve", "scheduler"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  # The outbound-only tunnel that puts the API on a public hostname. No inbound port is opened
+  # on this machine; Cloudflare terminates TLS and enforces the Access policy in front of it.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
+    profiles: ["tunnel"]
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Lets Grafana Cloud query this Postgres over an outbound tunnel, so the dashboards keep
+  # working without exposing the database.
+  pdc-agent:
+    image: grafana/pdc-agent:latest
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    environment:
+      PDC_TOKEN: ${GRAFANA_PDC_TOKEN:-}
+      PDC_CLUSTER: ${GRAFANA_PDC_CLUSTER:-}
+      PDC_HOSTED_GRAFANA_ID: ${GRAFANA_STACK_ID:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # The streaming pipeline, opt-in. Kafka plus the worker is roughly a gigabyte that the
+  # scheduler path does not need.
+  kafka:
+    image: apache/kafka:3.9.0
+    restart: unless-stopped
+    profiles: ["stream"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_HEAP_OPTS: -Xmx512m -Xms256m
+    volumes:
+      - kafkadata:/var/lib/kafka/data
+
+  stream:
+    <<: *backend
+    command: ["scout", "stream", "serve"]
+    profiles: ["stream"]
+    environment:
+      RS_DATABASE_URL: postgresql+psycopg://researchscout:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/researchscout
+      RS_KAFKA_BOOTSTRAP: kafka:9092
+      RS_LLM_BASE_URL: ${RS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+      RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
+      RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
+      S2_API_KEY: ${S2_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      kafka:
+        condition: service_started
+
+# Named explicitly. Compose would otherwise derive them from the project name and reuse the
+# volumes left behind by the Docker stack this repository had before the teardown - which is a
+# Postgres 16 data directory, and produces a container that restarts forever complaining about
+# an incompatible version. These names collide with nothing.
+volumes:
+  pgdata:
+    name: researchscout-deploy-pgdata
+  models:
+    name: researchscout-deploy-models
+  kafkadata:
+    name: researchscout-deploy-kafka
