@@ -121,6 +121,30 @@ export async function fetchPaper(id: string): Promise<PaperSummary | null> {
   }
 }
 
+// A data source as /about lists it. The attribution fields are null together when a source
+// has not declared one in config/sources.yaml, which the page shows rather than hides.
+export interface SourceInfo {
+  name: string;
+  kind: string;
+  enabled: boolean;
+  display_name: string | null;
+  homepage: string | null;
+  terms_url: string | null;
+  data_license: string | null;
+  provides: string | null;
+}
+
+export async function fetchSources(): Promise<SourceInfo[] | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/sources`);
+    if (!response.ok) return null;
+    const body = (await response.json()) as { items: SourceInfo[] };
+    return body.items;
+  } catch {
+    return null;
+  }
+}
+
 export function formatDate(iso: string): string {
   return iso.slice(0, 10);
 }
