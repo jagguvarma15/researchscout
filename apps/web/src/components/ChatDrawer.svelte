@@ -1,45 +1,15 @@
 <script lang="ts">
   // The chat side panel: a single island, closed by default. Talks to the API through the
-  // same-origin proxy (/api/chat) and renders the SSE stream token by token.
+  // same-origin proxy (/api/chat), applies the SSE stream to per-message state, and
+  // delegates rendering to ChatMessage. Pure logic (frame parsing, formatting, matching,
+  // commands) lives in src/lib where it is unit-tested.
 
   import { MessageCircle, Send, X } from 'lucide-svelte';
 
+  import type { Message, WebHit } from '../lib/chat-types';
+  import { parseSseFrame, splitSseBuffer, type SseEvent } from '../lib/sse';
+  import ChatMessage from './ChatMessage.svelte';
   import ScoutMascot from './ScoutMascot.svelte';
-
-  interface UsedPaper {
-    id: string;
-    title: string;
-    score: number;
-  }
-
-  interface WebHit {
-    provider: string;
-    title: string;
-    authors: string[];
-    year: number | null;
-    snippet: string;
-    arxiv_id: string | null;
-    url: string | null;
-    already_known: boolean;
-    paper_id: string | null;
-  }
-
-  interface Message {
-    role: 'user' | 'assistant';
-    text: string;
-    phase?: 'searching' | 'thinking' | 'streaming' | 'done';
-    mode?: 'fast' | 'llm';
-    question?: string;
-    retrieved?: number;
-    cited?: string[];
-    used?: UsedPaper[];
-    error?: boolean;
-    notfound?: { query: string; webSearch: boolean };
-    webBusy?: boolean;
-    webHits?: WebHit[];
-    webFailed?: string[];
-    imports?: Record<string, string>;
-  }
 
   let open = $state(false);
   let input = $state('');
@@ -97,52 +67,36 @@
   });
 
   $effect(() => {
-    // Track message content so streaming tokens keep the newest text in view.
-    void messages.map((m) => m.text);
+    // Track streamed text plus card and web-hit arrivals so the newest content stays in view.
+    void messages.map((m) => m.text + (m.results?.length ?? 0) + (m.webHits?.length ?? 0));
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   });
 
-  function handleFrame(frame: string, current: Message) {
-    let event = 'message';
-    let data = '';
-    for (const line of frame.split('\n')) {
-      if (line.startsWith('event: ')) event = line.slice(7).trim();
-      else if (line.startsWith('data: ')) data = line.slice(6);
-    }
-    if (!data) return;
-    const payload = JSON.parse(data);
-    if (event === 'meta') {
+  function applyEvent(frame: SseEvent, current: Message) {
+    const payload = frame.payload as Record<string, any>;
+    if (frame.event === 'meta') {
       current.retrieved = payload.retrieved;
       if (current.phase !== 'streaming') current.phase = 'thinking';
-    } else if (event === 'notfound') {
+    } else if (frame.event === 'results') {
+      current.results = payload.items;
+    } else if (frame.event === 'notfound') {
       current.notfound = { query: payload.query, webSearch: Boolean(payload.web_search) };
       current.text = 'No papers in your library matched this question.';
-    } else if (event === 'token') {
+    } else if (frame.event === 'token') {
       // The first token flips to streaming whether or not meta arrived; guardrail refusals
-      // skip meta entirely.
+      // skip meta entirely. Fast messages with structured results render cards, so the
+      // duplicate raw text never accumulates.
       current.phase = 'streaming';
-      current.text += payload.delta;
-    } else if (event === 'done') {
+      if (!current.results) current.text += payload.delta;
+    } else if (frame.event === 'done') {
       current.phase = 'done';
       current.cited = payload.cited;
       current.used = payload.used;
-    } else if (event === 'error') {
+    } else if (frame.event === 'error') {
       current.phase = 'done';
       current.text = payload.message ?? 'Something went wrong.';
       current.error = true;
     }
-  }
-
-  function statusLabel(message: Message): string | null {
-    if (message.role !== 'assistant' || message.text) return null;
-    if (message.phase === 'searching') return 'Searching papers';
-    if (message.phase === 'thinking') {
-      if (message.retrieved && message.retrieved > 0) {
-        return `Reading ${message.retrieved} paper${message.retrieved === 1 ? '' : 's'}`;
-      }
-      return 'Thinking';
-    }
-    return null;
   }
 
   async function send(event: SubmitEvent) {
@@ -191,10 +145,11 @@
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
-        let split;
-        while ((split = buffer.indexOf('\n\n')) !== -1) {
-          handleFrame(buffer.slice(0, split), current);
-          buffer = buffer.slice(split + 2);
+        const { frames, rest } = splitSseBuffer(buffer);
+        buffer = rest;
+        for (const piece of frames) {
+          const parsed = parseSseFrame(piece);
+          if (parsed) applyEvent(parsed, current);
         }
       }
     } catch {
@@ -277,81 +232,14 @@
       </div>
     {/if}
     {#each messages as message}
-      <div class="msg {message.role}" class:error={message.error}>
-        {#if statusLabel(message)}
-          <p class="pending" role="status">
-            {statusLabel(message)}<span class="dots" aria-hidden="true"
-              ><span>.</span><span>.</span><span>.</span></span
-            >
-          </p>
-        {:else}
-          <p>{message.text}{#if message.role === 'assistant' && busy && message === messages[messages.length - 1]}<span class="cursor" aria-hidden="true"></span>{/if}</p>
-        {/if}
-        {#if message.cited && message.cited.length > 0}
-          <p class="citations">
-            {#each message.used ?? [] as paper}
-              {#if message.cited.includes(paper.id)}
-                <a href={`/papers/${paper.id}`} title={paper.title}>{paper.id}</a>
-              {/if}
-            {/each}
-          </p>
-        {/if}
-        {#if message.mode === 'fast' && message.phase === 'done' && !message.error && message.cited && message.cited.length > 0}
-          <p class="actions">
-            <button class="ghost" onclick={() => summarize(message)} disabled={busy}>
-              Summarize with AI
-            </button>
-          </p>
-        {/if}
-        {#if message.notfound && message.phase === 'done'}
-          <div class="webfallback">
-            {#if message.notfound.webSearch && !message.webHits}
-              <p class="actions">
-                <button class="ghost" onclick={() => searchWeb(message)} disabled={message.webBusy}>
-                  {message.webBusy ? 'Searching the web' : 'Search the web'}
-                </button>
-              </p>
-            {/if}
-            {#if message.webHits}
-              {#if message.webHits.length === 0}
-                <p class="webnote">Nothing found on the web either.</p>
-              {/if}
-              {#each message.webHits as hit}
-                <div class="webhit">
-                  <p class="webtitle">{hit.title}{#if hit.year}&nbsp;({hit.year}){/if}</p>
-                  {#if hit.authors.length > 0}<p class="webmeta">{hit.authors.join(', ')}</p>{/if}
-                  {#if hit.snippet}<p class="websnippet">{hit.snippet}</p>{/if}
-                  <p class="webactions">
-                    <span class="provider">{hit.provider}</span>
-                    {#if hit.already_known && hit.paper_id}
-                      <a href={`/papers/${hit.paper_id}`}>In library - open</a>
-                    {:else if hit.arxiv_id}
-                      {#if message.imports?.[hit.arxiv_id] === 'busy'}
-                        <span class="webnote">Adding</span>
-                      {:else if message.imports?.[hit.arxiv_id] === 'error'}
-                        <span class="weberror">Could not add - try again</span>
-                      {:else if message.imports?.[hit.arxiv_id]}
-                        <a href={`/papers/${message.imports[hit.arxiv_id]}`}>
-                          Added to Reading list - open
-                        </a>
-                      {:else}
-                        <button class="ghost" onclick={() => importHit(message, hit)}>
-                          Add to library
-                        </button>
-                      {/if}
-                    {:else if hit.url}
-                      <a href={hit.url} target="_blank" rel="noreferrer">View source</a>
-                    {/if}
-                  </p>
-                </div>
-              {/each}
-              {#if message.webFailed && message.webFailed.length > 0}
-                <p class="webnote">Search unavailable for: {message.webFailed.join(', ')}</p>
-              {/if}
-            {/if}
-          </div>
-        {/if}
-      </div>
+      <ChatMessage
+        {message}
+        {busy}
+        last={message === messages[messages.length - 1]}
+        onsummarize={() => summarize(message)}
+        onwebsearch={() => searchWeb(message)}
+        onimport={(hit) => importHit(message, hit)}
+      />
     {/each}
   </div>
   <form onsubmit={send}>
@@ -524,201 +412,10 @@
     font-size: 0.9rem;
     max-width: 24rem;
   }
-  .msg p {
-    margin: 0;
-    padding: 0.6rem 0.9rem;
-    border-radius: 14px;
-    font-size: 0.92rem;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-  }
-  .msg.user p {
-    background: var(--accent, #c2410c);
-    color: var(--accent-contrast, #fff);
-    margin-left: 2rem;
-    border-bottom-right-radius: 4px;
-  }
-  .msg.assistant p {
-    background: var(--surface-2, #f4f0e8);
-    border: 1px solid var(--line, #e6e1d5);
-    margin-right: 2rem;
-    border-bottom-left-radius: 4px;
-  }
-  .msg.error p {
-    background: #fdecec;
-    border-color: #f5c8c8;
-    color: #8b1d1d;
-  }
-  /* The design system has no error tokens, so the dark values live here. */
-  :global([data-theme='dark']) .msg.error p {
-    background: #3a2020;
-    border-color: #5c3434;
-    color: #f2b8b8;
-  }
-  .citations {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    padding: 0.4rem 0 0 !important;
-    background: none !important;
-    border: none !important;
-  }
-  .citations a {
-    font-size: 0.75rem;
-    font-weight: 500;
-    background: var(--accent-soft, #fef3c7);
-    border-radius: 999px;
-    padding: 0.05rem 0.55rem;
-    text-decoration: none;
-    color: var(--accent-ink, #78350f);
-    transition: background-color 0.15s ease;
-  }
-  .citations a:hover {
-    background: var(--chip-hover, #fde68a);
-  }
-  .cursor {
-    display: inline-block;
-    width: 3px;
-    height: 1em;
-    margin-left: 2px;
-    vertical-align: text-bottom;
-    background: currentColor;
-    animation: blink 1s step-start infinite;
-  }
-  @keyframes blink {
-    50% {
-      opacity: 0;
-    }
-  }
-  .msg .pending {
-    color: var(--muted, #5d6570);
-  }
-  .actions {
-    padding: 0.4rem 0 0 !important;
-    background: none !important;
-    border: none !important;
-  }
-  .ghost {
-    border: 1px solid var(--line, #e6e1d5);
-    border-radius: 999px;
-    background: var(--surface, #fff);
-    color: var(--ink, #17191c);
-    font: inherit;
-    font-size: 0.78rem;
-    font-weight: 500;
-    padding: 0.25rem 0.75rem;
-    cursor: pointer;
-    transition: background-color 0.15s ease;
-  }
-  .ghost:hover:not(:disabled) {
-    background: var(--surface-2, #f4f0e8);
-  }
-  .ghost:disabled {
-    opacity: 0.55;
-    cursor: default;
-  }
-  .ghost:focus-visible {
-    outline: 2px solid var(--accent, #c2410c);
-    outline-offset: 2px;
-  }
-  .webfallback {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-right: 2rem;
-  }
-  .webhit {
-    border: 1px solid var(--line, #e6e1d5);
-    border-radius: 10px;
-    padding: 0.55rem 0.75rem;
-    background: var(--surface, #fff);
-  }
-  .webhit p {
-    margin: 0;
-    padding: 0;
-    background: none;
-    border: none;
-    border-radius: 0;
-  }
-  .webtitle {
-    font-size: 0.85rem;
-    font-weight: 600;
-  }
-  .webmeta {
-    font-size: 0.75rem;
-    color: var(--muted, #5d6570);
-  }
-  .websnippet {
-    font-size: 0.78rem;
-    margin-top: 0.25rem !important;
-    color: var(--ink, #17191c);
-  }
-  .webactions {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.4rem !important;
-    font-size: 0.78rem;
-  }
-  .webactions a {
-    color: var(--accent-ink, #78350f);
-    font-weight: 500;
-  }
-  .provider {
-    font-size: 0.68rem;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--muted, #5d6570);
-    border: 1px solid var(--line, #e6e1d5);
-    border-radius: 999px;
-    padding: 0.05rem 0.45rem;
-  }
-  .webnote {
-    font-size: 0.78rem;
-    color: var(--muted, #5d6570);
-    background: none !important;
-    border: none !important;
-    padding: 0 !important;
-  }
-  .weberror {
-    font-size: 0.78rem;
-    color: #8b1d1d;
-  }
-  :global([data-theme='dark']) .weberror {
-    color: #f2b8b8;
-  }
-  .dots span {
-    display: inline-block;
-    animation: dot-fade 1.2s infinite;
-  }
-  .dots span:nth-child(2) {
-    animation-delay: 0.2s;
-  }
-  .dots span:nth-child(3) {
-    animation-delay: 0.4s;
-  }
-  @keyframes dot-fade {
-    0%,
-    60%,
-    100% {
-      opacity: 0.25;
-    }
-    20% {
-      opacity: 1;
-    }
-  }
-  /* Stilled to a static ellipsis under reduced motion, like the cursor. */
-  @media (prefers-reduced-motion: reduce) {
-    .cursor,
-    .dots span {
-      animation: none;
-    }
-  }
   form {
     display: flex;
     gap: 0.5rem;
-    padding: 0.9rem 1.25rem;
+    padding: 0.9rem 1.25rem 0.5rem;
     border-top: 1px solid var(--line, #e6e1d5);
   }
   input {
@@ -767,21 +464,9 @@
   }
   .disclaimer {
     margin: 0;
-    padding: 0 1.25rem 0.7rem;
+    padding: 0.35rem 1.25rem 0.7rem;
     text-align: center;
     font-size: 0.72rem;
     color: var(--muted, #5d6570);
-  }
-  /* Keep bubbles and cards usable when the 560px panel collapses to the viewport. */
-  @media (max-width: 480px) {
-    .msg.user p {
-      margin-left: 1.25rem;
-    }
-    .msg.assistant p {
-      margin-right: 1.25rem;
-    }
-    .webfallback {
-      margin-right: 1.25rem;
-    }
   }
 </style>
