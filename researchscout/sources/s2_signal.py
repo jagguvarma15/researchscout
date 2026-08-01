@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from researchscout.schema import Signal, SignalType
 from researchscout.sources.base import HealthStatus, RawItem, Source, register, source_config
+from researchscout.useragent import default_headers
 
 _S2_BASE = "https://api.semanticscholar.org/graph/v1"
 _FIELDS = "citationCount,influentialCitationCount"
@@ -34,7 +35,7 @@ class SemanticScholarSource(Source):
         self.page_size = page_size
 
     def _headers(self) -> dict[str, str]:
-        return {"x-api-key": self._api_key} if self._api_key else {}
+        return default_headers({"x-api-key": self._api_key} if self._api_key else None)
 
     def _target_papers(self, offset: int, limit: int) -> list[tuple[str, str]]:
         """(canonical_id, arxiv_id) for stored papers with an arXiv external id — the match set."""
