@@ -18,15 +18,16 @@ import time
 from collections.abc import Iterator
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from openai import OpenAIError
 from sqlalchemy.orm import Session
 
 from researchscout.answer import Answer, StreamDelta, StreamMeta, answer_fast, answer_stream
-from researchscout.api.auth import User, require_user
+from researchscout.api.auth import User, optional_user
 from researchscout.api.deps import get_embedder, get_llm, get_session
-from researchscout.api.ratelimit import check_rate_limit
+from researchscout.api.llmgate import llm_slot
+from researchscout.api.ratelimit import check_rate_limit, client_key
 from researchscout.api.schemas import AskRequest, FastResultItem, UsedPaper
 from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
@@ -67,17 +68,30 @@ def _sse(event: str, payload: dict[str, Any]) -> str:
 
 @router.post("/chat")
 def chat(
+    request: Request,
     body: AskRequest,
-    user: Annotated[User, Depends(require_user)],
+    user: Annotated[User | None, Depends(optional_user)],
     session: Annotated[Session, Depends(get_session)],
     embedder: Annotated[Embedder, Depends(get_embedder)],
     llm: Annotated[LLM, Depends(get_llm)],
 ) -> StreamingResponse:
-    """Stream a grounded, cited answer as SSE."""
+    """Stream a grounded, cited answer as SSE.
+
+    A signed-out visitor gets the extractive path only: it is the fast one, it costs no model
+    time, and it is what makes the site useful before anyone registers. Generated answers need
+    an account, both to keep one visitor from occupying the model and because the account is
+    what the rate limit can hold on to.
+    """
     settings = get_settings()
+    if user is None and body.mode != "fast":
+        raise HTTPException(
+            status_code=401,
+            detail="sign in for generated answers; ask again for a quick one",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     check_rate_limit(
-        f"chat:{user.sub}",
-        limit=settings.chat_rate_limit,
+        client_key(request, user, prefix="chat"),
+        limit=settings.chat_rate_limit if user else settings.chat_rate_limit_anonymous,
         window_seconds=settings.chat_rate_window_seconds,
     )
 
@@ -97,27 +111,35 @@ def chat(
         retrieved = 0
         final: Answer | None = None
         try:
-            for event in answer_stream(
-                session, embedder, llm, body.question, k=body.k, days=body.days
-            ):
-                if isinstance(event, StreamMeta):
-                    meta_at = time.perf_counter()
-                    retrieved = event.retrieved
-                    yield _sse("meta", {"retrieved": event.retrieved})
-                elif isinstance(event, StreamDelta):
-                    yield _sse("token", {"delta": event.text})
-                elif isinstance(event, Answer):
-                    final = event
-                    yield _sse(
-                        "done",
-                        {
-                            "cited": event.cited,
-                            "hallucinated": event.hallucinated,
-                            "used": [
-                                UsedPaper.from_scored(item).model_dump() for item in event.used
-                            ],
-                        },
-                    )
+            # The slot is held for the whole generation, not just its start, which is what
+            # actually bounds how much of the machine the model can take.
+            with llm_slot():
+                for event in answer_stream(
+                    session, embedder, llm, body.question, k=body.k, days=body.days
+                ):
+                    if isinstance(event, StreamMeta):
+                        meta_at = time.perf_counter()
+                        retrieved = event.retrieved
+                        yield _sse("meta", {"retrieved": event.retrieved})
+                    elif isinstance(event, StreamDelta):
+                        yield _sse("token", {"delta": event.text})
+                    elif isinstance(event, Answer):
+                        final = event
+                        yield _sse(
+                            "done",
+                            {
+                                "cited": event.cited,
+                                "hallucinated": event.hallucinated,
+                                "used": [
+                                    UsedPaper.from_scored(item).model_dump() for item in event.used
+                                ],
+                            },
+                        )
+        except HTTPException as exc:
+            # Headers are already on the wire, so a busy queue is an SSE error rather than a
+            # status code.
+            yield _sse("error", {"code": exc.status_code, "message": str(exc.detail)})
+            return
         except OpenAIError:
             yield _sse("error", {"code": 502, "message": "LLM backend unavailable"})
             return
