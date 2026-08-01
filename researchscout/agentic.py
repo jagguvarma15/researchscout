@@ -20,6 +20,7 @@ from researchscout.llm.base import LLM
 from researchscout.retrieve.search import ScoredPaper, retrieve
 from researchscout.schema import normalize_arxiv_id
 from researchscout.store.facets import PaperFacets
+from researchscout.useragent import default_headers
 
 _DECOMPOSE_SYSTEM = (
     "Break the user's research question into 2-4 focused sub-questions, one per line, with no "
@@ -93,6 +94,7 @@ def _reference_arxiv_ids(arxiv_id: str, *, limit: int) -> list[str] | None:
         resp = httpx.get(
             f"{_S2_BASE}/paper/arXiv:{arxiv_id}/references",
             params={"fields": "externalIds", "limit": limit},
+            headers=default_headers(),
             timeout=_REQUEST_TIMEOUT,
             follow_redirects=True,
         )
