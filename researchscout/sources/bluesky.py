@@ -26,6 +26,7 @@ from sqlalchemy import select
 
 from researchscout.schema import Signal, SignalType, normalize_arxiv_id
 from researchscout.sources.base import HealthStatus, RawItem, Source, register, source_config
+from researchscout.useragent import default_headers
 
 _SEARCH = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts"
 _REQUEST_TIMEOUT = 30.0
@@ -103,7 +104,11 @@ class BlueskySource(Source):
             if cursor:
                 params["cursor"] = cursor
             resp = httpx.get(
-                _SEARCH, params=params, timeout=_REQUEST_TIMEOUT, follow_redirects=True
+                _SEARCH,
+                params=params,
+                headers=default_headers(),
+                timeout=_REQUEST_TIMEOUT,
+                follow_redirects=True,
             )
             if resp.status_code in (403, 429) and posts:
                 break  # burst cap mid-walk: a partial snapshot beats an error
@@ -188,6 +193,7 @@ class BlueskySource(Source):
             resp = httpx.get(
                 _SEARCH,
                 params={"q": "domain:arxiv.org", "limit": 1},
+                headers=default_headers(),
                 timeout=_REQUEST_TIMEOUT,
                 follow_redirects=True,
             )
