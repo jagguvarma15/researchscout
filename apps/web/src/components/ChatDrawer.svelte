@@ -4,9 +4,11 @@
   // delegates rendering to ChatMessage. Pure logic (frame parsing, formatting, matching,
   // commands) lives in src/lib where it is unit-tested.
 
-  import { MessageCircle, Send, X } from 'lucide-svelte';
+  import { MessageCircle, Send, Square, X } from 'lucide-svelte';
 
-  import type { Message, WebHit } from '../lib/chat-types';
+  import type { KeywordCount, Message, WebHit } from '../lib/chat-types';
+  import { commandHint, parseInput } from '../lib/commands';
+  import { loaderMatches, matchKeywords } from '../lib/keyword-match';
   import { parseSseFrame, splitSseBuffer, type SseEvent } from '../lib/sse';
   import ChatMessage from './ChatMessage.svelte';
   import ScoutMascot from './ScoutMascot.svelte';
@@ -20,6 +22,45 @@
   let inputEl: HTMLInputElement | undefined = $state();
   let drawer: HTMLElement | undefined = $state();
   let everOpened = false;
+  // The corpus keyword dictionary; null until loaded (or on failure), and every keyword
+  // feature degrades to the pre-dictionary behavior while it is.
+  let dictionary: KeywordCount[] | null = $state(null);
+  let controller: AbortController | null = null;
+
+  const hint = $derived(commandHint(input));
+  const suggestions = $derived(
+    !busy && dictionary && !input.trimStart().startsWith('/') && input.trim().length >= 2
+      ? matchKeywords(input, dictionary)
+      : [],
+  );
+
+  $effect(() => {
+    // Refresh the dictionary on each open: imports and stream enrichment between opens
+    // should show up, and the read is a few milliseconds server-side.
+    if (open) void loadDictionary();
+  });
+
+  async function loadDictionary() {
+    try {
+      const response = await fetch('/api/keywords');
+      if (!response.ok) return;
+      const payload = await response.json();
+      dictionary = payload.items;
+    } catch {
+      dictionary = null;
+    }
+  }
+
+  function insertKeyword(keyword: string) {
+    // Replace the partial word being typed with the chosen keyword.
+    input = input.replace(/[a-z0-9]+$/i, '').trimEnd();
+    input = input ? `${input} ${keyword} ` : `${keyword} `;
+    inputEl?.focus();
+  }
+
+  function stop() {
+    controller?.abort();
+  }
 
   // The "Ask Scout!" bubble shows until the drawer is opened once, then never again.
   // Storage failures (private mode) degrade to showing it each load - never a crash.
@@ -101,11 +142,70 @@
 
   async function send(event: SubmitEvent) {
     event.preventDefault();
-    const question = input.trim();
-    if (!question || busy) return;
-    input = '';
-    messages.push({ role: 'user', text: question });
-    await ask(question, 'fast');
+    if (busy) return;
+    // Unknown commands and commands without an argument never send; the hint line under
+    // the composer explains the command set instead.
+    const parsed = parseInput(input);
+    if (parsed.kind === 'unknown') return;
+    if (parsed.kind === 'web' && parsed.query) {
+      input = '';
+      messages.push({ role: 'user', text: `/web ${parsed.query}` });
+      await runWebSearch(parsed.query);
+    } else if (parsed.kind === 'ai' && parsed.question) {
+      input = '';
+      messages.push({ role: 'user', text: `/ai ${parsed.question}` });
+      await ask(parsed.question, 'llm');
+    } else if (parsed.kind === 'question' && parsed.text) {
+      input = '';
+      messages.push({ role: 'user', text: parsed.text });
+      await ask(parsed.text, 'fast');
+    }
+  }
+
+  async function runWebSearch(query: string) {
+    // The /web command: an assistant message holding web hit cards, reusing the same
+    // fallback rendering and one-click import flow as the notfound path.
+    busy = true;
+    controller = new AbortController();
+    const current: Message = {
+      role: 'assistant',
+      text: '',
+      phase: 'searching',
+      question: query,
+      webBusy: true,
+    };
+    messages.push(current);
+    try {
+      const response = await fetch(`/api/search/web?q=${encodeURIComponent(query)}`, {
+        signal: controller.signal,
+      });
+      if (response.status === 404) {
+        current.text = 'Web search is disabled.';
+        current.error = true;
+        return;
+      }
+      if (response.status === 429) {
+        current.text = 'Slow down a little - try again in a few seconds.';
+        current.error = true;
+        return;
+      }
+      if (!response.ok) throw new Error(String(response.status));
+      const payload = await response.json();
+      current.webHits = payload.hits;
+      current.webFailed = payload.providers_failed;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        current.stopped = true;
+      } else {
+        current.webHits = [];
+        current.webFailed = ['arxiv', 's2'];
+      }
+    } finally {
+      current.webBusy = false;
+      current.phase = 'done';
+      busy = false;
+      controller = null;
+    }
   }
 
   function summarize(message: Message) {
@@ -117,7 +217,12 @@
 
   async function ask(question: string, mode: 'fast' | 'llm') {
     busy = true;
+    controller = new AbortController();
     const current: Message = { role: 'assistant', text: '', phase: 'searching', mode, question };
+    if (mode === 'fast' && dictionary) {
+      // The loader line names the dictionary keywords the question hit.
+      current.matched = loaderMatches(question, dictionary);
+    }
     messages.push(current);
 
     try {
@@ -125,6 +230,7 @@
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ question, mode }),
+        signal: controller.signal,
       });
       if (response.status === 429) {
         const wait = response.headers.get('Retry-After');
@@ -152,12 +258,18 @@
           if (parsed) applyEvent(parsed, current);
         }
       }
-    } catch {
-      current.text = 'Connection lost mid-answer - try again.';
-      current.error = true;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        // The Stop button: keep whatever streamed and mark the message, no error styling.
+        current.stopped = true;
+      } else {
+        current.text = 'Connection lost mid-answer - try again.';
+        current.error = true;
+      }
     } finally {
       current.phase = 'done';
       busy = false;
+      controller = null;
     }
   }
 
@@ -242,6 +354,17 @@
       />
     {/each}
   </div>
+  {#if hint}
+    <p class="commandhint">{hint}</p>
+  {:else if suggestions.length > 0}
+    <p class="suggestions" aria-label="Keyword suggestions">
+      {#each suggestions as suggestion}
+        <button type="button" class="chip" onclick={() => insertKeyword(suggestion.keyword)}>
+          {suggestion.keyword}<span class="chipcount">{suggestion.papers}</span>
+        </button>
+      {/each}
+    </p>
+  {/if}
   <form onsubmit={send}>
     <input
       type="text"
@@ -250,9 +373,15 @@
       bind:value={input}
       disabled={busy}
     />
-    <button type="submit" disabled={busy || !input.trim()} aria-label="Send">
-      <Send size={17} aria-hidden="true" />
-    </button>
+    {#if busy}
+      <button type="button" class="halt" onclick={stop} aria-label="Stop">
+        <Square size={15} aria-hidden="true" />
+      </button>
+    {:else}
+      <button type="submit" disabled={!input.trim()} aria-label="Send">
+        <Send size={17} aria-hidden="true" />
+      </button>
+    {/if}
   </form>
   <p class="disclaimer">Scout can make mistakes, double check responses.</p>
 </aside>
@@ -412,11 +541,58 @@
     font-size: 0.9rem;
     max-width: 24rem;
   }
+  .commandhint {
+    margin: 0;
+    padding: 0.35rem 1.25rem;
+    border-top: 1px solid var(--line, #e6e1d5);
+    font-size: 0.75rem;
+    color: var(--muted, #5d6570);
+  }
+  .suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0.45rem 1.25rem 0.1rem;
+    border-top: 1px solid var(--line, #e6e1d5);
+  }
+  .chip {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.3rem;
+    border: 1px solid var(--line, #e6e1d5);
+    border-radius: 999px;
+    background: var(--surface, #fff);
+    color: var(--ink, #17191c);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 500;
+    padding: 0.15rem 0.6rem;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+  .chip:hover {
+    background: var(--surface-2, #f4f0e8);
+  }
+  .chip:focus-visible {
+    outline: 2px solid var(--accent, #c2410c);
+    outline-offset: 2px;
+  }
+  .chipcount {
+    font-size: 0.68rem;
+    color: var(--muted, #5d6570);
+  }
   form {
     display: flex;
     gap: 0.5rem;
     padding: 0.9rem 1.25rem 0.5rem;
     border-top: 1px solid var(--line, #e6e1d5);
+  }
+  /* The hint and suggestion rows already draw the divider; avoid doubling it. */
+  .commandhint + form,
+  .suggestions + form {
+    border-top: none;
+    padding-top: 0.35rem;
   }
   input {
     flex: 1;
@@ -461,6 +637,13 @@
   form button:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  form button.halt {
+    background: var(--ink, #17191c);
+    color: var(--surface, #fff);
+  }
+  form button.halt:hover {
+    background: var(--muted, #5d6570);
   }
   .disclaimer {
     margin: 0;
