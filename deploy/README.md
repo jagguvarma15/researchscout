@@ -56,24 +56,39 @@ tailscale funnel --bg 8001  # publishes the API (on the host, not in compose)
 ## Moving the existing data in
 
 The development stack keeps its data in `.local/pgdata` under Homebrew Postgres; the deployment
-keeps its own volume. Copy one into the other once:
+keeps its own volume. Copy one into the other once.
+
+Note the drop and recreate: `make deploy-up` has already run the migrations, so the target
+holds an empty schema, and restoring a plain dump on top of it fails on every `CREATE TABLE`.
+The dump carries its own schema and its own `alembic_version`, so the cleanest target is an
+empty database rather than a migrated one.
 
 ```bash
 # 1. Dump the development database (with the local stack running).
 pg_dump -h localhost -p 5432 -U researchscout --format plain --no-owner researchscout \
   > /tmp/researchscout-dev.sql
 
-# 2. Start only the database, and let migrations create the schema.
-docker compose -f deploy/docker-compose.yml up -d postgres
-docker compose -f deploy/docker-compose.yml run --rm migrate
+# 2. Free the database: the API and scheduler hold connections that block a drop.
+docker compose -f deploy/docker-compose.yml stop api scheduler
 
-# 3. Restore into it.
+# 3. Recreate it empty, then restore into it.
 docker compose -f deploy/docker-compose.yml exec -T postgres \
-  psql --username researchscout --dbname researchscout < /tmp/researchscout-dev.sql
+  psql -U researchscout -d postgres \
+  -c 'DROP DATABASE researchscout WITH (FORCE)' \
+  -c 'CREATE DATABASE researchscout OWNER researchscout'
 
-# 4. Check the counts match before trusting it.
+docker compose -f deploy/docker-compose.yml exec -T postgres \
+  psql -U researchscout -d researchscout -v ON_ERROR_STOP=1 < /tmp/researchscout-dev.sql
+
+docker compose -f deploy/docker-compose.yml start api scheduler
+```
+
+Check the counts match before trusting it:
+
+```bash
 psql -h localhost -p 5432 -U researchscout -d researchscout -c 'select count(*) from papers'
-psql -h localhost -p 5433 -U researchscout -d researchscout -c 'select count(*) from papers'
+docker compose -f deploy/docker-compose.yml exec -T postgres \
+  psql -U researchscout -d researchscout -c 'select count(*) from papers'
 ```
 
 The Homebrew cluster is left untouched, so it stays the rollback.
