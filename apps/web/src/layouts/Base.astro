@@ -91,11 +91,13 @@ const termsOutstanding = account !== null && !account.terms_accepted;
     </main>
     <footer class="site-footer">
       <div class="container footer-inner">
-        <p>Papers from arXiv and friends, scored by freshness and signals.</p>
-        <p class="footer-legal">
-          Copyright (c) 2026 Jagadesh Varma. MIT licensed. Paper metadata from arXiv under CC0;
-          data from Semantic Scholar. Papers stay under their authors' copyright.
-        </p>
+        <div class="footer-text">
+          <p>Papers from arXiv and friends, scored by freshness and signals.</p>
+          <p class="footer-legal">
+            Copyright (c) 2026 Jagadesh Varma. MIT licensed. Metadata from arXiv under CC0; data
+            from Semantic Scholar.
+          </p>
+        </div>
         <p class="footer-links">
           <a href="/about">About</a>
           <a href="/terms">Terms</a>
@@ -221,9 +223,16 @@ const termsOutstanding = account !== null && !account.terms_accepted;
     padding-top: 1.1rem;
     padding-bottom: 2rem;
   }
+  /* Text on the left, links on the right, stacking on narrow screens. */
+  .footer-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.8rem 1.5rem;
+  }
   .footer-inner p {
     margin: 0;
-    max-width: 70ch;
   }
   /* Scoped past `.footer-inner p` above, which would otherwise win on specificity. */
   .footer-inner .footer-legal {
@@ -235,7 +244,8 @@ const termsOutstanding = account !== null && !account.terms_accepted;
     display: flex;
     flex-wrap: wrap;
     gap: 1rem;
-    margin-top: 0.6rem;
+    margin-left: auto;
+    text-align: right;
   }
   .footer-legal a {
     white-space: nowrap;
