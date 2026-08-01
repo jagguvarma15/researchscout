@@ -143,7 +143,7 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
             initialOpen={Astro.url.searchParams.get('read') === '1'}
           />
         )}
-        <Telemetry client:idle surface="detail" paperId={paper.id} />
+        <Telemetry client:idle surface="detail" paperId={paper.id} enabled={Astro.locals.user !== null} />
         {related.length > 0 && (
           <section class="related">
             <h2 class="related-title">Related papers</h2>
