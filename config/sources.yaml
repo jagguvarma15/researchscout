@@ -1,11 +1,22 @@
 # Source registry — enabling/disabling a source is config, not code. The scheduler runs every
 # source marked enabled for its kind (content sources ingest papers; signal sources attach
 # observations to papers already stored).
+#
+# Every source also carries an `attribution` block: who the data belongs to, the terms it
+# arrives under, and what this app takes from it. GET /v1/sources serves it verbatim to the
+# /about page, so a new connector cannot ship without saying where its data comes from.
+# Nothing else in a source block is ever served: `api_key`, `token` and `mailto` stay here.
 sources:
   arxiv:
     enabled: true
     kind: content
     cadence: daily
+    attribution:
+      name: arXiv
+      homepage: https://arxiv.org
+      terms: https://info.arxiv.org/help/api/tou.html
+      data_license: Metadata CC0 1.0; each paper stays under the license its author chose
+      provides: Titles, abstracts, authors, categories, ids and links, plus full text for papers you save or open
     # All arXiv groups: tech (cs/stat/eess) plus every non-tech archive, so the tech vs
     # non-tech facet has real data. Trim this list to cut ingest volume; deep backfills
     # should run per group (`scout ingest --category cs.* --resume`).
@@ -19,16 +30,34 @@ sources:
     enabled: true
     kind: signal
     cadence: daily
+    attribution:
+      name: Semantic Scholar
+      homepage: https://www.semanticscholar.org
+      terms: https://www.semanticscholar.org/product/api/license
+      data_license: Governed by the licenses accompanying the data (CC BY-NC or ODC-BY); attribution required
+      provides: Citation counts per paper
   hf_trending:
     enabled: true
     kind: signal
     cadence: daily
+    attribution:
+      name: Hugging Face Papers
+      homepage: https://huggingface.co/papers
+      terms: https://huggingface.co/terms-of-service
+      data_license: Community submissions; each entry stays with the people who posted it
+      provides: Daily paper rank and per-paper upvote counts
   hn_discussion:
     # Hacker News via the Algolia search API: keyless. Points feed social_mention, comment
     # counts feed discussion; both attach only to papers already stored.
     enabled: true
     kind: signal
     cadence: daily
+    attribution:
+      name: Hacker News (Algolia API)
+      homepage: https://news.ycombinator.com
+      terms: https://hn.algolia.com/api
+      data_license: Reader-submitted posts; each stays with the person who wrote it
+      provides: Story points and comment counts, plus the public story ids they came from
   bluesky:
     # Unauthenticated searchPosts on api.bsky.app (the documented public host 403s for search).
     # Post engagement feeds social_mention, reply counts feed discussion. Excluded handles are
@@ -36,6 +65,12 @@ sources:
     enabled: true
     kind: signal
     cadence: daily
+    attribution:
+      name: Bluesky
+      homepage: https://bsky.app
+      terms: https://bsky.social/about/support/tos
+      data_license: Posts stay with their authors
+      provides: Engagement and reply counts only - no handles, no post text
     exclude_accounts:
       - arxiv-daily-bot.bsky.social
       - ai-firehose.column.social
@@ -45,6 +80,12 @@ sources:
     enabled: false
     kind: signal
     cadence: daily
+    attribution:
+      name: GitHub
+      homepage: https://github.com
+      terms: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service
+      data_license: Public repository metadata read through the REST API
+      provides: Star count of the repository that names a paper
   openalex:
     # Off by default: a keyless citation cross-check and S2-outage fallback. With both this and
     # semantic_scholar on, the citation contribution to the breakthrough score counts twice
@@ -52,6 +93,12 @@ sources:
     enabled: false
     kind: signal
     cadence: daily
+    attribution:
+      name: OpenAlex
+      homepage: https://openalex.org
+      terms: https://developers.openalex.org/
+      data_license: CC0 1.0
+      provides: Citation counts, as a keyless cross-check on Semantic Scholar
     # mailto: you@example.com
   openreview:
     # Off by default: best-effort review scores via the search endpoint (the /notes listing is
@@ -60,3 +107,9 @@ sources:
     enabled: false
     kind: signal
     cadence: daily
+    attribution:
+      name: OpenReview
+      homepage: https://openreview.net
+      terms: https://openreview.net/legal/terms
+      data_license: Reviews stay with their venues and reviewers
+      provides: Review scores where a venue publishes them
