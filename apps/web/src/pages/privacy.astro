@@ -1,0 +1,194 @@
+---
+import Base from '../layouts/Base.astro';
+import { CONTACT_URL, MINIMUM_AGE, TERMS_EFFECTIVE } from '../lib/legal';
+---
+
+<Base title="Privacy">
+  <div class="legal">
+    <header class="hero">
+      <h1 class="page-title">Privacy notice</h1>
+      <p class="version">Effective {TERMS_EFFECTIVE}</p>
+      <p class="lede">
+        What this site stores about you, why, who else can see it, and how to get rid of it.
+        Written from the code rather than from a template, and not legal advice. If you run
+        ResearchScout yourself, everything below stays on the machine you run it on.
+      </p>
+    </header>
+
+    <section class="block">
+      <h2>Who is responsible</h2>
+      <p>
+        The site is operated by one person as a personal, non-commercial project. There is no
+        company behind it. Reach the operator through{' '}
+        <a href={CONTACT_URL} rel="noopener noreferrer" target="_blank">the project's issue
+        tracker</a>.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>What is collected</h2>
+      <ul>
+        <li>
+          <strong>Your account.</strong> An identifier, your email address, and a display name,
+          all supplied by the sign-in provider when you register. Passwords are handled by that
+          provider and never reach this site.
+        </li>
+        <li>
+          <strong>What you keep.</strong> Papers you save and the research interests you type
+          into your profile.
+        </li>
+        <li>
+          <strong>What you read here.</strong> Which papers were shown to you, which you opened,
+          how long you stayed on one, which you dismissed, and when. This is what makes the
+          personalized feed work.
+        </li>
+        <li>
+          <strong>Questions you ask Scout.</strong> Answers are generated on the operator's own
+          machine. A truncated copy of the question is stored with timing information to
+          diagnose slow answers.
+        </li>
+        <li>
+          <strong>Ordinary server records.</strong> Requests reach the site through hosting and
+          network providers that log IP addresses and request details for security and abuse
+          prevention, as any web service does.
+        </li>
+      </ul>
+      <p>
+        There are no analytics, no advertising, no tracking pixels, no third-party fonts or
+        scripts, and nothing is sold or shared for marketing. The only cookie is the one that
+        keeps you signed in, which is why the site does not ask for cookie consent.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>Why it is collected</h2>
+      <p>
+        The account exists to give you a reading list, interests and settings, which is the
+        service you asked for when you registered. Reading signals exist to rank the feed for
+        you, which is the legitimate interest of making a research radar useful; you can delete
+        them by deleting your account. Server records exist to keep the site up and to stop
+        abuse.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>Who else sees it</h2>
+      <ul>
+        <li><strong>Auth0</strong> handles registration, sign-in and password resets.</li>
+        <li><strong>Vercel</strong> serves the web pages.</li>
+        <li><strong>Cloudflare</strong> carries traffic to the backend and filters abuse.</li>
+      </ul>
+      <p>
+        Those three see what they need to do their job, under their own terms. Nobody else does.
+        Your saved papers, interests and reading history live in a database on the operator's own
+        machine, along with its backups, and are not shared with anyone.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>How long it is kept</h2>
+      <p>
+        Account data and reading history are kept while the account exists. Deleting your
+        account removes the login at the sign-in provider and every row tied to you - saved
+        papers, interests and reading events - immediately, in one step. Backups roll over
+        within a week. Questions stored for timing are truncated and carry no account
+        identifier.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>Your rights</h2>
+      <p>
+        From your <a href="/profile">profile</a> you can see what is stored, correct your
+        display name, download everything as JSON, and delete your account and its data. If you
+        are in the UK or the EU you also have the right to object to processing, to ask for a
+        copy in a portable form (the export does this), and to complain to your data protection
+        authority. Ask through the{' '}
+        <a href={CONTACT_URL} rel="noopener noreferrer" target="_blank">issue tracker</a> and it
+        will be handled.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>Children</h2>
+      <p>
+        The site is not for anyone under {MINIMUM_AGE}. No account should be created for a
+        child, and any that is found will be deleted.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>Where papers come from</h2>
+      <p>
+        The research data on the site is not personal data: it comes from arXiv, Semantic
+        Scholar and the other sources listed on the <a href="/about">about page</a>, which
+        explains what is taken from each and under what terms. Opening the reader makes your
+        browser fetch the PDF from arXiv directly, so arXiv sees that request as it would any
+        visit.
+      </p>
+    </section>
+
+    <section class="block">
+      <h2>Changes</h2>
+      <p>
+        If this notice changes in a way that matters, the terms version is bumped and the site
+        asks you to read and accept it again on your next visit.
+      </p>
+    </section>
+  </div>
+</Base>
+
+<style>
+  .legal {
+    max-width: 58rem;
+    margin: 0 auto;
+  }
+  .hero {
+    text-align: center;
+    margin-bottom: var(--space-6);
+  }
+  .hero .page-title {
+    margin-bottom: 0.35rem;
+  }
+  .version {
+    margin: 0 0 0.9rem;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .lede {
+    max-width: 60ch;
+    margin: 0 auto;
+    color: var(--muted);
+    font-size: var(--text-md);
+    line-height: 1.6;
+  }
+  .block {
+    margin-bottom: var(--space-6);
+    padding-top: var(--space-5);
+    border-top: 1px solid var(--line);
+  }
+  .block h2 {
+    margin: 0 0 0.9rem;
+    font-size: var(--text-lg);
+    letter-spacing: -0.01em;
+    text-align: center;
+  }
+  .block p,
+  .block ul {
+    max-width: 62ch;
+    margin: 0 auto 0.8rem;
+    line-height: 1.65;
+  }
+  .block ul {
+    padding-left: 1.2rem;
+  }
+  .block li {
+    margin-bottom: 0.45rem;
+  }
+  .block p:last-child,
+  .block ul:last-child {
+    margin-bottom: 0;
+  }
+</style>
