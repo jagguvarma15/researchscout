@@ -16,6 +16,9 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "pgvector>=0.3",
     "sentence-transformers>=3.0",
+    # Named explicitly, though sentence-transformers already pulls it, so the source below can
+    # apply: uv only honours [tool.uv.sources] for direct dependencies.
+    "torch>=2.12",
     "openai>=1.0",
     "selectolax>=0.4.11",
     "bytewax[kafka]>=0.21,<0.22",
@@ -92,3 +95,14 @@ testpaths = ["tests"]
 markers = [
     "integration: needs a real Postgres (run separately; excluded from default unit runs)",
 ]
+
+# CPU-only torch on Linux. Embedding and reranking run on this machine's CPU (Metal on macOS),
+# and the default Linux wheels drag in several gigabytes of CUDA libraries that a container on
+# a laptop will never load. The marker keeps macOS resolution on the default index.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
