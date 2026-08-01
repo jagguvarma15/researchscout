@@ -4,9 +4,12 @@ from pathlib import Path
 import httpx
 import pytest
 
+import researchscout.sources.arxiv as arxiv
 from researchscout.schema import Paper
 from researchscout.sources import enabled_sources, get_source
 from researchscout.sources.arxiv import ArxivSource, _entry_payload, _normalize_payload
+from researchscout.sources.base import describe_sources, registered_sources
+from researchscout.useragent import USER_AGENT
 
 FIXTURE = Path(__file__).parent / "fixtures" / "arxiv_query.atom"
 
@@ -114,18 +117,63 @@ def test_fetch_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
     assert exhausted is None  # partial page → done
 
 
-def test_fetch_sleeps_before_later_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_paces_every_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """arXiv asks for one request every three seconds, so the floor spans fetches.
+
+    Paging alone is not enough: a second category's first page, or a health probe, would
+    otherwise follow the previous request immediately. The clock is per process, which is
+    why the test resets it and drives a fake one.
+    """
     monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
     monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "2.5")
+    monkeypatch.setattr(arxiv, "_last_request_at", None)
     sleeps: list[float] = []
-    src = ArxivSource(page_size=1, sleep=sleeps.append)
+    now = [100.0]
+    src = ArxivSource(page_size=1, sleep=sleeps.append, clock=lambda: now[0])
 
     src.fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
-    assert sleeps == []  # the first page never waits
+    assert sleeps == []  # nothing to wait for: the first request of the process
 
     src.fetch(datetime(2024, 1, 1, tzinfo=UTC), "1")
-    assert sleeps == [2.5]
+    assert sleeps == [2.5]  # next page, no time elapsed: the whole floor
+
+    now[0] += 1.0
+    other = ArxivSource(page_size=1, sleep=sleeps.append, clock=lambda: now[0])
+    other.fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
+    assert sleeps == [2.5, 1.5]  # a fresh source's first page waits out the remainder
 
     monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
     src.fetch(datetime(2024, 1, 1, tzinfo=UTC), "2")
-    assert sleeps == [2.5]  # zero disables the pause
+    assert sleeps == [2.5, 1.5]  # zero disables the pause
+
+
+def test_fetch_identifies_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The /about page claims requests are identified; this is that claim."""
+    seen: dict[str, str] = {}
+
+    def capture(*args: object, **kwargs: object) -> _Resp:
+        seen.update(kwargs.get("headers") or {})  # type: ignore[arg-type]
+        return _Resp()
+
+    monkeypatch.setattr(httpx, "get", capture)
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+    ArxivSource(page_size=1).fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
+
+    assert seen["User-Agent"] == USER_AGENT
+    assert seen["User-Agent"].startswith("researchscout/")
+    assert "https://github.com/" in seen["User-Agent"]
+
+
+def test_every_source_declares_attribution() -> None:
+    """A connector cannot ship without saying where its data comes from."""
+    described = describe_sources()
+    assert [d.name for d in described] == [cls.name for cls in registered_sources()]
+
+    for source in described:
+        attribution = source.attribution
+        assert attribution is not None, f"{source.name} has no attribution block"
+        assert attribution.name
+        assert attribution.provides
+        assert attribution.data_license
+        for url in (attribution.homepage, attribution.terms):
+            assert url.startswith("https://"), f"{source.name}: {url}"
