@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
+from researchscout.answer import FastEntry
 from researchscout.retrieve.search import ScoredPaper
 from researchscout.schema import Author, Paper, PaperLabel
 
@@ -96,6 +97,32 @@ class AskResponse(BaseModel):
     used: list[UsedPaper]
     # False only for fast-mode answers under the relevance floor (nothing matched).
     found: bool = True
+
+
+class FastResultItem(BaseModel):
+    """One structured fast-answer hit, streamed to the drawer in the ``results`` event."""
+
+    id: str
+    title: str
+    published_at: datetime
+    venue: str | None
+    matches: list[str]
+    keywords: list[str]
+    excerpt: str | None
+    relevance: float | None
+
+    @classmethod
+    def from_entry(cls, entry: FastEntry) -> FastResultItem:
+        return cls(
+            id=entry.id,
+            title=entry.title,
+            published_at=entry.published_at,
+            venue=entry.venue,
+            matches=entry.matches,
+            keywords=entry.keywords,
+            excerpt=entry.excerpt,
+            relevance=entry.relevance,
+        )
 
 
 class WebSearchHit(BaseModel):
