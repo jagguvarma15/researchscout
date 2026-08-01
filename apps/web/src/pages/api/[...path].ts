@@ -6,13 +6,12 @@ import type { APIRoute } from 'astro';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:8000';
 const SITE_URL = process.env.SITE_URL ?? 'http://localhost:4321';
-// Cloudflare Access service token for the API hostname. Unset locally, where the API is
-// reachable directly.
-const ACCESS_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID ?? '';
-const ACCESS_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET ?? '';
+// The shared secret that gets this deployment through the API's front door. Unset locally,
+// where the API is reachable directly and open.
+const SERVICE_TOKEN = process.env.API_SERVICE_TOKEN ?? '';
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-export const ALL: APIRoute = async ({ locals, params, request, url }) => {
+export const ALL: APIRoute = async ({ clientAddress, locals, params, request, url }) => {
   if (MUTATING.has(request.method)) {
     const origin = request.headers.get('origin');
     const fetchSite = request.headers.get('sec-fetch-site');
@@ -27,9 +26,12 @@ export const ALL: APIRoute = async ({ locals, params, request, url }) => {
     if (value) headers.set(name, value);
   }
   if (locals.accessToken) headers.set('authorization', `Bearer ${locals.accessToken}`);
-  if (ACCESS_CLIENT_ID && ACCESS_CLIENT_SECRET) {
-    headers.set('cf-access-client-id', ACCESS_CLIENT_ID);
-    headers.set('cf-access-client-secret', ACCESS_CLIENT_SECRET);
+  if (SERVICE_TOKEN) {
+    headers.set('x-rs-service-token', SERVICE_TOKEN);
+    // Every request reaches the API from this server, so without this the rate limiter would
+    // put every signed-out visitor in one bucket. The API believes it only because the token
+    // above proves where it came from.
+    if (clientAddress) headers.set('x-rs-client-ip', clientAddress);
   }
 
   const response = await fetch(`${API_URL}/v1/${params.path}${url.search}`, {
