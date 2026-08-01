@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     auth0_domain: str = ""
     auth0_mgmt_client_id: str = ""
     auth0_mgmt_client_secret: str = ""
+    # A shared secret the site's own server sends with every API call. Empty (the default)
+    # leaves the API open, which is what a local install wants; set it once the API has a
+    # public hostname, and anything arriving without it gets a 404.
+    service_token: str = ""
     # Signed-out callers get the extractive answer path only, on a tighter budget than an
     # account: no model call, and a bucket keyed by address rather than by account.
     chat_rate_limit_anonymous: int = 5
