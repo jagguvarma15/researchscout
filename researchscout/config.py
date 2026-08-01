@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     oidc_audience: str = "api"
     # Where to fetch signing keys; defaults to the issuer's JWKS endpoint.
     oidc_jwks_url: str | None = None
+    # The terms version the site currently asks people to accept. Bumping it makes every
+    # account re-accept on their next visit, so change it only when the terms change.
+    terms_version: str = "2026-08-01"
+    # Deleting an account must also delete the identity at the provider, or "delete my
+    # account" is a half-truth. These are an Auth0 machine-to-machine application with the
+    # delete:users scope; with an issuer set but these empty, deletion refuses rather than
+    # leaving the login behind.
+    auth0_domain: str = ""
+    auth0_mgmt_client_id: str = ""
+    auth0_mgmt_client_secret: str = ""
     # Chat rate limiting (in-process fixed window).
     # Web search fallback (arXiv + Semantic Scholar cards on not-found answers). Default
     # ON deliberately (a documented deviation like the guardrail): user-triggered, zero
