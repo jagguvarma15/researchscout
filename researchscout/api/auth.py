@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Annotated, Any
 
+import httpx
 import jwt
 from fastapi import Depends, HTTPException, Request
 from jwt import InvalidTokenError, PyJWKClient
@@ -27,8 +28,10 @@ from sqlalchemy.orm import Session
 from researchscout.api.deps import get_session
 from researchscout.config import get_settings
 from researchscout.store.users import upsert_user
+from researchscout.useragent import default_headers
 
 _BEARER = {"WWW-Authenticate": "Bearer"}
+_DISCOVERY_TIMEOUT = 10.0
 
 
 @dataclass
@@ -40,10 +43,30 @@ class User:
 _LOCAL_USER = User(sub="local", username="local")
 
 
+def _discover_jwks_url(issuer: str) -> str:
+    """Ask the issuer where its signing keys are, the way OIDC says to.
+
+    This used to guess Keycloak's path, which is wrong for every other provider - against
+    Auth0 it 404s and every token is rejected as invalid, with nothing in the response to
+    suggest the keys were the problem. The discovery document is the one place that is
+    correct for all of them.
+    """
+    resp = httpx.get(
+        f"{issuer.rstrip('/')}/.well-known/openid-configuration",
+        headers=default_headers(),
+        timeout=_DISCOVERY_TIMEOUT,
+    )
+    resp.raise_for_status()
+    jwks_uri = resp.json().get("jwks_uri")
+    if not jwks_uri:
+        raise PyJWKClientError(f"{issuer} published no jwks_uri")
+    return str(jwks_uri)
+
+
 @lru_cache(maxsize=1)
 def _jwk_client() -> PyJWKClient:
     settings = get_settings()
-    url = settings.oidc_jwks_url or f"{settings.oidc_issuer}/protocol/openid-connect/certs"
+    url = settings.oidc_jwks_url or _discover_jwks_url(settings.oidc_issuer)
     return PyJWKClient(url, cache_keys=True)
 
 
