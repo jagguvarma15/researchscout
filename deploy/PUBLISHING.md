@@ -56,22 +56,68 @@ posting the link somewhere busy.
 
 ## 2. Auth0
 
-1. Create a tenant. Applications -> Create -> Regular Web Application.
-   - Allowed Callback URLs: `https://<site>/callback`
-   - Allowed Logout URLs: `https://<site>`
-   - Note the domain, client id and client secret.
-2. APIs -> Create API. Identifier (the audience) is what the backend validates - it is a
-   name, not a URL that has to resolve, so something stable like `https://researchscout.api`
-   is fine. Set `RS_OIDC_AUDIENCE` to exactly that string, and
-   `RS_OIDC_ISSUER` to `https://<tenant>/` (with the trailing slash).
-3. Applications -> Create -> Machine to Machine, authorized for the Auth0 Management API with
-   the `delete:users` scope. Its credentials go in `RS_AUTH0_DOMAIN`,
-   `RS_AUTH0_MGMT_CLIENT_ID` and `RS_AUTH0_MGMT_CLIENT_SECRET`. Without these, account
-   deletion refuses rather than deleting rows and leaving the login behind.
-4. Restart the backend so it picks up the issuer: `make deploy-down && make deploy-up`.
+Three things get created, and each hands back values that go somewhere specific. The gotchas
+below are the ones that cost an afternoon rather than a minute.
 
-Check: with the service token header, `/v1/me` returns 401 without a bearer token, and
-`/v1/papers` still returns papers.
+### The application people sign in through
+
+Applications -> Create Application -> **Regular Web Application** (not Single Page: this flow
+runs on the server and keeps a client secret). Skip the quickstart, go to Settings.
+
+- **Allowed Callback URLs**: `http://localhost:4321/callback` while testing locally, and
+  `https://<your-site>.vercel.app/callback` once Vercel has given you a name. Both can sit in
+  the list, comma separated.
+- **Allowed Logout URLs**: `http://localhost:4321` and `https://<your-site>.vercel.app`.
+- Advanced Settings -> Grant Types: **Authorization Code** and **Refresh Token** both ticked.
+  Without the second, sessions end when the access token expires instead of renewing.
+
+Copy the Domain, Client ID and Client Secret.
+
+### The API the tokens are for
+
+APIs -> Create API.
+
+- **Name**: anything. **Identifier**: `https://researchscout.api` - this is the audience the
+  backend validates, it is a name rather than a URL that resolves, and it must match
+  `RS_OIDC_AUDIENCE` character for character.
+- **Signing Algorithm**: RS256. The backend accepts nothing else.
+- After creating it, Settings -> **Allow Offline Access: on**. This is the one people miss:
+  without it the `offline_access` scope is ignored, no refresh token is issued, and everyone
+  is signed out when their access token expires.
+
+### The application that deletes accounts
+
+Applications -> Create Application -> **Machine to Machine**, authorized for the **Auth0
+Management API**, with the **`delete:users`** scope and nothing else.
+
+Copy its Domain, Client ID and Client Secret - they are different from the first application's.
+
+### Where the values go
+
+| Auth0 | Setting | Format |
+| --- | --- | --- |
+| Domain | `RS_OIDC_ISSUER` in `deploy/.env` | `https://tenant.us.auth0.com/` - scheme and trailing slash |
+| Domain | `RS_AUTH0_DOMAIN` in `deploy/.env` | `tenant.us.auth0.com` - bare, no scheme, no slash |
+| Domain | `AUTH0_DOMAIN` in Vercel | bare, as above |
+| API Identifier | `RS_OIDC_AUDIENCE` and Vercel's `AUTH0_AUDIENCE` | identical in both |
+| Web app Client ID / Secret | Vercel `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` | |
+| M2M Client ID / Secret | `RS_AUTH0_MGMT_CLIENT_ID` / `RS_AUTH0_MGMT_CLIENT_SECRET` | |
+
+The trailing slash on the issuer matters: it is compared against the `iss` claim in every
+token, which Auth0 writes with one. A mismatch is a 401 on every request and says nothing
+about why.
+
+The signing keys need no configuration - the backend reads the issuer's discovery document to
+find them.
+
+One thing to look at before inviting anyone: Authentication -> Social. A new tenant enables
+Google using Auth0's shared development keys, which are rate limited and show an Auth0 notice
+on the consent screen. Either turn the connection off or give it your own Google credentials.
+
+Then restart the backend so it picks up the issuer: `make deploy-down && make deploy-up`.
+
+Check: `curl -H "x-rs-service-token: <token>" https://<machine>.<tailnet>.ts.net/v1/me` returns
+401 (no account token), and the same request to `/v1/papers` still returns papers.
 
 ## 3. Vercel
 
