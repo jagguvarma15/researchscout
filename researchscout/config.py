@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     # OIDC issuer to require Bearer tokens instead.
     oidc_issuer: str = ""
     oidc_audience: str = "api"
-    # Where to fetch signing keys; defaults to the issuer's JWKS endpoint.
+    # Where to fetch signing keys. Left unset, the issuer's OIDC discovery document is asked,
+    # which is right for any compliant provider; set it only to skip that request.
     oidc_jwks_url: str | None = None
     # The terms version the site currently asks people to accept. Bumping it makes every
     # account re-accept on their next visit, so change it only when the terms change.
