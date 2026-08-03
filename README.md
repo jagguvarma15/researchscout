@@ -45,9 +45,9 @@ whenever the broker is down.
 
 ## Monitoring
 
-Grafana dashboards are provisioned as code: `brew install grafana` once, then `make setup`
-renders the config and `make start` (or `make grafana-start` on its own) serves
-http://localhost:3000 with no sign-in. Four dashboards land in a ResearchScout folder:
+Four dashboards live in `config/grafana/dashboards/` as JSON, and are hosted on Grafana Cloud
+rather than by a local Grafana - the free tier costs nothing, and the machine at home has
+better uses for the memory:
 
 - Pipeline: throughput by stage and outcome, error rate, packet-weighted stage latency,
   backlog (produced but not yet injected), freshness, kind/source/category breakdowns, top errors.
@@ -58,11 +58,15 @@ http://localhost:3000 with no sign-in. Four dashboards land in a ResearchScout f
 - Corpus: paper/keyword/fulltext/chunk/signal/topic totals, papers and signals per day,
   enrichment coverage, topics by size.
 
-Everything reads the `pipeline_lineage` table and corpus tables in Postgres — no exporters or
-extra agents, and metrics accrue while Grafana is down. The dashboard JSONs under
-`config/grafana/dashboards/` are the source of truth (UI edits are disabled); edits hot-reload
-within 30 seconds. Grafana runs anonymous with the Admin role, which is safe only because it
-binds to 127.0.0.1 — do not loosen `http_addr` in `config/grafana/grafana.ini.template`.
+Everything reads the `pipeline_lineage` table and corpus tables in Postgres - no exporters and
+no metrics agent, and the numbers accrue whether anything is watching or not. Grafana Cloud
+reaches that database through Private Data Source Connect: an agent in the deployment stack
+opens an outbound tunnel, so the database needs no inbound rule and no public address. Setting
+it up, including the read-only login the dashboards use, is section 4 of
+`deploy/PUBLISHING.md`.
+
+To read them against a development database instead, run a Grafana yourself and point it at
+`.local/pgdata`; the JSON files are portable.
 
 ## Deep backfill
 
