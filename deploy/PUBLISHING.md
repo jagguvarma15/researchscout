@@ -175,7 +175,13 @@ over; the hosted one will point at the database actually serving the site.
    ```
 
    It creates a `grafana` role that can `SELECT` and nothing else, generates a password into
-   `deploy/.env`, and covers future tables through default privileges.
+   `deploy/.env`, and covers future tables through default privileges. Rerun it any time - it
+   resets the password to whatever is in the file, which is the cure if the two drift apart.
+
+   Verify it from another container rather than from inside the database one: the image trusts
+   loopback, so `psql` inside `postgres` succeeds with no password at all and proves nothing
+   about what the tunnel will face. From `api`, the connection crosses the network and is
+   asked for a password, which is the path Grafana Cloud takes.
 
 4. Start the agent:
 
