@@ -15,8 +15,11 @@
 #   - The tunnel. Tailscale runs on the host rather than in a container: one command
 #     (`tailscale funnel --bg 8001`), no auth key to store, no userspace networking to debug,
 #     and it keeps working across `make deploy-down`. See deploy/PUBLISHING.md.
-#   - Kafka and the stream worker by default. They are a profile because the ingest path also
-#     works from the scheduler, and on 8 GB the broker is the first thing worth giving up.
+#   - Kafka and the stream worker by default. They are a profile because on 8 GB the broker is
+#     the first thing worth giving up - and because the scheduler can do the same work in
+#     batches when RS_SCHEDULER_BATCH_PIPELINE is set, which is how this deployment runs.
+#     Never both: two processes fetching from the same upstreams on one address is what
+#     arXiv's three-second floor cannot survive.
 
 name: researchscout
 
@@ -35,6 +38,7 @@ x-backend: &backend
     RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
     RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
     RS_SERVICE_TOKEN: ${RS_SERVICE_TOKEN:-}
+    RS_SCHEDULER_BATCH_PIPELINE: ${RS_SCHEDULER_BATCH_PIPELINE:-false}
     RS_OIDC_ISSUER: ${RS_OIDC_ISSUER:-}
     RS_OIDC_AUDIENCE: ${RS_OIDC_AUDIENCE:-api}
     RS_TERMS_VERSION: ${RS_TERMS_VERSION:-2026-08-01}
@@ -113,7 +117,9 @@ services:
       start_period: 300s
       retries: 3
 
-  # Ingest, indexing, signals, digests, topics and the daily report on their intervals.
+  # Digests, topics and the daily report on their intervals - plus ingest, embedding, full
+  # text and signals when RS_SCHEDULER_BATCH_PIPELINE is on, which is what keeps a
+  # stream-less deployment supplied with new papers.
   scheduler:
     <<: *backend
     command: ["scout", "serve", "scheduler"]
