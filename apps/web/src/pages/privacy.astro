@@ -29,9 +29,10 @@ import { CONTACT_URL, MINIMUM_AGE, TERMS_EFFECTIVE } from '../lib/legal';
       <h2>What is collected</h2>
       <ul>
         <li>
-          <strong>Your account.</strong> An identifier, your email address, and a display name,
-          all supplied by the sign-in provider when you register. Passwords are handled by that
-          provider and never reach this site.
+          <strong>Your account.</strong> An identifier from the sign-in provider, and a display
+          name if you set one. Not your email address: the provider holds that, and the token
+          this site receives does not carry it. Passwords are handled entirely by the provider
+          and never reach this site.
         </li>
         <li>
           <strong>What you keep.</strong> Papers you save and the research interests you type
