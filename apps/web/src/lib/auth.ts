@@ -11,6 +11,8 @@
 import { EncryptJWT, jwtDecrypt } from 'jose';
 import * as oidc from 'openid-client';
 
+import { SITE_URL } from './site-url.js';
+
 export interface SessionUser {
   sub: string;
   username: string;
@@ -34,7 +36,7 @@ const clientId = process.env.AUTH0_CLIENT_ID ?? '';
 const clientSecret = process.env.AUTH0_CLIENT_SECRET ?? '';
 const audience = process.env.AUTH0_AUDIENCE ?? 'api';
 const sessionSecret = process.env.SESSION_SECRET ?? '';
-const siteUrl = process.env.SITE_URL ?? 'http://localhost:4321';
+const siteUrl = SITE_URL;
 
 /** True when the site is configured to sign people in; false leaves the local-user behavior. */
 export function authEnabled(): boolean {
