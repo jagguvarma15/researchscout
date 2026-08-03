@@ -148,30 +148,59 @@ The terms dialog must not appear the second time.
 
 The dashboards in `config/grafana/dashboards/` are SQL against Postgres, so Grafana Cloud needs
 a route to a database that is not exposed. Private Data Source Connect is that route: an agent
-in the compose stack opens an outbound tunnel, and no inbound rule is needed.
+in this compose stack opens an outbound tunnel, and no inbound rule is needed.
+
+Moving here also changes what the dashboards watch. The local Grafana points at the development
+database in `.local/pgdata`, which stopped being the live system the moment the deployment took
+over; the hosted one will point at the database actually serving the site.
 
 1. Create a free Grafana Cloud stack.
-2. Connections -> Private data source connect -> create for your region. Copy the token,
-   cluster and stack id into `GRAFANA_PDC_TOKEN`, `GRAFANA_PDC_CLUSTER` and `GRAFANA_STACK_ID`.
-3. `docker compose -f deploy/docker-compose.yml --profile monitoring up -d`
-4. Add a PostgreSQL data source in Grafana Cloud with host `postgres:5432`, database
-   `researchscout`, and Private data source connect set to your PDC network.
-5. Give it its own read-only login rather than the application's:
+2. **Connections -> Private data source connections -> Configure**. Note the three values from
+   the Configuration Details tab and put them in `deploy/.env`:
 
-   ```sql
-   CREATE ROLE grafana LOGIN PASSWORD '...';
-   GRANT CONNECT ON DATABASE researchscout TO grafana;
-   GRANT USAGE ON SCHEMA public TO grafana;
-   GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana;
-   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana;
+   ```
+   GCLOUD_PDC_SIGNING_TOKEN=
+   GCLOUD_PDC_CLUSTER=
+   GCLOUD_HOSTED_GRAFANA_ID=
    ```
 
-6. Import the four dashboards from `config/grafana/dashboards/`, pointing them at the new data
-   source. The local Grafana stays as it is for development.
+   The token needs the `pdc-signing:write` scope. The agent takes these as command-line flags,
+   not environment variables - passed the wrong way it starts, connects to nothing, and says
+   little about why. The compose service already passes them correctly.
+
+3. Give the dashboards their own read-only login rather than the application's:
+
+   ```bash
+   make grafana-db-role
+   ```
+
+   It creates a `grafana` role that can `SELECT` and nothing else, generates a password into
+   `deploy/.env`, and covers future tables through default privileges.
+
+4. Start the agent:
+
+   ```bash
+   docker compose -f deploy/docker-compose.yml --profile monitoring up -d
+   docker compose -f deploy/docker-compose.yml logs pdc-agent   # should report a connection
+   ```
+
+5. In Grafana Cloud, add a **PostgreSQL** data source:
+
+   | Field | Value |
+   | --- | --- |
+   | Host | `postgres:5432` |
+   | Database | `researchscout` |
+   | User | `grafana` |
+   | Password | `GRAFANA_DB_PASSWORD` from `deploy/.env` |
+   | TLS/SSL Mode | `disable` (the tunnel is the encryption) |
+   | Private data source connect | your PDC network |
+
+   `postgres` resolves inside the compose network, which is where the agent runs.
+
+6. Import the four dashboards from `config/grafana/dashboards/`, pointing each at that data
+   source.
 
 Check: the Pipeline dashboard renders with data.
 
-## Afterwards
-
-Rewrite `/about`. It currently says the app "runs entirely on this machine, and it publishes
-nothing", which is true until the moment any of the above is done, and false immediately after.
+Once it does, the local Grafana is redundant - `make grafana-stop` reclaims about 170 MB, and
+`make grafana-start` brings it back for development.
