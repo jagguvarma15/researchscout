@@ -16,11 +16,6 @@ KAFKA_DATA := $(LOCAL)/kafka-logs
 KAFKA_CONF := $(LOCAL)/kafka/server.properties
 KAFKA_HEAP ?= -Xmx512m -Xms128m
 
-GRAFANA_BIN   := $(shell brew --prefix grafana 2>/dev/null)/bin
-GRAFANA_HOME  := $(shell brew --prefix grafana 2>/dev/null)/share/grafana
-GRAFANA_LOCAL := $(LOCAL)/grafana
-GRAFANA_CONF  := $(GRAFANA_LOCAL)/grafana.ini
-
 # The deployment stack: containers, its own database volume, separate from everything above.
 COMPOSE := deploy/docker-compose.yml
 AGENT_PLIST := $(HOME)/Library/LaunchAgents/com.researchscout.backup.plist
@@ -29,7 +24,7 @@ AGENT_DIR := $(HOME)/Library/Application Support/researchscout
 
 .DEFAULT_GOAL := help
 .PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop \
-        grafana-start grafana-stop deploy-build deploy-up deploy-up-stream deploy-down \
+        deploy-build deploy-up deploy-up-stream deploy-down \
         deploy-ps deploy-logs backup backup-schedule backup-unschedule grafana-db-role \
         check clean
 
@@ -54,11 +49,6 @@ setup: ## install toolchains, dependencies, and the local Postgres cluster
 	@[ -f $(KAFKA_DATA)/meta.properties ] || { \
 	  $(KAFKA_BIN)/kafka-storage format --standalone -t $$($(KAFKA_BIN)/kafka-storage random-uuid) -c $(KAFKA_CONF) >/dev/null && \
 	  echo "initialized $(KAFKA_DATA)"; }
-	@[ -x "$(GRAFANA_BIN)/grafana" ] || echo "note: no grafana — monitoring dashboards need it (brew install grafana)"
-	@mkdir -p $(GRAFANA_LOCAL)/data $(GRAFANA_LOCAL)/plugins $(GRAFANA_LOCAL)/provisioning/datasources $(GRAFANA_LOCAL)/provisioning/dashboards $(GRAFANA_LOCAL)/provisioning/plugins $(GRAFANA_LOCAL)/provisioning/alerting
-	@sed -e "s|@GRAFANA_DATA@|$(GRAFANA_LOCAL)|" -e "s|@REPO@|$(CURDIR)|" config/grafana/grafana.ini.template > $(GRAFANA_CONF)
-	@sed "s|@REPO@|$(CURDIR)|" config/grafana/provisioning/dashboards/researchscout.yaml > $(GRAFANA_LOCAL)/provisioning/dashboards/researchscout.yaml
-	@cp config/grafana/provisioning/datasources/researchscout.yaml $(GRAFANA_LOCAL)/provisioning/datasources/researchscout.yaml
 	@[ -f .env ] || { cp .env.example .env && echo "created .env from .env.example"; }
 	@echo "setup complete — next: make start"
 
@@ -94,22 +84,18 @@ start: ## start postgres, kafka, migrate, then the stream, API, and web app in t
 	else \
 	  cd apps/web && { nohup ./node_modules/.bin/astro dev >> $(LOG)/web.log 2>&1 & echo $$! > $(RUN)/web.pid; }; \
 	fi
-	@if [ -x "$(GRAFANA_BIN)/grafana" ]; then $(MAKE) grafana-start; else echo "grafana: not installed (brew install grafana)"; fi
 	@echo
 	@echo "  web       http://localhost:4321   (no sign-in — you are the local user)"
 	@echo "  api docs  http://localhost:8000/docs"
-	@echo "  grafana   http://localhost:3000   (monitoring dashboards, no sign-in)"
 	@echo
 	@echo "  next: make seed   (chat needs 'ollama serve' + qwen2.5:3b-instruct, or a cloud key in .env)"
 
-stop: ## stop the web app, API, stream, grafana, kafka, and postgres
+stop: ## stop the web app, API, stream, kafka, and postgres
 	-@[ -f $(RUN)/web.pid ] && kill $$(cat $(RUN)/web.pid) 2>/dev/null; rm -f $(RUN)/web.pid
 	-@[ -f $(RUN)/api.pid ] && kill $$(cat $(RUN)/api.pid) 2>/dev/null; rm -f $(RUN)/api.pid
 	-@[ -f $(RUN)/stream.pid ] && kill $$(cat $(RUN)/stream.pid) 2>/dev/null; rm -f $(RUN)/stream.pid
 	-@lsof -ti :4321 2>/dev/null | xargs kill -9 2>/dev/null; true
 	-@lsof -ti :8000 2>/dev/null | xargs kill -9 2>/dev/null; true
-	-@[ -f $(RUN)/grafana.pid ] && kill $$(cat $(RUN)/grafana.pid) 2>/dev/null; rm -f $(RUN)/grafana.pid
-	-@lsof -ti :3000 2>/dev/null | xargs kill 2>/dev/null; true
 	-@[ -f $(RUN)/kafka.pid ] && kill $$(cat $(RUN)/kafka.pid) 2>/dev/null; rm -f $(RUN)/kafka.pid
 	-@lsof -ti :9092 2>/dev/null | xargs kill 2>/dev/null; true
 	-@$(PG_BIN)/pg_ctl -D $(PGDATA) status >/dev/null 2>&1 && $(PG_BIN)/pg_ctl -D $(PGDATA) stop >/dev/null
@@ -120,7 +106,6 @@ status: ## show what is running
 	@lsof -ti :8000 >/dev/null 2>&1 && echo "api: up on :8000" || echo "api: stopped"
 	@lsof -ti :4321 >/dev/null 2>&1 && echo "web: up on :4321" || echo "web: stopped"
 	@lsof -ti :9092 >/dev/null 2>&1 && echo "kafka: up on :9092" || echo "kafka: stopped"
-	@lsof -ti :3000 >/dev/null 2>&1 && echo "grafana: up on :3000" || echo "grafana: stopped"
 	@[ -f $(RUN)/stream.pid ] && kill -0 $$(cat $(RUN)/stream.pid) 2>/dev/null && echo "stream: running" || echo "stream: stopped"
 
 logs: ## tail the local service logs
@@ -154,80 +139,6 @@ kafka-stop: ## stop the kafka broker
 	-@[ -f $(RUN)/kafka.pid ] && kill $$(cat $(RUN)/kafka.pid) 2>/dev/null; rm -f $(RUN)/kafka.pid
 	-@lsof -ti :9092 2>/dev/null | xargs kill 2>/dev/null; true
 	@echo "kafka: stopped"
-
-grafana-start: ## start grafana with the provisioned dashboards in the background
-	@mkdir -p $(LOG) $(RUN)
-	@[ -x "$(GRAFANA_BIN)/grafana" ] || { echo "grafana is required: brew install grafana"; exit 1; }
-	@[ -f $(GRAFANA_CONF) ] || { echo "no grafana config — run: make setup"; exit 1; }
-	@if [ -f $(RUN)/grafana.pid ] && kill -0 $$(cat $(RUN)/grafana.pid) 2>/dev/null; then \
-	  echo "grafana: already running"; \
-	elif lsof -ti :3000 >/dev/null 2>&1; then \
-	  echo "error: another process owns port 3000 — stop it first"; exit 1; \
-	else \
-	  nohup $(GRAFANA_BIN)/grafana server --config $(GRAFANA_CONF) --homepath $(GRAFANA_HOME) >> $(LOG)/grafana.log 2>&1 & echo $$! > $(RUN)/grafana.pid; \
-	fi
-	@for i in $$(seq 1 30); do curl -sf http://127.0.0.1:3000/api/health >/dev/null && break; sleep 1; done; \
-	  curl -sf http://127.0.0.1:3000/api/health >/dev/null || { echo "grafana did not come up — check: make logs"; exit 1; }
-	@echo "grafana: up on http://127.0.0.1:3000"
-
-grafana-stop: ## stop grafana
-	-@[ -f $(RUN)/grafana.pid ] && kill $$(cat $(RUN)/grafana.pid) 2>/dev/null; rm -f $(RUN)/grafana.pid
-	-@lsof -ti :3000 2>/dev/null | xargs kill 2>/dev/null; true
-	@echo "grafana: stopped"
-
-deploy-build: ## build the backend image used by the deployment stack
-	docker compose -f $(COMPOSE) build
-
-deploy-up: ## start the deployed backend (postgres, migrations, api, scheduler)
-	docker compose -f $(COMPOSE) up -d
-	@echo "api on http://127.0.0.1:8001 (the dev stack keeps :8000)"
-
-deploy-up-stream: ## the same, plus kafka and the streaming worker
-	docker compose -f $(COMPOSE) --profile stream up -d
-
-deploy-down: ## stop the deployed backend, keeping the data volume
-	docker compose -f $(COMPOSE) --profile stream --profile monitoring down
-
-deploy-ps: ## what the deployment stack is running
-	docker compose -f $(COMPOSE) ps
-
-deploy-logs: ## follow the deployment logs
-	docker compose -f $(COMPOSE) logs -f
-
-backup: ## dump the deployed database, keep a week, verify the file
-	./deploy/backup.sh
-
-grafana-db-role: ## create the read-only database login the hosted dashboards use
-	@grep -q '^GRAFANA_DB_PASSWORD=.\+' deploy/.env || { \
-	  pw=$$(openssl rand -hex 20); \
-	  if grep -q '^GRAFANA_DB_PASSWORD=' deploy/.env; then \
-	    sed -i '' "s|^GRAFANA_DB_PASSWORD=.*|GRAFANA_DB_PASSWORD=$$pw|" deploy/.env; \
-	  else printf 'GRAFANA_DB_PASSWORD=%s\n' "$$pw" >> deploy/.env; fi; \
-	  echo "generated a password into deploy/.env"; }
-	@pw=$$(grep '^GRAFANA_DB_PASSWORD=' deploy/.env | cut -d= -f2-); \
-	docker compose -f $(COMPOSE) exec -T postgres psql -U researchscout -d researchscout -q \
-	  -c "DO \$$\$$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='grafana') THEN CREATE ROLE grafana LOGIN; END IF; END \$$\$$;" \
-	  -c "ALTER ROLE grafana LOGIN PASSWORD '$$pw'" \
-	  -c "GRANT CONNECT ON DATABASE researchscout TO grafana" \
-	  -c "GRANT USAGE ON SCHEMA public TO grafana" \
-	  -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana" \
-	  -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana"
-	@echo "role 'grafana' can read this database and nothing else; password is in deploy/.env"
-
-backup-schedule: ## run the backup nightly at 03:30 (launchd)
-	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
-	@cp deploy/backup.sh "$(AGENT_DIR)/backup.sh" && chmod +x "$(AGENT_DIR)/backup.sh"
-	@sed "s|@AGENT_DIR@|$(AGENT_DIR)|g" deploy/launchd/com.researchscout.backup.plist.template > $(AGENT_PLIST)
-	-@launchctl bootout gui/$$(id -u)/com.researchscout.backup 2>/dev/null
-	launchctl bootstrap gui/$$(id -u) $(AGENT_PLIST)
-	@echo "nightly backup scheduled: 03:30"
-	@echo "  script: $(AGENT_DIR)/backup.sh   (a copy - rerun this target after changing it)"
-	@echo "  log:    $(AGENT_DIR)/backup.log"
-
-backup-unschedule: ## stop the nightly backup
-	-@launchctl bootout gui/$$(id -u)/com.researchscout.backup 2>/dev/null
-	-@rm -f $(AGENT_PLIST) "$(AGENT_DIR)/backup.sh"
-	@echo "nightly backup removed" 
 
 check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run ruff check researchscout tests
