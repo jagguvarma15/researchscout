@@ -74,10 +74,17 @@ class Settings(BaseSettings):
     digest_top_k: int = 10
     # Background refresh loop (`scout serve scheduler`, or `make scheduler`). Intervals are in
     # seconds; the ingest/signals look-back window is in days.
+    # Ingest, embedding, full text and signals normally come from the streaming pipeline.
+    # Turn this on for an install that does not run the stream - without it, such a deployment
+    # never sees another paper. Never run both: two processes fetching from the same upstreams
+    # on one address is exactly what arXiv's three-second floor cannot survive.
+    scheduler_batch_pipeline: bool = False
     scheduler_ingest_window_days: int = 2
     scheduler_ingest_interval_sec: int = 3600
     scheduler_index_interval_sec: int = 900
     scheduler_signals_interval_sec: int = 21600
+    scheduler_fulltext_interval_sec: int = 3600
+    scheduler_fulltext_batch: int = 25
     scheduler_digest_interval_sec: int = 86400
     scheduler_report_interval_sec: int = 86400
     scheduler_tick_sec: int = 30
