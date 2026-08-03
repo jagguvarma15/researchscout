@@ -23,11 +23,14 @@ GRAFANA_CONF  := $(GRAFANA_LOCAL)/grafana.ini
 
 # The deployment stack: containers, its own database volume, separate from everything above.
 COMPOSE := deploy/docker-compose.yml
+AGENT_PLIST := $(HOME)/Library/LaunchAgents/com.researchscout.backup.plist
+# Outside ~/Desktop and friends: launchd jobs are denied those by macOS privacy protection.
+AGENT_DIR := $(HOME)/Library/Application Support/researchscout
 
 .DEFAULT_GOAL := help
 .PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop \
         grafana-start grafana-stop deploy-build deploy-up deploy-up-stream deploy-down \
-        deploy-ps deploy-logs backup check clean
+        deploy-ps deploy-logs backup backup-schedule backup-unschedule check clean
 
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
@@ -192,6 +195,21 @@ deploy-logs: ## follow the deployment logs
 
 backup: ## dump the deployed database, keep a week, verify the file
 	./deploy/backup.sh
+
+backup-schedule: ## run the backup nightly at 03:30 (launchd)
+	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
+	@cp deploy/backup.sh "$(AGENT_DIR)/backup.sh" && chmod +x "$(AGENT_DIR)/backup.sh"
+	@sed "s|@AGENT_DIR@|$(AGENT_DIR)|g" deploy/launchd/com.researchscout.backup.plist.template > $(AGENT_PLIST)
+	-@launchctl bootout gui/$$(id -u)/com.researchscout.backup 2>/dev/null
+	launchctl bootstrap gui/$$(id -u) $(AGENT_PLIST)
+	@echo "nightly backup scheduled: 03:30"
+	@echo "  script: $(AGENT_DIR)/backup.sh   (a copy - rerun this target after changing it)"
+	@echo "  log:    $(AGENT_DIR)/backup.log"
+
+backup-unschedule: ## stop the nightly backup
+	-@launchctl bootout gui/$$(id -u)/com.researchscout.backup 2>/dev/null
+	-@rm -f $(AGENT_PLIST) "$(AGENT_DIR)/backup.sh"
+	@echo "nightly backup removed" 
 
 check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run ruff check researchscout tests
