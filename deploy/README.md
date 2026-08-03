@@ -93,6 +93,22 @@ docker compose -f deploy/docker-compose.yml exec -T postgres \
 
 The Homebrew cluster is left untouched, so it stays the rollback.
 
+## Only one of them may ingest
+
+The development stack and the deployment both know how to fetch from arXiv - `scout stream
+serve` on the host, the scheduler in compose - and they share this machine's address. The
+three-second floor arXiv asks for is held per process, so running both halves it, and the
+first sign is 429s on every request for a while afterwards.
+
+So: with the deployment running, stop the development ingest.
+
+```bash
+[ -f .local/run/stream.pid ] && kill $(cat .local/run/stream.pid) && rm .local/run/stream.pid
+```
+
+`make start` brings it back for development; just do not leave both running. The development
+API and web app are fine either way - they only reach arXiv when somebody asks them to.
+
 ## Backups
 
 ```bash
