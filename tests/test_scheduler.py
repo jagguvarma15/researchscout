@@ -1,5 +1,10 @@
 """Unit tests for the refresh scheduler's mechanics (no DB, no network)."""
 
+from contextlib import nullcontext
+from types import SimpleNamespace
+
+import pytest
+
 from researchscout.config import Settings
 from researchscout.scheduler import Scheduler, Task, build_tasks
 
@@ -77,3 +82,61 @@ def test_build_tasks_maps_settings_intervals() -> None:
     tasks = build_tasks(settings)
     assert [t.name for t in tasks] == ["digest", "topics", "report"]
     assert [t.interval_sec for t in tasks] == [444, 555, 666]
+
+
+def test_the_stream_owns_the_pipeline_by_default() -> None:
+    """Adding these where the stream already runs means two processes on one address."""
+    assert "ingest" not in [t.name for t in build_tasks(Settings())]
+
+
+def test_batch_pipeline_adds_the_work_the_stream_would_do() -> None:
+    """An install without the stream would otherwise never see another paper."""
+    settings = Settings(
+        scheduler_batch_pipeline=True,
+        scheduler_ingest_interval_sec=11,
+        scheduler_index_interval_sec=22,
+        scheduler_fulltext_interval_sec=33,
+        scheduler_signals_interval_sec=44,
+    )
+    tasks = build_tasks(settings)
+    assert [t.name for t in tasks] == [
+        "ingest",
+        "index",
+        "fulltext",
+        "signals",
+        "digest",
+        "topics",
+        "report",
+    ]
+    assert [t.interval_sec for t in tasks[:4]] == [11, 22, 33, 44]
+
+
+def test_one_failing_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A rate-limited upstream is normal; it must not cost the others their turn."""
+    import httpx
+
+    import researchscout.scheduler as scheduler_mod
+
+    class _Source:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    seen: list[str] = []
+
+    def fake_run_ingest(session: object, source: object, since: object, **kwargs: object) -> object:
+        name = getattr(source, "name", "?")
+        seen.append(name)
+        if name == "broken":
+            raise httpx.HTTPError("429 from upstream")
+        return SimpleNamespace(source=name, fetched=1, new_papers=1, signals=0)
+
+    monkeypatch.setattr(
+        "researchscout.sources.enabled_sources",
+        lambda kind=None: [_Source("broken"), _Source("fine")],
+    )
+    monkeypatch.setattr("researchscout.ingest.pipeline.run_ingest", fake_run_ingest)
+    monkeypatch.setattr(scheduler_mod, "session_scope", nullcontext, raising=False)
+    monkeypatch.setattr("researchscout.store.db.session_scope", lambda: nullcontext(None))
+
+    scheduler_mod._ingest(Settings())
+    assert seen == ["broken", "fine"]
