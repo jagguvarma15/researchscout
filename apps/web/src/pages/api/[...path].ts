@@ -4,8 +4,10 @@
 
 import type { APIRoute } from 'astro';
 
+import { SITE_URL } from '../../lib/site-url.js';
+
 const API_URL = process.env.API_URL ?? 'http://localhost:8000';
-const SITE_URL = process.env.SITE_URL ?? 'http://localhost:4321';
+
 // The shared secret that gets this deployment through the API's front door. Unset locally,
 // where the API is reachable directly and open.
 const SERVICE_TOKEN = process.env.API_SERVICE_TOKEN ?? '';
