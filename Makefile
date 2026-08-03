@@ -30,7 +30,8 @@ AGENT_DIR := $(HOME)/Library/Application Support/researchscout
 .DEFAULT_GOAL := help
 .PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop \
         grafana-start grafana-stop deploy-build deploy-up deploy-up-stream deploy-down \
-        deploy-ps deploy-logs backup backup-schedule backup-unschedule check clean
+        deploy-ps deploy-logs backup backup-schedule backup-unschedule grafana-db-role \
+        check clean
 
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
@@ -195,6 +196,23 @@ deploy-logs: ## follow the deployment logs
 
 backup: ## dump the deployed database, keep a week, verify the file
 	./deploy/backup.sh
+
+grafana-db-role: ## create the read-only database login the hosted dashboards use
+	@grep -q '^GRAFANA_DB_PASSWORD=.\+' deploy/.env || { \
+	  pw=$$(openssl rand -hex 20); \
+	  if grep -q '^GRAFANA_DB_PASSWORD=' deploy/.env; then \
+	    sed -i '' "s|^GRAFANA_DB_PASSWORD=.*|GRAFANA_DB_PASSWORD=$$pw|" deploy/.env; \
+	  else printf 'GRAFANA_DB_PASSWORD=%s\n' "$$pw" >> deploy/.env; fi; \
+	  echo "generated a password into deploy/.env"; }
+	@pw=$$(grep '^GRAFANA_DB_PASSWORD=' deploy/.env | cut -d= -f2-); \
+	docker compose -f $(COMPOSE) exec -T postgres psql -U researchscout -d researchscout -q \
+	  -c "DO \$$\$$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='grafana') THEN CREATE ROLE grafana LOGIN; END IF; END \$$\$$;" \
+	  -c "ALTER ROLE grafana LOGIN PASSWORD '$$pw'" \
+	  -c "GRANT CONNECT ON DATABASE researchscout TO grafana" \
+	  -c "GRANT USAGE ON SCHEMA public TO grafana" \
+	  -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana" \
+	  -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana"
+	@echo "role 'grafana' can read this database and nothing else; password is in deploy/.env"
 
 backup-schedule: ## run the backup nightly at 03:30 (launchd)
 	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
