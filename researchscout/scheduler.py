@@ -1,11 +1,18 @@
 """In-process refresh loop for the derived products the stream does not build.
 
-Three tasks run on independent intervals: the weekly digest, the topic rebuild, and the
-daily report. Ingestion, embedding, and signal refresh moved to the streaming pipeline
-(``scout stream serve``); the manual batch path (``scout ingest`` / ``scout index`` /
-``scout fulltext``) remains as the fallback and backfill route. The same task set backs both
-``scout serve scheduler`` (a long-lived loop) and ``--once`` (a single pass), so a host cron
-can drive it too. A task that raises is logged and skipped, so one failure never stops the loop.
+Three tasks always run on independent intervals: the weekly digest, the topic rebuild, and the
+daily report. Ingestion, embedding, full text and signal refresh normally come from the
+streaming pipeline (``scout stream serve``).
+
+``RS_SCHEDULER_BATCH_PIPELINE`` adds those four here instead, driving the same batch functions
+``scout ingest`` / ``index`` / ``fulltext`` use. That is for an install that does not run the
+stream - a deployment where Kafka is not worth its memory, say - which would otherwise never
+see another paper. Running both at once means two processes fetching from the same upstreams
+on one address, which is what the three-second arXiv floor is not designed for; pick one.
+
+The same task set backs both ``scout serve scheduler`` (a long-lived loop) and ``--once`` (a
+single pass), so a host cron can drive it too. A task that raises is logged and skipped, so one
+failure never stops the loop.
 """
 
 from __future__ import annotations
@@ -96,6 +103,103 @@ def _embedder() -> Embedder:
     return default_embedder()
 
 
+def _ingest(settings: Settings) -> None:
+    """Fetch every enabled content source over the recent window, resuming its cursor."""
+    from datetime import UTC, datetime, timedelta
+
+    import httpx
+
+    from researchscout.ingest.pipeline import run_ingest
+    from researchscout.sources import enabled_sources
+    from researchscout.store.db import session_scope
+
+    since = datetime.now(UTC) - timedelta(days=settings.scheduler_ingest_window_days)
+    for source in enabled_sources("content"):
+        try:
+            with session_scope() as session:
+                summary = run_ingest(session, source, since, resume=True)
+        except httpx.HTTPError as exc:
+            # One upstream being rate limited or down must not stop the others.
+            logger.warning("ingest %s failed: %s", source.name, exc)
+            continue
+        logger.info(
+            "ingest %s: fetched=%d new=%d signals=%d",
+            summary.source,
+            summary.fetched,
+            summary.new_papers,
+            summary.signals,
+        )
+
+
+def _signals(settings: Settings) -> None:
+    """Refresh every enabled signal source: citations, upvotes, discussion, engagement."""
+    from datetime import UTC, datetime, timedelta
+
+    import httpx
+
+    from researchscout.ingest.pipeline import run_ingest
+    from researchscout.sources import enabled_sources
+    from researchscout.store.db import session_scope
+
+    since = datetime.now(UTC) - timedelta(days=settings.scheduler_ingest_window_days)
+    for source in enabled_sources("signal"):
+        try:
+            with session_scope() as session:
+                summary = run_ingest(session, source, since, resume=True)
+        except httpx.HTTPError as exc:
+            logger.warning("signals %s failed: %s", source.name, exc)
+            continue
+        logger.info("signals %s: %d observation(s)", summary.source, summary.signals)
+
+
+def _index(settings: Settings) -> None:
+    """Embed whatever is not embedded yet, and chunk full text when chunk retrieval is on."""
+    from researchscout.store.chunks import index_chunks
+    from researchscout.store.db import session_scope
+    from researchscout.store.vectors import index_papers
+
+    embedder = _embedder()
+    with session_scope() as session:
+        papers = index_papers(session, embedder)
+        chunks = index_chunks(session, embedder) if settings.chunk_retrieval else 0
+    if papers or chunks:
+        logger.info("index: %d paper(s), %d chunk(s)", papers, chunks)
+
+
+def _fulltext(settings: Settings) -> None:
+    """Fetch article text for a modest batch, saved and read papers first.
+
+    Full-content harvesting is not permitted, so this stays small and paced exactly like the
+    ingest path - the batch size is the politeness, not an optimisation.
+    """
+    import time
+
+    from sqlalchemy import select
+
+    from researchscout.fulltext import fetch_full_text
+    from researchscout.store.db import session_scope
+    from researchscout.store.models import EventRow, SavedPaperRow
+    from researchscout.store.papers import papers_missing_full_text, set_full_text
+
+    delay = settings.arxiv_page_delay_sec
+    fetched = 0
+    with session_scope() as session:
+        priority = set(session.execute(select(SavedPaperRow.paper_id)).scalars()) | set(
+            session.execute(select(EventRow.paper_id).distinct()).scalars()
+        )
+        pending = papers_missing_full_text(
+            session, limit=settings.scheduler_fulltext_batch, first=sorted(priority)
+        )
+        for position, (paper_id, arxiv_id) in enumerate(pending):
+            if position and delay > 0:
+                time.sleep(delay)
+            text = fetch_full_text(arxiv_id)
+            set_full_text(session, paper_id, text or "")
+            fetched += 1 if text else 0
+    if pending:
+        logger.info("full text: %d of %d attempted", fetched, len(pending))
+
+
 def _digest(settings: Settings) -> None:
     from researchscout.digest import build_digest
     from researchscout.llm.openai_compat import OpenAICompatLLM
@@ -152,8 +256,23 @@ def _report(settings: Settings) -> None:
 
 def build_tasks(settings: Settings) -> list[Task]:
     """Construct the scheduler's tasks with intervals drawn from ``settings``."""
-    return [
+    tasks: list[Task] = []
+    if settings.scheduler_batch_pipeline:
+        # Ordered so a cycle flows the way a paper does: arrive, get embedded, get its text,
+        # then collect the signals that rank it.
+        tasks += [
+            Task("ingest", settings.scheduler_ingest_interval_sec, partial(_ingest, settings)),
+            Task("index", settings.scheduler_index_interval_sec, partial(_index, settings)),
+            Task(
+                "fulltext",
+                settings.scheduler_fulltext_interval_sec,
+                partial(_fulltext, settings),
+            ),
+            Task("signals", settings.scheduler_signals_interval_sec, partial(_signals, settings)),
+        ]
+    tasks += [
         Task("digest", settings.scheduler_digest_interval_sec, partial(_digest, settings)),
         Task("topics", settings.scheduler_topics_interval_sec, partial(_topics, settings)),
         Task("report", settings.scheduler_report_interval_sec, partial(_report, settings)),
     ]
+    return tasks
