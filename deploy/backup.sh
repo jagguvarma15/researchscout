@@ -9,11 +9,16 @@
 #   deploy/backup.sh              write today's dump and prune old ones
 #   BACKUP_DIR=/path deploy/backup.sh
 #
+# Deliberately depends on nothing in the repository: it addresses the database container by
+# name rather than through the compose file. `make backup-schedule` installs a copy outside
+# the home folders macOS protects, because a launchd job cannot read ~/Desktop or ~/Documents
+# and fails with "Operation not permitted" long before it reaches Postgres.
+#
 # Restore is in the runbook: deploy/README.md.
 
 set -euo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONTAINER="${CONTAINER:-researchscout-postgres-1}"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/backups/researchscout}"
 KEEP_DAYS="${KEEP_DAYS:-7}"
 stamp="$(date +%Y%m%d-%H%M%S)"
@@ -21,13 +26,14 @@ target="$BACKUP_DIR/researchscout-$stamp.sql.gz"
 
 mkdir -p "$BACKUP_DIR"
 
-if ! docker compose -f "$here/docker-compose.yml" ps postgres --status running --quiet >/dev/null 2>&1; then
-  echo "backup: postgres is not running, nothing dumped" >&2
+if ! docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q true; then
+  echo "backup: $CONTAINER is not running, nothing dumped" >&2
   exit 1
 fi
 
-# -T because there is no terminal in a cron run; the dump streams straight into gzip.
-docker compose -f "$here/docker-compose.yml" exec -T postgres \
+# Local connections inside the container are trusted, so no password is needed here and none
+# is stored in the schedule.
+docker exec "$CONTAINER" \
   pg_dump --username researchscout --format plain --no-owner researchscout |
   gzip >"$target.partial"
 
