@@ -140,6 +140,60 @@ kafka-stop: ## stop the kafka broker
 	-@lsof -ti :9092 2>/dev/null | xargs kill 2>/dev/null; true
 	@echo "kafka: stopped"
 
+deploy-build: ## build the backend image used by the deployment stack
+	docker compose -f $(COMPOSE) build
+
+deploy-up: ## start the deployed backend (postgres, migrations, api, scheduler)
+	docker compose -f $(COMPOSE) up -d
+	@echo "api on http://127.0.0.1:8001 (the dev stack keeps :8000)"
+
+deploy-up-stream: ## the same, plus kafka and the streaming worker
+	docker compose -f $(COMPOSE) --profile stream up -d
+
+deploy-down: ## stop the deployed backend, keeping the data volume
+	docker compose -f $(COMPOSE) --profile stream --profile monitoring down
+
+deploy-ps: ## what the deployment stack is running
+	docker compose -f $(COMPOSE) ps
+
+deploy-logs: ## follow the deployment logs
+	docker compose -f $(COMPOSE) logs -f
+
+backup: ## dump the deployed database, keep a week, verify the file
+	./deploy/backup.sh
+
+grafana-db-role: ## create the read-only database login the hosted dashboards use
+	@grep -q '^GRAFANA_DB_PASSWORD=.\+' deploy/.env || { \
+	  pw=$$(openssl rand -hex 20); \
+	  if grep -q '^GRAFANA_DB_PASSWORD=' deploy/.env; then \
+	    sed -i '' "s|^GRAFANA_DB_PASSWORD=.*|GRAFANA_DB_PASSWORD=$$pw|" deploy/.env; \
+	  else printf 'GRAFANA_DB_PASSWORD=%s\n' "$$pw" >> deploy/.env; fi; \
+	  echo "generated a password into deploy/.env"; }
+	@pw=$$(grep '^GRAFANA_DB_PASSWORD=' deploy/.env | cut -d= -f2-); \
+	docker compose -f $(COMPOSE) exec -T postgres psql -U researchscout -d researchscout -q \
+	  -c "DO \$$\$$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='grafana') THEN CREATE ROLE grafana LOGIN; END IF; END \$$\$$;" \
+	  -c "ALTER ROLE grafana LOGIN PASSWORD '$$pw'" \
+	  -c "GRANT CONNECT ON DATABASE researchscout TO grafana" \
+	  -c "GRANT USAGE ON SCHEMA public TO grafana" \
+	  -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana" \
+	  -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana"
+	@echo "role 'grafana' can read this database and nothing else; password is in deploy/.env"
+
+backup-schedule: ## run the backup nightly at 03:30 (launchd)
+	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
+	@cp deploy/backup.sh "$(AGENT_DIR)/backup.sh" && chmod +x "$(AGENT_DIR)/backup.sh"
+	@sed "s|@AGENT_DIR@|$(AGENT_DIR)|g" deploy/launchd/com.researchscout.backup.plist.template > $(AGENT_PLIST)
+	-@launchctl bootout gui/$$(id -u)/com.researchscout.backup 2>/dev/null
+	launchctl bootstrap gui/$$(id -u) $(AGENT_PLIST)
+	@echo "nightly backup scheduled: 03:30"
+	@echo "  script: $(AGENT_DIR)/backup.sh   (a copy - rerun this target after changing it)"
+	@echo "  log:    $(AGENT_DIR)/backup.log"
+
+backup-unschedule: ## stop the nightly backup
+	-@launchctl bootout gui/$$(id -u)/com.researchscout.backup 2>/dev/null
+	-@rm -f $(AGENT_PLIST) "$(AGENT_DIR)/backup.sh"
+	@echo "nightly backup removed"
+
 check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run ruff check researchscout tests
 	uv run ruff format --check researchscout tests
