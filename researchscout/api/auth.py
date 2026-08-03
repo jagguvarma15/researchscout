@@ -14,6 +14,7 @@ may still use.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Annotated, Any
@@ -29,6 +30,8 @@ from researchscout.api.deps import get_session
 from researchscout.config import get_settings
 from researchscout.store.users import upsert_user
 from researchscout.useragent import default_headers
+
+logger = logging.getLogger(__name__)
 
 _BEARER = {"WWW-Authenticate": "Bearer"}
 _DISCOVERY_TIMEOUT = 10.0
@@ -101,6 +104,11 @@ def require_user(
             issuer=settings.oidc_issuer,
         )
     except (InvalidTokenError, PyJWKClientError) as exc:
+        # The 401 body stays deliberately vague - a caller holding a bad token learns nothing
+        # useful from a detailed reason. The operator needs it though: audience mismatch,
+        # wrong signing algorithm and an expired token are three very different problems that
+        # otherwise look identical from the outside.
+        logger.warning("rejected a bearer token: %s: %s", type(exc).__name__, exc)
         raise HTTPException(status_code=401, detail="invalid token", headers=_BEARER) from exc
 
     user = User(sub=claims["sub"], username=claims.get("preferred_username", claims["sub"]))
