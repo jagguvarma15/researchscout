@@ -25,9 +25,11 @@ is `deploy/PUBLISHING.md`.
 
 1. `cp deploy/.env.example deploy/.env` and fill it in. `POSTGRES_PASSWORD` is chosen once: it
    is baked into the database volume on first start.
-2. Ollama on the host: `ollama serve` and `ollama pull qwen2.5:3b-instruct`. It stays outside
-   Docker deliberately - Docker on macOS has no Metal passthrough, so a containerised model
-   runs on CPU at a fraction of the speed.
+2. Ollama on the host: `brew services start ollama` and `ollama pull qwen2.5:3b-instruct`. Use
+   the service rather than `ollama serve` in a terminal - answers and the digest depend on it,
+   and a model that only runs until the next reboot fails silently afterwards. It stays outside
+   Docker deliberately: Docker on macOS has no Metal passthrough, so a containerised model
+   would run on CPU at a fraction of the speed.
 3. Docker Desktop needs enough memory for Postgres plus the API's models. 4 GB works without
    the stream profile; with it, expect pressure on an 8 GB machine.
 
@@ -112,16 +114,21 @@ API and web app are fine either way - they only reach arXiv when somebody asks t
 ## Backups
 
 ```bash
-make backup                    # dump to ~/backups/researchscout, keep 7 days, verify
-BACKUP_DIR=/elsewhere make backup
+make backup             # dump to ~/backups/researchscout, keep 7 days, verify the file
+make backup-schedule    # and nightly at 03:30, under launchd
+make backup-unschedule  # stop it
 ```
 
-Run it nightly. On macOS, `launchd` survives reboots where `cron` is deprecated:
+`backup-schedule` copies the script to `~/Library/Application Support/researchscout/` and
+points the agent there. That indirection is not fussiness: macOS denies launchd jobs access to
+`~/Desktop`, `~/Documents` and `~/Downloads`, so a job pointed at a checkout in one of those
+fails with "Operation not permitted" before it reaches Postgres - and writes that message to a
+log it also cannot create. The script addresses the database container by name for the same
+reason, so it needs nothing from the repository. **After changing `deploy/backup.sh`, rerun
+`make backup-schedule`** to refresh the copy.
 
-```bash
-# ~/Library/LaunchAgents/com.researchscout.backup.plist -> runs deploy/backup.sh at 03:30
-launchctl load ~/Library/LaunchAgents/com.researchscout.backup.plist
-```
+Check it: `launchctl kickstart -p gui/$(id -u)/com.researchscout.backup`, then read
+`~/Library/Application Support/researchscout/backup.log`.
 
 To restore a dump into an empty database:
 
