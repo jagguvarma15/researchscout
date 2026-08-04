@@ -140,6 +140,7 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
             client:load
             pdfUrl={paper.pdf_url}
             title={stripMath(paper.title)}
+            paperId={paper.id}
             initialOpen={Astro.url.searchParams.get('read') === '1'}
           />
         )}
