@@ -458,6 +458,71 @@ def db_upgrade() -> None:
     typer.secho("Database is at head.", fg=typer.colors.GREEN)
 
 
+@app.command("catalog")
+def catalog_refresh() -> None:
+    """Refresh the model and benchmark catalogue from Epoch AI and Hugging Face.
+
+    Runs on its own daily; this is the manual way in. Both upstreams are keyless and fail soft,
+    so a refresh that cannot reach one of them leaves its rows as they were.
+    """
+    from researchscout.catalog import counts, refresh_catalog
+    from researchscout.store.db import session_scope
+    from researchscout.trace import configure_logging
+
+    configure_logging()
+    with session_scope() as session:
+        summary = refresh_catalog(session)
+        totals = counts(session)
+    typer.echo(
+        f"wrote {summary.models} model(s), {summary.benchmarks} benchmark(s), "
+        f"{summary.results} score(s); linked {summary.linked} to papers"
+    )
+    typer.echo(
+        f"catalogue now holds {totals['models']} model(s), {totals['benchmarks']} benchmark(s), "
+        f"{totals['results']} score(s), {totals['linked']} with a paper here"
+    )
+    if summary.failed:
+        typer.secho(
+            f"upstream(s) unavailable, existing rows kept: {', '.join(summary.failed)}",
+            fg=typer.colors.YELLOW,
+        )
+
+
+@db_app.command("prune-scope")
+def db_prune_scope(
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Report what would go without deleting anything.")
+    ] = False,
+) -> None:
+    """Delete papers outside what this radar covers (see researchscout/taxonomy.py).
+
+    For a corpus gathered before the scope narrowed. Deletion cascades to embeddings, chunks,
+    signals, citation edges and saved rows, and cannot be undone without a re-ingest -- so run
+    it with --dry-run first, and take a backup if the corpus is one you care about.
+    """
+    from researchscout.store.db import session_scope
+    from researchscout.store.scope import (
+        count_out_of_scope,
+        delete_out_of_scope,
+        sample_out_of_scope,
+    )
+
+    with session_scope() as session:
+        total = count_out_of_scope(session)
+        if total == 0:
+            typer.secho("Every stored paper is in scope.", fg=typer.colors.GREEN)
+            return
+        typer.echo(f"{total} paper(s) fall outside the scope rule, for example:")
+        for paper_id, title, primary in sample_out_of_scope(session):
+            typer.echo(f"  {primary or 'none':<12} {paper_id:<24} {title[:60]}")
+        if dry_run:
+            typer.secho("Dry run: nothing was deleted.", fg=typer.colors.YELLOW)
+            return
+        typer.confirm(f"Delete {total} paper(s) and everything derived from them?", abort=True)
+        deleted = delete_out_of_scope(session)
+    typer.secho(f"Deleted {deleted} paper(s).", fg=typer.colors.GREEN)
+
+
 @signals_app.command("show")
 def signals_show(
     paper_id: Annotated[str, typer.Argument(help="Canonical paper id.")],
