@@ -27,20 +27,24 @@
     Minus,
     Plus,
     Scaling,
+    SquareDashed,
     Trash2,
     X,
   } from 'lucide-svelte';
   import { tick } from 'svelte';
 
   import {
+    clampRect,
     highlightAt,
     loadHighlights,
     newId,
     pageOfRect,
+    rectFromDrag,
     saveHighlights,
     toPageRects,
     toScreenRects,
     type Highlight,
+    type HighlightRect,
   } from '../lib/highlights';
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
   import {
@@ -82,11 +86,20 @@
   let scale = $state(0); // 0 = fit width at the next layout
   let baseSizes = $state<{ w: number; h: number }[]>([]);
   let highlights = $state<Highlight[]>([]);
-  let popover = $state<
-    | { mode: 'select'; x: number; y: number }
-    | { mode: 'remove'; x: number; y: number; id: string }
-    | null
-  >(null);
+
+  // A mark being made, before a colour has been chosen for it. Text pending state lives in
+  // the document's own selection - this only records that there is one, and where its ends
+  // are, so the knobs can be drawn. An area carries its rectangle here in page units.
+  type Pending = { kind: 'text' } | { kind: 'area'; page: number; rect: HighlightRect };
+  let areaMode = $state(false);
+  let pending = $state<Pending | null>(null);
+  let selEnds = $state<{ sx: number; sy: number; ex: number; ey: number } | null>(null);
+  let anchor = $state<{ x: number; y: number } | null>(null);
+  let removing = $state<{ id: string; x: number; y: number } | null>(null);
+
+  type Grip = 'start' | 'end' | 'new' | 'nw' | 'ne' | 'sw' | 'se';
+  let dragging: Grip | null = $state(null);
+  let areaStart: { page: number; x: number; y: number } | null = null;
 
   let overlay: HTMLElement | undefined = $state();
   let viewer: HTMLElement | undefined = $state();
@@ -137,7 +150,7 @@
   function wake() {
     chromeOn = true;
     clearTimeout(idleTimer);
-    if (reducedMotion() || popover || listOpen) return;
+    if (reducedMotion() || pending || removing || listOpen || areaMode) return;
     idleTimer = setTimeout(() => (chromeOn = false), IDLE_MS);
   }
 
@@ -163,7 +176,9 @@
   function hide() {
     open = false;
     minimized = false;
-    popover = null;
+    clearPending();
+    removing = null;
+    areaMode = false;
     listOpen = false;
     clearTimeout(idleTimer);
     unlockScroll?.();
@@ -372,7 +387,8 @@
 
   function toggleMinimized() {
     minimized = !minimized;
-    popover = null;
+    clearPending();
+    removing = null;
     listOpen = false;
     if (minimized) {
       unlockScroll?.();
@@ -389,17 +405,208 @@
     saveHighlights(paperId, highlights);
   }
 
-  function onMouseUp() {
-    if (minimized) return;
+  function clearPending() {
+    pending = null;
+    selEnds = null;
+    anchor = null;
+    areaStart = null;
+    dragging = null;
+    window.getSelection()?.removeAllRanges();
+  }
+
+  /** Where a page's own coordinates put a pointer, at scale 1 so it matches what is stored. */
+  function pagePoint(event: { clientX: number; clientY: number }, num: number) {
+    const el = pageEls[num - 1];
+    if (!el) return null;
+    const box = el.getBoundingClientRect();
+    return { x: (event.clientX - box.left) / effScale, y: (event.clientY - box.top) / effScale };
+  }
+
+  // Text selection ------------------------------------------------------------
+
+  /** Reads the document's selection into the knob positions and the popover anchor. */
+  function syncTextSelection() {
     const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+      if (pending?.kind === 'text') clearPending();
+      return;
+    }
     if (!selection.toString().trim()) return;
-    const rect = selection.getRangeAt(0).getBoundingClientRect();
-    popover = { mode: 'select', x: rect.left + rect.width / 2, y: rect.top };
+    const rects = [...selection.getRangeAt(0).getClientRects()].filter(
+      (rect) => rect.width > 0.5 && rect.height > 0.5,
+    );
+    if (rects.length === 0) return;
+    const first = rects[0];
+    const last = rects[rects.length - 1];
+    selEnds = { sx: first.left, sy: first.bottom, ex: last.right, ey: last.bottom };
+    anchor = { x: first.left + first.width / 2, y: first.top };
+    pending = { kind: 'text' };
     chromeOn = true;
   }
 
+  function onViewerMouseUp() {
+    if (minimized || areaMode || dragging) return;
+    syncTextSelection();
+  }
+
+  /**
+   * The text position under a point, but only inside a rendered text layer.
+   *
+   * Without that guard a knob dragged past the last line lands on the canvas, and setting a
+   * range boundary to an element node rather than a text node silently swallows whole spans.
+   */
+  function caretAt(x: number, y: number): { node: Node; offset: number } | null {
+    const api = document as Document & {
+      caretPositionFromPoint?: (
+        x: number,
+        y: number,
+      ) => { offsetNode: Node; offset: number } | null;
+      caretRangeFromPoint?: (x: number, y: number) => Range | null;
+    };
+    let node: Node | null = null;
+    let offset = 0;
+    if (api.caretPositionFromPoint) {
+      const position = api.caretPositionFromPoint(x, y);
+      if (position) {
+        node = position.offsetNode;
+        offset = position.offset;
+      }
+    } else if (api.caretRangeFromPoint) {
+      const range = api.caretRangeFromPoint(x, y);
+      if (range) {
+        node = range.startContainer;
+        offset = range.startOffset;
+      }
+    }
+    if (!node || node.nodeType !== Node.TEXT_NODE) return null;
+    if (!node.parentElement?.closest('.textLayer')) return null;
+    return { node, offset };
+  }
+
+  // Grips ---------------------------------------------------------------------
+
+  function onGripDown(grip: Grip, event: PointerEvent) {
+    event.preventDefault();
+    event.stopPropagation();
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    dragging = grip;
+  }
+
+  function onGripMove(event: PointerEvent) {
+    if (dragging === 'start' || dragging === 'end') {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return;
+      const caret = caretAt(event.clientX, event.clientY);
+      if (!caret) return;
+      const range = selection.getRangeAt(0).cloneRange();
+      try {
+        if (dragging === 'start') range.setStart(caret.node, caret.offset);
+        else range.setEnd(caret.node, caret.offset);
+      } catch {
+        return; // Boundaries in unrelated trees; the drag simply does not take.
+      }
+      // Dragging one end past the other would collapse the selection; hold instead of
+      // flipping, which is what makes a small overshoot recoverable.
+      if (range.collapsed) return;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      syncTextSelection();
+      return;
+    }
+    if (pending?.kind !== 'area' || !dragging) return;
+    const point = pagePoint(event, pending.page);
+    if (!point) return;
+    const rect = pending.rect;
+    // The corner opposite the one being dragged is the one that stays put.
+    const fixed = {
+      x: dragging === 'nw' || dragging === 'sw' ? rect.x + rect.w : rect.x,
+      y: dragging === 'nw' || dragging === 'ne' ? rect.y + rect.h : rect.y,
+    };
+    const size = baseSizes[pending.page - 1];
+    pending = {
+      kind: 'area',
+      page: pending.page,
+      rect: clampRect(rectFromDrag(fixed, point), size.w, size.h),
+    };
+    anchorArea();
+  }
+
+  function onGripUp(event: PointerEvent) {
+    (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
+    dragging = null;
+  }
+
+  // Area selection ------------------------------------------------------------
+
+  function anchorArea() {
+    if (pending?.kind !== 'area') return;
+    const el = pageEls[pending.page - 1];
+    if (!el) return;
+    const box = el.getBoundingClientRect();
+    anchor = {
+      x: box.left + (pending.rect.x + pending.rect.w / 2) * effScale,
+      y: box.top + pending.rect.y * effScale,
+    };
+  }
+
+  function onPagePointerDown(event: PointerEvent, num: number) {
+    if (!areaMode || event.button !== 0) return;
+    event.preventDefault();
+    const point = pagePoint(event, num);
+    if (!point) return;
+    (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+    areaStart = { page: num, ...point };
+    dragging = 'new';
+    removing = null;
+    anchor = null;
+    pending = { kind: 'area', page: num, rect: { x: point.x, y: point.y, w: 0, h: 0 } };
+  }
+
+  function onPagePointerMove(event: PointerEvent) {
+    if (dragging !== 'new' || !areaStart) return;
+    const point = pagePoint(event, areaStart.page);
+    if (!point) return;
+    const size = baseSizes[areaStart.page - 1];
+    pending = {
+      kind: 'area',
+      page: areaStart.page,
+      rect: clampRect(rectFromDrag(areaStart, point), size.w, size.h),
+    };
+  }
+
+  function onPagePointerUp(event: PointerEvent) {
+    if (dragging !== 'new') return;
+    (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
+    dragging = null;
+    areaStart = null;
+    // A click rather than a drag: nothing was framed, so nothing is pending.
+    if (pending?.kind === 'area' && (pending.rect.w < 4 || pending.rect.h < 4)) {
+      pending = null;
+      return;
+    }
+    anchorArea();
+    chromeOn = true;
+  }
+
+  // Committing and removing ---------------------------------------------------
+
   function applyHighlight(color: string) {
+    const now = Date.now();
+    if (pending?.kind === 'area') {
+      highlights.push({
+        id: newId(now),
+        page: pending.page,
+        kind: 'area',
+        color,
+        text: '',
+        rects: [pending.rect],
+      });
+      persist();
+      clearPending();
+      wake();
+      return;
+    }
+
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
     const range = selection.getRangeAt(0);
@@ -419,20 +626,19 @@
       byPage.set(num, list);
     }
 
-    const now = Date.now();
     for (const [num, rects] of byPage) {
       const pageBox = pageBoxes.find((entry) => entry.page === num)!.box;
       const converted = toPageRects(rects, pageBox, effScale);
       if (converted.length === 0) continue;
-      highlights.push({ id: newId(now), page: num, color, text, rects: converted });
+      highlights.push({ id: newId(now), page: num, kind: 'text', color, text, rects: converted });
     }
     persist();
-    selection.removeAllRanges();
-    popover = null;
+    clearPending();
     wake();
   }
 
   function onPageClick(event: MouseEvent, num: number) {
+    if (areaMode || dragging) return;
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) return;
     const el = pageEls[num - 1];
@@ -445,13 +651,20 @@
       event.clientY - box.top,
       effScale,
     );
-    popover = hit ? { mode: 'remove', x: event.clientX, y: event.clientY, id: hit.id } : null;
+    removing = hit ? { id: hit.id, x: event.clientX, y: event.clientY } : null;
   }
 
   function removeHighlight(id: string) {
     highlights = highlights.filter((item) => item.id !== id);
     persist();
-    popover = null;
+    removing = null;
+  }
+
+  function toggleAreaMode() {
+    areaMode = !areaMode;
+    clearPending();
+    removing = null;
+    wake();
   }
 
   // Input --------------------------------------------------------------------
@@ -469,7 +682,9 @@
     if (!open) return;
     wake();
     if (event.key === 'Escape') {
-      if (popover) popover = null;
+      if (pending) clearPending();
+      else if (removing) removing = null;
+      else if (areaMode) areaMode = false;
       else if (listOpen) listOpen = false;
       else if (!document.fullscreenElement) hide();
       return;
@@ -581,10 +796,11 @@
 
       <div
         class="viewer"
+        class:marking={areaMode}
         bind:this={viewer}
         onscroll={onScroll}
         onwheel={onWheel}
-        onmouseup={onMouseUp}
+        onmouseup={onViewerMouseUp}
       >
         {#if loading}
           <p class="status">Loading the PDF from arXiv…</p>
@@ -604,6 +820,9 @@
               bind:this={pageEls[index]}
               style={`top:${boxes[index]?.top ?? 0}px;width:${size.w}px;height:${size.h}px`}
               onclick={(event) => onPageClick(event, index + 1)}
+              onpointerdown={(event) => onPagePointerDown(event, index + 1)}
+              onpointermove={onPagePointerMove}
+              onpointerup={onPagePointerUp}
               role="presentation"
             >
               <canvas></canvas>
@@ -611,12 +830,32 @@
                 {#each highlights.filter((item) => item.page === index + 1) as item}
                   {#each toScreenRects(item.rects, effScale) as rect}
                     <span
+                      class:area={item.kind === 'area'}
                       style={`left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;background:${COLORS[item.color] ?? COLORS.yellow}`}
                     ></span>
                   {/each}
                 {/each}
               </div>
               <div class="textLayer"></div>
+              {#if pending?.kind === 'area' && pending.page === index + 1}
+                {@const box = toScreenRects([pending.rect], effScale)[0]}
+                <div
+                  class="marquee"
+                  style={`left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px`}
+                >
+                  <!-- Corner grips, so a frame drawn slightly wrong is corrected rather than
+                       redrawn. Each one pivots on the corner opposite it. -->
+                  {#each ['nw', 'ne', 'sw', 'se'] as const as corner}
+                    <button
+                      class={`grip corner ${corner}`}
+                      onpointerdown={(event) => onGripDown(corner, event)}
+                      onpointermove={onGripMove}
+                      onpointerup={onGripUp}
+                      aria-label={`Adjust the ${corner} corner`}
+                    ></button>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
@@ -667,6 +906,16 @@
         <span class="sep"></span>
         <button
           class="tool"
+          class:on={areaMode}
+          onclick={toggleAreaMode}
+          aria-pressed={areaMode}
+          aria-label="Highlight an area"
+          title="Frame an equation or a figure"
+        >
+          <SquareDashed size={15} aria-hidden="true" />
+        </button>
+        <button
+          class="tool"
           class:on={listOpen}
           onclick={() => {
             listOpen = !listOpen;
@@ -697,8 +946,8 @@
           <h2>Highlights</h2>
           {#if ordered.length === 0}
             <p class="listnote">
-              Select text on a page to highlight it. Highlights are kept in this browser, so
-              they stay on this device.
+              Select text to highlight it, or frame an equation or figure with the dashed-square
+              button. Highlights are kept in this browser, so they stay on this device.
             </p>
           {:else}
             <ul>
@@ -712,7 +961,9 @@
                     }}
                   >
                     <span class="swatch" style={`background:${COLORS[item.color]}`}></span>
-                    <span class="quote">{item.text}</span>
+                    <span class="quote" class:framed={item.kind === 'area'}>
+                      {item.kind === 'area' ? 'Framed area' : item.text}
+                    </span>
                     <span class="onpage">p{item.page}</span>
                   </button>
                   <button
@@ -729,23 +980,50 @@
         </aside>
       {/if}
 
-      {#if popover}
-        <div class="popover" style={`left:${popover.x}px;top:${popover.y}px`}>
-          {#if popover.mode === 'select'}
-            {#each Object.entries(COLORS) as [name, value]}
-              <button
-                class="swatch pick"
-                style={`background:${value}`}
-                onclick={() => applyHighlight(name)}
-                aria-label={`Highlight in ${name}`}
-              ></button>
-            {/each}
-          {:else}
-            <button class="remove" onclick={() => removeHighlight(popover.id)}>
-              <Trash2 size={13} aria-hidden="true" />
-              Remove
-            </button>
-          {/if}
+      <!-- Knobs on the ends of a text selection. The trackpad has already been let go by the
+           time you see the selection was one word short, so the fix is a handle rather than
+           starting again. Pointer events are off while one is dragged: the caret under the
+           pointer is what moves the boundary, and a knob sitting over it would be hit first. -->
+      {#if pending?.kind === 'text' && selEnds}
+        <button
+          class="grip end-grip"
+          class:held={dragging === 'start'}
+          style={`left:${selEnds.sx}px;top:${selEnds.sy}px`}
+          onpointerdown={(event) => onGripDown('start', event)}
+          onpointermove={onGripMove}
+          onpointerup={onGripUp}
+          aria-label="Adjust where the selection starts"
+        ></button>
+        <button
+          class="grip end-grip"
+          class:held={dragging === 'end'}
+          style={`left:${selEnds.ex}px;top:${selEnds.ey}px`}
+          onpointerdown={(event) => onGripDown('end', event)}
+          onpointermove={onGripMove}
+          onpointerup={onGripUp}
+          aria-label="Adjust where the selection ends"
+        ></button>
+      {/if}
+
+      {#if pending && anchor && !dragging}
+        <div class="popover" style={`left:${anchor.x}px;top:${anchor.y}px`}>
+          {#each Object.entries(COLORS) as [name, value]}
+            <button
+              class="swatch pick"
+              style={`background:${value}`}
+              onclick={() => applyHighlight(name)}
+              aria-label={`Highlight in ${name}`}
+            ></button>
+          {/each}
+        </div>
+      {/if}
+
+      {#if removing}
+        <div class="popover" style={`left:${removing.x}px;top:${removing.y}px`}>
+          <button class="remove" onclick={() => removeHighlight(removing.id)}>
+            <Trash2 size={13} aria-hidden="true" />
+            Remove
+          </button>
         </div>
       {/if}
     {/if}
@@ -939,6 +1217,82 @@
     border-radius: 2px;
     mix-blend-mode: multiply;
   }
+  /* A framed area covers a figure rather than a line of words, so it is lighter than a text
+     highlight and keeps an outline - otherwise a large tinted block reads as damage. */
+  .hl span.area {
+    border-radius: 4px;
+    opacity: 0.55;
+    outline: 1.5px solid currentColor;
+    outline-offset: -1px;
+    color: rgb(23 25 28 / 0.35);
+  }
+
+  /* Area mode: the text layer stops taking pointer events so a drag frames a region instead
+     of selecting the words underneath it. */
+  .viewer.marking :global(.textLayer) {
+    pointer-events: none;
+  }
+  .viewer.marking .pdfpage {
+    cursor: crosshair;
+  }
+  .marquee {
+    position: absolute;
+    border: 1.5px dashed var(--accent, #c2410c);
+    background: rgb(194 65 12 / 0.12);
+    border-radius: 3px;
+  }
+  .grip {
+    position: absolute;
+    padding: 0;
+    border: 2px solid var(--surface, #fff);
+    border-radius: 999px;
+    background: var(--accent, #c2410c);
+    box-shadow: var(--shadow-sm, 0 1px 3px rgb(23 25 28 / 0.3));
+    cursor: grab;
+    touch-action: none;
+  }
+  .grip:active,
+  .grip.held {
+    cursor: grabbing;
+  }
+  /* While a grip is dragged the caret under the pointer decides the new boundary, and the
+     grip itself would be hit-tested first. Pointer capture keeps the events coming anyway. */
+  .grip.held {
+    pointer-events: none;
+  }
+  .grip.corner {
+    width: 0.7rem;
+    height: 0.7rem;
+  }
+  .grip.corner.nw {
+    left: -0.35rem;
+    top: -0.35rem;
+    cursor: nwse-resize;
+  }
+  .grip.corner.ne {
+    right: -0.35rem;
+    top: -0.35rem;
+    cursor: nesw-resize;
+  }
+  .grip.corner.sw {
+    left: -0.35rem;
+    bottom: -0.35rem;
+    cursor: nesw-resize;
+  }
+  .grip.corner.se {
+    right: -0.35rem;
+    bottom: -0.35rem;
+    cursor: nwse-resize;
+  }
+  /* The two ends of a text selection, placed on the baseline at each end and offset so the
+     knob hangs below the line rather than over the words. */
+  .grip.end-grip {
+    position: fixed;
+    z-index: 4;
+    width: 0.85rem;
+    height: 0.85rem;
+    transform: translate(-50%, -10%);
+  }
 
   .edge {
     position: absolute;
@@ -1119,6 +1473,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .quote.framed {
+    color: var(--muted, #5d6570);
+    font-style: italic;
+  }
   .onpage {
     flex-shrink: 0;
     color: var(--muted, #5d6570);
@@ -1141,9 +1499,11 @@
     white-space: pre;
     cursor: text;
   }
+  /* The alpha has to be in the colour. ::selection takes background-color, color and a few
+     text properties and nothing else - an `opacity` beside it is ignored, which turns this
+     into a solid block painted over the words you are trying to read. */
   .pdfpage :global(.textLayer ::selection) {
-    background: var(--accent, #c2410c);
+    background: rgb(194 65 12 / 0.28);
     color: transparent;
-    opacity: 0.3;
   }
 </style>
