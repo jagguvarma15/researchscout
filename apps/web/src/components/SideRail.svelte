@@ -16,15 +16,12 @@
 
   let { current }: { current: string } = $props();
 
-  // About keeps its place in the header, so the rail proper does not repeat it. The menu
-  // does: below 40rem the header has no room for it, and a link that is only in the footer
-  // is a link nobody finds.
-  const ITEMS: { href: string; label: string; icon: Component; menuOnly?: boolean }[] = [
+  const ITEMS: { href: string; label: string; icon: Component }[] = [
+    { href: '/about', label: 'About', icon: Info },
     { href: '/for-you', label: 'For you', icon: Sparkles },
     { href: '/topics', label: 'Trends', icon: TrendingUp },
     { href: '/digests', label: 'Digests', icon: Newspaper },
     { href: '/saved', label: 'Reading list', icon: Bookmark },
-    { href: '/about', label: 'About', icon: Info, menuOnly: true },
   ];
 
   let open = $state(false);
@@ -102,7 +99,7 @@
   </button>
   <ul>
     {#each ITEMS as item}
-      <li class:menu-only={item.menuOnly}>
+      <li>
         <a
           class="btn btn-nav"
           href={item.href}
@@ -155,11 +152,9 @@
   .rail a[aria-current] :global(svg) {
     color: var(--accent-ink, #78350f);
   }
-  /* The close button, the backdrop and the menu-only links all belong to the narrow panel;
-     all three are revealed below. */
+  /* The close button and backdrop exist for the narrow panel; both are revealed below. */
   .close,
-  .backdrop,
-  .menu-only {
+  .backdrop {
     display: none;
   }
 
@@ -184,9 +179,6 @@
     .rail.open {
       visibility: visible;
       transform: translateX(0);
-    }
-    .menu-only {
-      display: block;
     }
     .close {
       display: inline-flex;
