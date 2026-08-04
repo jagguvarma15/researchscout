@@ -13,7 +13,7 @@ const items = await fetchForYou(Astro.locals.accessToken);
 
   {
     items === null && (
-      <div class="card empty">
+      <div class="card empty is-error">
         <Icon name="lucide:cloud-off" aria-hidden="true" />
         <p>The API is unreachable — try again in a moment.</p>
       </div>
@@ -50,13 +50,6 @@ const items = await fetchForYou(Astro.locals.accessToken);
 </Base>
 
 <style>
-  .lede {
-    color: var(--muted);
-    margin-top: -0.25rem;
-  }
-  .empty p {
-    margin: 0;
-  }
   .feed {
     list-style: none;
     margin: 0;
