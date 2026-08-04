@@ -34,8 +34,10 @@ export interface FeedParams {
   year?: string;
   month?: string;
   category?: string[];
-  kind?: string;
-  group?: string[];
+  /** The field a paper is in; repeat to widen. */
+  subject?: string[];
+  /** The technique it uses; repeat to widen. Narrows against subject. */
+  topic?: string[];
   author?: string;
   venue?: string;
   minCitations?: string;
@@ -69,13 +71,13 @@ export async function fetchPapers(params: FeedParams): Promise<PaperPage | null>
   if (params.days) search.set('days', params.days);
   if (params.year) search.set('year', params.year);
   if (params.month) search.set('month', params.month);
-  if (params.kind) search.set('kind', params.kind);
   if (params.author) search.set('author', params.author);
   if (params.venue) search.set('venue', params.venue);
   if (params.minCitations) search.set('min_citations', params.minCitations);
   if (params.sort && params.sort !== 'newest') search.set('sort', params.sort);
   for (const value of params.category ?? []) search.append('category', value);
-  for (const value of params.group ?? []) search.append('group', value);
+  for (const value of params.subject ?? []) search.append('subject', value);
+  for (const value of params.topic ?? []) search.append('topic', value);
   if (!params.q && params.page && params.page > 1) {
     search.set('offset', String((params.page - 1) * PAGE_SIZE));
   }
@@ -180,6 +182,128 @@ export async function fetchAccount(token?: string | null): Promise<Account | nul
 
 export function formatDate(iso: string): string {
   return iso.slice(0, 10);
+}
+
+// --- The AI landscape ---
+
+export interface AiModel {
+  id: string;
+  name: string;
+  organization: string | null;
+  publication_date: string | null;
+  domains: string[];
+  task: string | null;
+  parameters: number | null;
+  training_compute_flop: number | null;
+  accessibility: string | null;
+  open_weights: boolean | null;
+  link: string | null;
+  // The paper this model came from, when this corpus holds it.
+  paper_id: string | null;
+  hf_repo: string | null;
+  hf_downloads: number | null;
+  hf_likes: number | null;
+  sources: string[];
+  scores: BenchmarkResult[];
+}
+
+export interface BenchmarkResult {
+  benchmark: string;
+  model: string;
+  model_id: string | null;
+  score: number;
+  measured_on: string | null;
+  origin: string | null;
+}
+
+export interface Benchmark {
+  id: string;
+  name: string;
+  released_on: string | null;
+  result_count: number;
+}
+
+export interface BenchmarkDetail extends Benchmark {
+  results: BenchmarkResult[];
+}
+
+export interface ModelParams {
+  organization?: string;
+  domain?: string;
+  openWeights?: string;
+  withPaper?: boolean;
+  paperId?: string;
+  page?: number;
+}
+
+export const MODEL_PAGE_SIZE = 50;
+
+export async function fetchModels(
+  params: ModelParams = {},
+): Promise<{ items: AiModel[]; total: number } | null> {
+  const search = new URLSearchParams({ limit: String(MODEL_PAGE_SIZE) });
+  if (params.organization) search.set('organization', params.organization);
+  if (params.domain) search.set('domain', params.domain);
+  if (params.openWeights) search.set('open_weights', params.openWeights);
+  if (params.withPaper) search.set('with_paper', 'true');
+  if (params.paperId) search.set('paper_id', params.paperId);
+  if (params.page && params.page > 1) {
+    search.set('offset', String((params.page - 1) * MODEL_PAGE_SIZE));
+  }
+  try {
+    const response = await fetch(`${API_URL}/v1/models?${search}`, { headers: apiHeaders() });
+    if (!response.ok) return null;
+    return (await response.json()) as { items: AiModel[]; total: number };
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchBenchmarks(): Promise<Benchmark[] | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/benchmarks`, { headers: apiHeaders() });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { items: Benchmark[] };
+    return body.items;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchBenchmark(id: string): Promise<BenchmarkDetail | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/benchmarks/${id}?limit=25`, {
+      headers: apiHeaders(),
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as BenchmarkDetail;
+  } catch {
+    return null;
+  }
+}
+
+// --- Per-account site state (signed in only; a cache, so failures cost a suggestion) ---
+
+export async function fetchSearchHistory(token?: string | null): Promise<string[] | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/me/history`, { headers: apiHeaders(token) });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { items: string[] };
+    return body.items;
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchDismissals(token?: string | null): Promise<string[] | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/me/dismissals`, { headers: apiHeaders(token) });
+    if (!response.ok) return null;
+    const body = (await response.json()) as { items: string[] };
+    return body.items;
+  } catch {
+    return null;
+  }
 }
 
 export interface DigestSummary {
