@@ -13,8 +13,27 @@ from researchscout.embed.base import Embedder
 from researchscout.retrieve.search import retrieve
 from researchscout.store.facets import PaperFacets
 from researchscout.store.papers import count_papers, get_paper, list_papers
+from researchscout.taxonomy import all_subjects, all_topics
 
 router = APIRouter(tags=["papers"])
+
+
+def _validated(values: list[str] | None, *, axis: Literal["subject", "topic"]) -> list[str] | None:
+    """Reject unknown facet keys rather than silently returning nothing.
+
+    A mistyped ``subject=machinelearning`` that quietly matched no papers reads as "there are
+    none", which is a worse answer than being told the key does not exist.
+    """
+    if not values:
+        return None
+    known = {item.key for item in (all_subjects() if axis == "subject" else all_topics())}
+    unknown = sorted(set(values) - known)
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown {axis}: {', '.join(unknown)}; available: {', '.join(sorted(known))}",
+        )
+    return values
 
 
 @router.get("/papers")
@@ -26,8 +45,8 @@ def papers_index(
     year: Annotated[int | None, Query(ge=2007, le=2100)] = None,
     month: Annotated[int | None, Query(ge=1, le=12)] = None,
     category: Annotated[list[str] | None, Query()] = None,
-    kind: Annotated[Literal["tech", "non_tech", "ai"] | None, Query()] = None,
-    group: Annotated[list[str] | None, Query()] = None,
+    subject: Annotated[list[str] | None, Query()] = None,
+    topic: Annotated[list[str] | None, Query()] = None,
     author: Annotated[str | None, Query(max_length=100)] = None,
     venue: Annotated[str | None, Query(max_length=100)] = None,
     min_citations: Annotated[int | None, Query(ge=0)] = None,
@@ -36,6 +55,10 @@ def papers_index(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PaperList:
     """List papers filtered by facets and ordered by ``sort``, or ranked against ``q``.
+
+    ``subject`` names a field (repeat it to widen); ``topic`` names a technique. Values within
+    an axis are alternatives and the axes narrow each other, so ``subject=ai&topic=rl`` means
+    machine learning papers about reinforcement learning.
 
     Under ``q`` the facets still apply to both retrieval legs, but ``sort``/``offset`` are
     inert and ``total`` is null — search returns at most ``limit`` ranked results.
@@ -50,8 +73,8 @@ def papers_index(
         year=year,
         month=month,
         categories=category or None,
-        kind=kind,
-        groups=group or None,
+        subjects=_validated(subject, axis="subject"),
+        topics=_validated(topic, axis="topic"),
         author=author,
         venue=venue,
         min_citations=min_citations,
