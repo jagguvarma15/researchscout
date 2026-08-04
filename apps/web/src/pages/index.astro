@@ -1,38 +1,53 @@
 ---
 import { Icon } from 'astro-icon/components';
+import DismissNotice from '../components/DismissNotice.svelte';
 import FilterSidebar from '../components/FilterSidebar.svelte';
 import SaveButton from '../components/SaveButton.svelte';
 import Telemetry from '../components/Telemetry.svelte';
 import Base from '../layouts/Base.astro';
-import { fetchPapers, fetchSaved, formatDate, PAGE_SIZE, type PaperSummary } from '../lib/api';
+import {
+  fetchDismissals,
+  fetchPapers,
+  fetchSaved,
+  formatDate,
+  PAGE_SIZE,
+  type PaperSummary,
+} from '../lib/api';
 import { renderMathHTML } from '../lib/math';
-import { categoryName, groupLabel } from '../lib/taxonomy';
+import { categoryName, subjectLabel, TOPICS, topicLabel } from '../lib/taxonomy';
 
 const params = Astro.url.searchParams;
 const q = params.get('q') ?? '';
-const days = params.get('days') ?? '';
+const daysParam = params.get('days') ?? '';
 const year = params.get('year') ?? '';
 const month = params.get('month') ?? '';
-const kindParam = params.get('kind') ?? '';
 const author = params.get('author') ?? '';
 const venue = params.get('venue') ?? '';
 const minCitations = params.get('min_citations') ?? '';
 const sort = params.get('sort') ?? '';
 const category = params.getAll('category');
-const group = params.getAll('group');
+const subject = params.getAll('subject');
+const topic = params.getAll('topic');
 const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
 
-// Web-level AI default: a bare feed reads as kind=ai, explicit off is ?kind=all (treated as
-// unfiltered and never forwarded), and searches stay unfiltered. The API keeps no default.
-const kind = kindParam || (q ? 'all' : 'ai');
+// The feed is a radar, so it opens on the last week. A default rather than a cap: an explicit
+// ?days= or ?year= wins, the filters can widen it, and every link ever shared still resolves.
+// A search is not the feed and is never windowed.
+const DEFAULT_DAYS = '7';
+const days = daysParam || (q || year ? '' : DEFAULT_DAYS);
 
-// Toggle/chip links: the same URL with kind replaced (page reset). Setting kind=all rather
-// than deleting the param is what keeps the ai default from resurrecting.
-function withKind(value: string): string {
+// Topic toggles: the same URL with one technique added or removed (page reset).
+function withTopic(value: string): string {
   const next = new URLSearchParams(Astro.url.searchParams);
-  next.set('kind', value);
+  const current = next.getAll('topic');
+  next.delete('topic');
+  for (const item of current) {
+    if (item !== value) next.append('topic', item);
+  }
+  if (!current.includes(value)) next.append('topic', value);
   next.delete('page');
-  return `/?${next}`;
+  const query = next.toString();
+  return query ? `/?${query}` : '/';
 }
 
 // Per-chip removal links: the same URL minus one param (or one value of a repeated param).
@@ -58,15 +73,13 @@ interface Chip {
 }
 const chips: Chip[] = [];
 if (q) chips.push({ label: `“${q}”`, href: withoutParams([['q']]) });
-const kindLabels: Record<string, string> = { ai: 'AI', tech: 'Tech', non_tech: 'Non-tech' };
-// Only an explicit kind gets a removable chip; the implicit ai default shows through the
-// active toolbar toggle alone. kind=all never gets a chip.
-if (kindParam && kindParam in kindLabels) {
-  chips.push({ label: kindLabels[kindParam], href: withKind('all') });
+for (const s of subject) {
+  chips.push({ label: subjectLabel(s), href: withoutParams([['subject', s]]) });
 }
-for (const g of group) chips.push({ label: groupLabel(g), href: withoutParams([['group', g]]) });
+for (const t of topic) chips.push({ label: topicLabel(t), href: withTopic(t) });
 for (const c of category) chips.push({ label: c, href: withoutParams([['category', c]]) });
-if (days) chips.push({ label: `Last ${days} days`, href: withoutParams([['days']]) });
+// Only an explicit window gets a removable chip; the seven-day default shows in the heading.
+if (daysParam) chips.push({ label: `Last ${daysParam} days`, href: withoutParams([['days']]) });
 if (year) {
   chips.push({
     label: month ? `${year}-${month.padStart(2, '0')}` : year,
@@ -94,15 +107,16 @@ const result = await fetchPapers({
   days,
   year,
   month,
-  kind: kind === 'all' ? '' : kind,
   author,
   venue,
   minCitations,
   sort,
   category,
-  group,
+  subject,
+  topic,
   page,
 });
+const dismissed = new Set((await fetchDismissals(Astro.locals.accessToken)) ?? []);
 const items = result === null ? null : result.items;
 const total = result?.total ?? null;
 
@@ -114,6 +128,14 @@ for (const paper of items ?? []) {
   const last = groups[groups.length - 1];
   if (last && last.date === date) last.papers.push(paper);
   else groups.push({ date, papers: [paper] });
+}
+
+// Dismissed papers sink to the end of their day rather than disappearing. "Not for me right
+// now" is not "never show me this", and a paper that vanishes cannot be reconsidered. Within
+// the day rather than the whole page, because moving one to the very bottom would file it
+// under somebody else's date and break the timeline the headings promise.
+for (const group of groups) {
+  group.papers.sort((a, b) => Number(dismissed.has(a.id)) - Number(dismissed.has(b.id)));
 }
 
 function formatDayHeading(iso: string): string {
@@ -180,21 +202,19 @@ function pageLink(target: number): string {
       Filters
       {activeCount > 0 && <span class="filter-count">{activeCount}</span>}
     </button>
-    <div class="kind-quick" role="group" aria-label="Quick kind filter">
-      <a
-        class:list={['kt', { on: kind === 'ai' }]}
-        href={withKind(kind === 'ai' ? 'all' : 'ai')}
-        aria-current={kind === 'ai' ? 'true' : undefined}
-      >
-        AI
-      </a>
-      <a
-        class:list={['kt', { on: kind === 'tech' }]}
-        href={withKind(kind === 'tech' ? 'all' : 'tech')}
-        aria-current={kind === 'tech' ? 'true' : undefined}
-      >
-        Tech
-      </a>
+    <div class="kind-quick" role="group" aria-label="Filter by technique">
+      {
+        TOPICS.map((option) => (
+          <a
+            class:list={['kt', { on: topic.includes(option.key) }]}
+            href={withTopic(option.key)}
+            title={option.label}
+            aria-pressed={topic.includes(option.key) ? 'true' : 'false'}
+          >
+            {option.short}
+          </a>
+        ))
+      }
     </div>
     {
       q && (
@@ -274,7 +294,11 @@ function pageLink(target: number): string {
               const note = sourceNote(paper);
               const badges = badgesFor(paper);
               return (
-                <li class="row" data-paper-id={paper.id} data-rank={rankOf.get(paper.id)}>
+                <li
+                  class:list={['row', { dismissed: dismissed.has(paper.id) }]}
+                  data-paper-id={paper.id}
+                  data-rank={rankOf.get(paper.id)}
+                >
                   <div class="row-head">
                     <a
                       class="title"
@@ -322,7 +346,16 @@ function pageLink(target: number): string {
                         Read
                       </a>
                     )}
-                    <button class="dismiss" type="button" data-dismiss aria-label="Not interested">
+                    <button
+                      class="dismiss"
+                      type="button"
+                      data-dismiss
+                      aria-label={
+                        dismissed.has(paper.id)
+                          ? 'Already moved to the end of the list'
+                          : 'Move to the end of the list'
+                      }
+                    >
                       Dismiss
                     </button>
                   </p>
@@ -375,13 +408,14 @@ function pageLink(target: number): string {
   }
 
   <Telemetry client:idle surface={q ? 'search' : 'feed'} enabled={Astro.locals.user !== null} />
+  <DismissNotice client:idle />
   <FilterSidebar
     client:load
     initial={{
-      kind,
-      groups: group,
+      subjects: subject,
+      topics: topic,
       categories: category,
-      days,
+      days: daysParam,
       year,
       month,
       sort,
@@ -580,6 +614,15 @@ function pageLink(target: number): string {
   }
   .row:last-child::after {
     display: none;
+  }
+  /* Set back rather than hidden: it is still there, still readable, and still one click from
+     being restored - which is the whole difference between demoting and deleting. */
+  .row.dismissed {
+    opacity: 0.55;
+  }
+  .row.dismissed:hover,
+  .row.dismissed:focus-within {
+    opacity: 1;
   }
   .row-head {
     display: flex;
