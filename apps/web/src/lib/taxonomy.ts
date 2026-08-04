@@ -1,27 +1,134 @@
-// Display-only mirror of researchscout/taxonomy.py for rendering the sidebar's subject
-// controls and category badge tooltips. The server stays authoritative for filtering: if this
-// list drifts, a stale group yields an empty result and an unknown code renders without a
-// name, never wrong data.
+// Display-only mirror of researchscout/taxonomy.py for rendering the filter controls and
+// category badge tooltips. The server stays authoritative: if this list drifts, a stale subject
+// is rejected with a 422 naming it and an unknown code renders without a name, never wrong data.
+//
+// Two axes, matching the API. A subject is the field a paper is in; a topic is the technique it
+// uses. They are different questions, so they narrow each other rather than competing.
 
-export interface GroupOption {
+export interface SubjectOption {
   key: string;
   label: string;
-  tech: boolean;
+  /** Whole archives this subject covers. */
+  archives: string[];
+  /** Individual category codes, for subjects that are not a whole archive. */
+  categories: string[];
+  /** Core subjects are what this radar is about; the rest are where it meets other fields. */
+  core: boolean;
 }
 
-export const GROUPS: GroupOption[] = [
-  { key: 'cs', label: 'Computer Science', tech: true },
-  { key: 'stat', label: 'Statistics', tech: true },
-  { key: 'eess', label: 'Electrical Engineering and Systems', tech: true },
-  { key: 'math', label: 'Mathematics', tech: false },
-  { key: 'physics', label: 'Physics', tech: false },
-  { key: 'q-bio', label: 'Quantitative Biology', tech: false },
-  { key: 'q-fin', label: 'Quantitative Finance', tech: false },
-  { key: 'econ', label: 'Economics', tech: false },
+const PHYSICS_ARCHIVES = [
+  'astro-ph',
+  'cond-mat',
+  'gr-qc',
+  'hep-ex',
+  'hep-lat',
+  'hep-ph',
+  'hep-th',
+  'math-ph',
+  'nlin',
+  'nucl-ex',
+  'nucl-th',
+  'physics',
+  'quant-ph',
 ];
 
-export function groupLabel(key: string): string {
-  return GROUPS.find((group) => group.key === key)?.label ?? key;
+export const SUBJECTS: SubjectOption[] = [
+  {
+    key: 'ai',
+    label: 'AI and machine learning',
+    archives: [],
+    categories: [
+      'cs.AI',
+      'cs.CL',
+      'cs.CV',
+      'cs.IR',
+      'cs.LG',
+      'cs.MA',
+      'cs.NE',
+      'cs.RO',
+      'eess.AS',
+      'eess.IV',
+      'stat.ML',
+    ],
+    core: true,
+  },
+  { key: 'stats', label: 'Statistics', archives: ['stat'], categories: [], core: true },
+  {
+    key: 'data',
+    label: 'Data science',
+    archives: [],
+    categories: ['cs.DB', 'cs.DL', 'cs.DM', 'cs.DS', 'cs.IR', 'stat.AP', 'stat.CO'],
+    core: true,
+  },
+  {
+    key: 'math',
+    label: 'Mathematics',
+    archives: ['math', 'math-ph'],
+    categories: ['cs.CC', 'cs.GT', 'cs.LO', 'cs.NA', 'cs.SC'],
+    core: true,
+  },
+  { key: 'bio', label: 'Biology and health', archives: ['q-bio'], categories: [], core: false },
+  {
+    key: 'physical',
+    label: 'Physical sciences',
+    archives: PHYSICS_ARCHIVES,
+    categories: [],
+    core: false,
+  },
+  {
+    key: 'security',
+    label: 'Security and privacy',
+    archives: [],
+    categories: ['cs.CR'],
+    core: false,
+  },
+  {
+    key: 'society',
+    label: 'Society and economics',
+    archives: ['econ', 'q-fin'],
+    categories: ['cs.CY', 'cs.HC', 'cs.SI'],
+    core: false,
+  },
+  {
+    key: 'systems',
+    label: 'Systems and software',
+    archives: [],
+    categories: [
+      'cs.AR',
+      'cs.DC',
+      'cs.NI',
+      'cs.OS',
+      'cs.PF',
+      'cs.PL',
+      'cs.SE',
+      'cs.SY',
+      'eess.SY',
+    ],
+    core: false,
+  },
+];
+
+export function subjectLabel(key: string): string {
+  return SUBJECTS.find((subject) => subject.key === key)?.label ?? key;
+}
+
+export interface TopicOption {
+  key: string;
+  label: string;
+  /** Short form for the toolbar, where three of these sit side by side. */
+  short: string;
+}
+
+// NLP and CV are arXiv categories; RL is a phrase match, because arXiv has no category for it.
+// The server owns that distinction - here they are three equivalent buttons.
+export const TOPICS: TopicOption[] = [
+  { key: 'nlp', label: 'Natural language processing', short: 'NLP' },
+  { key: 'cv', label: 'Computer vision', short: 'CV' },
+  { key: 'rl', label: 'Reinforcement learning', short: 'RL' },
+];
+
+export function topicLabel(key: string): string {
+  return TOPICS.find((topic) => topic.key === key)?.short ?? key;
 }
 
 // Full arXiv taxonomy (arxiv.org/category_taxonomy), keyed by category code. Used for badge
@@ -200,11 +307,24 @@ export function categoryName(code: string): string | undefined {
   return CATEGORY_NAMES[code];
 }
 
-export function techCategories(groupKey: string): { code: string; name: string }[] {
-  const option = GROUPS.find((group) => group.key === groupKey);
-  if (!option?.tech) return [];
-  const prefix = `${groupKey}.`;
-  return Object.entries(CATEGORY_NAMES)
-    .filter(([code]) => code.startsWith(prefix))
-    .map(([code, name]) => ({ code, name }));
+/**
+ * The individual categories a reader can tick under one subject.
+ *
+ * A subject defined by whole archives expands to every code in them; one defined by a code list
+ * is that list. Sorted by code so the checklist reads the way arXiv writes it. Physical sciences
+ * expands to well over a hundred codes and is deliberately left as the subject alone - a
+ * checklist that long is a wall, not a control.
+ */
+export function subjectCategories(key: string): { code: string; name: string }[] {
+  const subject = SUBJECTS.find((option) => option.key === key);
+  if (!subject || key === 'physical') return [];
+  const codes = new Set(subject.categories);
+  for (const archive of subject.archives) {
+    for (const code of Object.keys(CATEGORY_NAMES)) {
+      if (code.startsWith(`${archive}.`)) codes.add(code);
+    }
+  }
+  return [...codes]
+    .sort()
+    .map((code) => ({ code, name: CATEGORY_NAMES[code] ?? code }));
 }
