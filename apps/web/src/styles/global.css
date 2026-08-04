@@ -362,6 +362,105 @@ svg[data-icon] {
   color: var(--danger-ink);
 }
 
+/* Dense tables ------------------------------------------------------------- */
+
+/* The models and benchmarks pages are the first things here that are genuinely tabular -
+   a dozen models against six columns of numbers, where the comparison is the point. Three
+   rules make that readable and are easy to get wrong separately, so they live together:
+
+   - The scroll container is the table's, never the page's. A wide table on a narrow window
+     scrolls inside its own box; the body never scrolls sideways.
+   - Numbers are right-aligned and tabular-figured, so digits line up in a column and the
+     eye can compare magnitudes without reading them.
+   - The header sticks, because a table you have to scroll is a table whose headings you
+     will otherwise lose. */
+
+.table-scroll {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+.data-table th,
+.data-table td {
+  padding: 0.55rem 0.6rem;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.data-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table tbody tr:hover {
+  background: var(--surface-2);
+}
+
+/* The one column that may wrap: a model name is the row's subject, not a value. */
+.data-table .cell-name {
+  white-space: normal;
+  min-width: 11rem;
+  font-weight: 600;
+}
+
+.data-table .cell-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Free text in a nowrap table sizes its column to the single longest value in it. One paper
+   credited to "Stability AI,University of Illinois Urbana-Champaign (UIUC)" was enough to take
+   that column to 1016px and push every number in the table off the screen. Clipped columns keep
+   a sane width and hand the whole value to the title attribute. */
+.data-table .cell-clip {
+  max-width: 11rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* On a phone the table still scrolls sideways - nine columns will never fit - but the
+   columns are narrowed so three arrive on screen instead of two, which is the difference
+   between a table you can read and one you have to drag. */
+@media (max-width: 42rem) {
+  .data-table th,
+  .data-table td {
+    padding: 0.5rem;
+  }
+
+  .data-table .cell-name {
+    min-width: 8rem;
+  }
+
+  .data-table .cell-clip {
+    max-width: 7rem;
+  }
+}
+
+.data-table .cell-muted {
+  color: var(--muted);
+}
+
 /* Placeholders for content the server is still fetching. Pages render these instead of a
    blank region, so the layout does not jump when the real rows arrive. The shimmer is
    decorative and stills under reduced motion; the block itself stays. */
