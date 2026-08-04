@@ -167,7 +167,8 @@ def test_fetch_identifies_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_every_source_declares_attribution() -> None:
     """A connector cannot ship without saying where its data comes from."""
     described = describe_sources()
-    assert [d.name for d in described] == [cls.name for cls in registered_sources()]
+    registered = [cls.name for cls in registered_sources()]
+    assert [d.name for d in described][: len(registered)] == registered
 
     for source in described:
         attribution = source.attribution
@@ -177,3 +178,21 @@ def test_every_source_declares_attribution() -> None:
         assert attribution.data_license
         for url in (attribution.homepage, attribution.terms):
             assert url.startswith("https://"), f"{source.name}: {url}"
+
+
+def test_catalog_sources_reach_the_listing_without_a_connector_class() -> None:
+    """The model and benchmark upstreams have nothing to normalize into a Paper or a Signal.
+
+    They are still somebody else's data being republished under a licence that requires credit,
+    so they declare attribution in the same file and reach /about by the same route. Without
+    this they would be the one set of sources the page does not mention.
+    """
+    described = {source.name: source for source in describe_sources()}
+    for name in ("epoch_ai", "huggingface_models"):
+        source = described[name]
+        assert source.kind == "catalog"
+        assert source.enabled is True
+        assert source.attribution is not None
+    # The licence Epoch AI publishes under asks for exactly this credit.
+    epoch = described["epoch_ai"].attribution
+    assert epoch is not None and "CC BY" in epoch.data_license
