@@ -1,0 +1,243 @@
+---
+import { Icon } from 'astro-icon/components';
+import Base from '../layouts/Base.astro';
+import { fetchBenchmark, fetchBenchmarks } from '../lib/api';
+
+const selected = Astro.url.searchParams.get('b') ?? '';
+
+const benchmarks = await fetchBenchmarks();
+// The first one is the most measured, which is the most useful thing to open on.
+const current = benchmarks?.length ? selected || benchmarks[0].id : '';
+const detail = current ? await fetchBenchmark(current) : null;
+
+function benchmarkLink(id: string): string {
+  return `/benchmarks?b=${encodeURIComponent(id)}`;
+}
+
+/** Scores arrive as fractions; a leaderboard reads better in whole percentage points. */
+function percent(score: number): string {
+  return `${(score * 100).toFixed(1)}`;
+}
+---
+
+<Base title="Benchmarks">
+  <h1 class="page-title">Benchmarks</h1>
+  <p class="lede">
+    How the models on the <a href="/models">Models</a> page score on the tests the field actually
+    uses. Pick a benchmark to see its leaderboard; a model this catalogue knows links back to its
+    entry.
+  </p>
+
+  {
+    benchmarks === null && (
+      <div class="card empty is-error">
+        <Icon name="lucide:cloud-off" aria-hidden="true" />
+        <p>The API is unreachable — try again in a moment.</p>
+      </div>
+    )
+  }
+  {
+    benchmarks !== null && benchmarks.length === 0 && (
+      <div class="card empty">
+        <Icon name="lucide:gauge" aria-hidden="true" />
+        <p>
+          No benchmarks yet — they arrive with the daily catalogue refresh, or run{' '}
+          <code>scout catalog</code>.
+        </p>
+      </div>
+    )
+  }
+
+  {
+    benchmarks !== null && benchmarks.length > 0 && (
+      <div class="layout">
+        <nav class="picker" aria-label="Benchmarks">
+          <ul>
+            {benchmarks.map((benchmark) => (
+              <li>
+                <a
+                  href={benchmarkLink(benchmark.id)}
+                  aria-current={benchmark.id === current ? 'page' : undefined}
+                >
+                  <span class="name">{benchmark.name}</span>
+                  <span class="n">{benchmark.result_count}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <section class="board">
+          {detail === null ? (
+            <div class="card empty">
+              <Icon name="lucide:search-x" aria-hidden="true" />
+              <p>That benchmark is not in the catalogue.</p>
+            </div>
+          ) : (
+            <Fragment>
+              <header class="board-head">
+                <h2>{detail.name}</h2>
+                <p class="board-meta">
+                  {detail.result_count} score{detail.result_count === 1 ? '' : 's'}
+                  {detail.released_on && ` · released ${detail.released_on}`}
+                </p>
+              </header>
+              <div class="table-scroll">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th scope="col" class="cell-num rank">
+                        #
+                      </th>
+                      <th scope="col">Model</th>
+                      <th scope="col" class="cell-num">
+                        Score
+                      </th>
+                      <th scope="col">Measured</th>
+                      <th scope="col">From</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {detail.results.map((result, index) => (
+                      <tr>
+                        <td class="cell-num cell-muted rank">{index + 1}</td>
+                        <th scope="row" class="cell-name">
+                          {result.model}
+                          {/* Roughly half the models with scores are not in the catalogue at
+                              all - a leaderboard covers what has been measured, the catalogue
+                              what somebody judged notable. Saying which is which is honest and
+                              cheap; linking the ones that match is not, because there is no
+                              per-model page to link to. */}
+                          {result.model_id === null && (
+                            <span class="unlisted" title="Not in the model catalogue">
+                              unlisted
+                            </span>
+                          )}
+                        </th>
+                        <td class="cell-num score">{percent(result.score)}</td>
+                        <td class="cell-muted">{result.measured_on ?? ''}</td>
+                        <td class="cell-muted cell-clip" title={result.origin ?? undefined}>
+                          {result.origin ?? ''}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Fragment>
+          )}
+        </section>
+      </div>
+    )
+  }
+
+  <p class="credit">
+    Benchmark data from <a href="https://epoch.ai" rel="noopener noreferrer">Epoch AI</a> under
+    CC BY. Scores are collected from published evaluations and are not run here; see
+    <a href="https://epoch.ai/benchmarks/about" rel="noopener noreferrer">their methodology</a>
+    for what each one measures.
+  </p>
+</Base>
+
+<style>
+  /* A picker beside the board on a wide window, stacked below one. The picker scrolls on its
+     own so a long benchmark list never pushes the leaderboard off the screen. */
+  .layout {
+    display: grid;
+    grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
+    gap: var(--space-5);
+    align-items: start;
+  }
+  .picker ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 32rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .picker a {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius-sm);
+    color: var(--ink);
+    font-size: var(--text-sm);
+    text-decoration: none;
+  }
+  .picker a:hover {
+    background: var(--surface-2);
+  }
+  .picker a[aria-current] {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-weight: 600;
+  }
+  .picker .n {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  .picker a[aria-current] .n {
+    color: var(--accent-ink);
+  }
+  .board-head {
+    margin-bottom: var(--space-3);
+  }
+  .board-head h2 {
+    margin: 0;
+    font-size: var(--text-lg);
+  }
+  .board-meta {
+    margin: 0.2rem 0 0;
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  .rank {
+    width: 2.5rem;
+  }
+  .score {
+    font-weight: 650;
+  }
+  .unlisted {
+    margin-left: 0.4rem;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-weight: 400;
+  }
+  .credit {
+    margin-top: var(--space-5);
+    color: var(--muted);
+    font-size: var(--text-xs);
+    line-height: 1.6;
+  }
+
+  @media (max-width: 56rem) {
+    .layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .picker ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      max-height: 9rem;
+    }
+    .picker a {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-full);
+    }
+    .picker a[aria-current] {
+      border-color: transparent;
+    }
+  }
+  @media (max-width: 42rem) {
+    .data-table :global(td:nth-child(4)),
+    .data-table :global(th:nth-child(4)),
+    .data-table :global(td:nth-child(5)),
+    .data-table :global(th:nth-child(5)) {
+      display: none;
+    }
+  }
+</style>
