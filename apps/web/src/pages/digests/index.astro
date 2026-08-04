@@ -11,7 +11,7 @@ const digests = await fetchDigests();
 
   {
     digests === null && (
-      <div class="card empty">
+      <div class="card empty is-error">
         <Icon name="lucide:cloud-off" aria-hidden="true" />
         <p>The API is unreachable — try again in a moment.</p>
       </div>
@@ -48,9 +48,6 @@ const digests = await fetchDigests();
 </Base>
 
 <style>
-  .empty p {
-    margin: 0;
-  }
   .list {
     list-style: none;
     margin: 0;
