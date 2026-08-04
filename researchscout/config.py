@@ -79,6 +79,15 @@ class Settings(BaseSettings):
     # never sees another paper. Never run both: two processes fetching from the same upstreams
     # on one address is exactly what arXiv's three-second floor cannot survive.
     scheduler_batch_pipeline: bool = False
+    # Wall-clock scheduling, as comma-separated HH:MM times in scheduler_timezone. Empty (the
+    # default) leaves every task on its interval below, which is what a local checkout wants.
+    # Set them and the named tasks run at those times instead: the pipeline set (ingest, index,
+    # full text, signals) on the first, and the daily set (model catalogue, digest, topics,
+    # report) on the second. A named zone rather than a fixed offset, so the runs stay put on
+    # the local clock across daylight saving.
+    scheduler_pipeline_at: str = ""
+    scheduler_daily_at: str = ""
+    scheduler_timezone: str = "America/New_York"
     scheduler_ingest_window_days: int = 2
     scheduler_ingest_interval_sec: int = 3600
     scheduler_index_interval_sec: int = 900
@@ -87,6 +96,7 @@ class Settings(BaseSettings):
     scheduler_fulltext_batch: int = 25
     scheduler_digest_interval_sec: int = 86400
     scheduler_report_interval_sec: int = 86400
+    scheduler_catalog_interval_sec: int = 86400
     scheduler_tick_sec: int = 30
     # Breakthrough scoring: how the signal series becomes a ranking boost. The window bounds how
     # far back momentum is measured; the weights set how much velocity and acceleration count
