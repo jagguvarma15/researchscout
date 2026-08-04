@@ -17,10 +17,19 @@ export interface HighlightRect {
   h: number;
 }
 
+/**
+ * Text highlights follow the words; area highlights are a rectangle over whatever is inside
+ * them. Both exist because the pdf.js text layer only covers text - a displayed equation or a
+ * figure is drawn straight to the canvas with nothing selectable over it, so marking one up
+ * has to mean drawing a box rather than dragging through characters.
+ */
+export type HighlightKind = 'text' | 'area';
+
 export interface Highlight {
   id: string;
   /** One-based, matching what the reader shows. */
   page: number;
+  kind: HighlightKind;
   color: string;
   /** The selected text, so a highlight can be listed and found without rendering the page. */
   text: string;
@@ -54,12 +63,15 @@ export function loadHighlights(paperId: string): Highlight[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item): item is Highlight =>
-        typeof item?.id === 'string' &&
-        typeof item?.page === 'number' &&
-        Array.isArray(item?.rects),
-    );
+    return parsed
+      .filter(
+        (item): item is Highlight =>
+          typeof item?.id === 'string' &&
+          typeof item?.page === 'number' &&
+          Array.isArray(item?.rects),
+      )
+      // Highlights written before area marking existed have no kind, and were all text.
+      .map((item) => ({ ...item, kind: item.kind === 'area' ? 'area' : 'text' }));
   } catch {
     return [];
   }
@@ -106,6 +118,31 @@ export function toScreenRects(
     width: rect.w * scale,
     height: rect.h * scale,
   }));
+}
+
+/**
+ * The rectangle between two dragged points, in page units.
+ *
+ * Dragging up or to the left is just as natural as down and right, so the corners are sorted
+ * rather than assumed: a rectangle with negative width paints nothing and hit-tests as empty.
+ */
+export function rectFromDrag(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+): HighlightRect {
+  return {
+    x: Math.min(from.x, to.x),
+    y: Math.min(from.y, to.y),
+    w: Math.abs(to.x - from.x),
+    h: Math.abs(to.y - from.y),
+  };
+}
+
+/** Keeps a dragged rectangle on its page, so a highlight cannot hang off the paper. */
+export function clampRect(rect: HighlightRect, width: number, height: number): HighlightRect {
+  const x = Math.min(Math.max(0, rect.x), width);
+  const y = Math.min(Math.max(0, rect.y), height);
+  return { x, y, w: Math.min(rect.w, width - x), h: Math.min(rect.h, height - y) };
 }
 
 /** Which page a screen rectangle belongs to, so a selection across a page break splits. */
