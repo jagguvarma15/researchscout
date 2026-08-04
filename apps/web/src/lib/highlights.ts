@@ -1,14 +1,21 @@
 // Highlights you make while reading a paper.
 //
-// They live in the browser, under a key per paper. That is a deliberate limit: highlights
-// never leave the machine that made them, so they are not personal data anyone here has to
-// hold, export or delete on request - and they work signed out. The cost is that they do not
-// follow you to another device, which the reader says plainly.
+// One mechanism: drag a box over anything. It does not matter whether what is underneath is a
+// sentence, a displayed equation, a symbol or a figure - the box tightens onto whatever ink is
+// inside it and that becomes the mark. Selecting text with the cursor was the obvious first
+// answer and it was the wrong one: pdf.js lays a PDF out as one absolutely-positioned span per
+// glyph run, so dragging through them is jumpy, `getClientRects()` comes back as dozens of
+// little boxes at different heights, and a displayed equation has no selectable text at all.
 //
-// Rectangles are stored in *unscaled* PDF units, divided by the render scale on the way in
-// and multiplied by it on the way out. Storing screen pixels instead would pin a highlight
-// to the zoom level and window width it was made at, and it would slide off its words the
-// first time either changed.
+// They live in the browser, under a key per paper. That is a deliberate limit: highlights never
+// leave the machine that made them, so they are not personal data anyone here has to hold,
+// export or delete on request - and they work signed out. The cost is that they do not follow
+// you to another device, which the reader says plainly.
+//
+// Rectangles are stored in *unscaled* PDF units, divided by the render scale on the way in and
+// multiplied by it on the way out. Storing screen pixels instead would pin a highlight to the
+// zoom level and window width it was made at, and it would slide off its words the first time
+// either changed.
 
 export interface HighlightRect {
   x: number;
@@ -17,31 +24,14 @@ export interface HighlightRect {
   h: number;
 }
 
-/**
- * Text highlights follow the words; area highlights are a rectangle over whatever is inside
- * them. Both exist because the pdf.js text layer only covers text - a displayed equation or a
- * figure is drawn straight to the canvas with nothing selectable over it, so marking one up
- * has to mean drawing a box rather than dragging through characters.
- */
-export type HighlightKind = 'text' | 'area';
-
 export interface Highlight {
   id: string;
   /** One-based, matching what the reader shows. */
   page: number;
-  kind: HighlightKind;
   color: string;
-  /** The selected text, so a highlight can be listed and found without rendering the page. */
+  /** Whatever text fell inside the box, so a mark can be listed without rendering the page. */
   text: string;
   rects: HighlightRect[];
-}
-
-/** The shape of a DOMRect, narrowed to what this module needs and can be handed in tests. */
-export interface Box {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
 }
 
 const PREFIX = 'rs-highlights:';
@@ -63,15 +53,12 @@ export function loadHighlights(paperId: string): Highlight[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (item): item is Highlight =>
-          typeof item?.id === 'string' &&
-          typeof item?.page === 'number' &&
-          Array.isArray(item?.rects),
-      )
-      // Highlights written before area marking existed have no kind, and were all text.
-      .map((item) => ({ ...item, kind: item.kind === 'area' ? 'area' : 'text' }));
+    return parsed.filter(
+      (item): item is Highlight =>
+        typeof item?.id === 'string' &&
+        typeof item?.page === 'number' &&
+        Array.isArray(item?.rects),
+    );
   } catch {
     return [];
   }
@@ -88,26 +75,7 @@ export function saveHighlights(paperId: string, items: Highlight[]): boolean {
   }
 }
 
-/**
- * Screen rectangles from a text selection, converted to page coordinates at scale 1.
- *
- * `page` is the rendered page's own box, so the result is relative to the top left corner of
- * the page rather than the window, and survives scrolling. Zero-area rectangles are dropped:
- * a selection produces one per line plus empty ones at its edges.
- */
-export function toPageRects(selection: Box[], page: Box, scale: number): HighlightRect[] {
-  if (scale <= 0) return [];
-  return selection
-    .filter((rect) => rect.width > 0.5 && rect.height > 0.5)
-    .map((rect) => ({
-      x: (rect.left - page.left) / scale,
-      y: (rect.top - page.top) / scale,
-      w: rect.width / scale,
-      h: rect.height / scale,
-    }));
-}
-
-/** Page coordinates back to pixels for painting at the current scale. */
+/** Page coordinates to pixels for painting at the current scale. */
 export function toScreenRects(
   rects: HighlightRect[],
   scale: number,
@@ -145,22 +113,48 @@ export function clampRect(rect: HighlightRect, width: number, height: number): H
   return { x, y, w: Math.min(rect.w, width - x), h: Math.min(rect.h, height - y) };
 }
 
-/** Which page a screen rectangle belongs to, so a selection across a page break splits. */
-export function pageOfRect(rect: Box, pages: { page: number; box: Box }[]): number | null {
-  const midX = rect.left + rect.width / 2;
-  const midY = rect.top + rect.height / 2;
-  for (const candidate of pages) {
-    const { box } = candidate;
-    if (
-      midX >= box.left &&
-      midX <= box.left + box.width &&
-      midY >= box.top &&
-      midY <= box.top + box.height
-    ) {
-      return candidate.page;
+/**
+ * The bounding box of everything drawn inside a patch of a rendered page.
+ *
+ * This is what lets a loose drag become a tidy mark: the reader hands over the pixels the box
+ * covers, and this finds where the ink actually is. It reads the rendered canvas rather than
+ * the text layer on purpose - the canvas is where a formula, a plot and a paragraph all end up
+ * looking the same, so one rule covers every kind of thing on the page.
+ *
+ * Coordinates are in the pixels handed in, relative to the patch. Null means the box was empty,
+ * which the reader treats as nothing worth marking.
+ *
+ * `threshold` is a channel value: a PDF page is painted on white, so anything below it on any
+ * channel is ink. Left a little under 255 so that antialiasing and off-white paper do not
+ * register as content.
+ */
+export function inkBounds(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  threshold = 244,
+): { x: number; y: number; w: number; h: number } | null {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width * 4;
+    for (let x = 0; x < width; x += 1) {
+      const i = row + x * 4;
+      // Transparent pixels are paper too: nothing was drawn there.
+      if (pixels[i + 3] < 8) continue;
+      if (pixels[i] >= threshold && pixels[i + 1] >= threshold && pixels[i + 2] >= threshold) {
+        continue;
+      }
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
     }
   }
-  return null;
+  if (maxX < 0) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
 /** The highlight under a point on a page, newest first so overlaps remove in reverse order. */
