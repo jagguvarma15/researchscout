@@ -1,0 +1,311 @@
+---
+import { Icon } from 'astro-icon/components';
+import Base from '../layouts/Base.astro';
+import { fetchModels, MODEL_PAGE_SIZE, type AiModel } from '../lib/api';
+
+const params = Astro.url.searchParams;
+const organization = params.get('organization') ?? '';
+const domain = params.get('domain') ?? '';
+const openWeights = params.get('open_weights') ?? '';
+const withPaper = params.get('with_paper') === 'true';
+const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
+
+const result = await fetchModels({ organization, domain, openWeights, withPaper, page });
+const models = result?.items ?? null;
+const total = result?.total ?? 0;
+
+// The domains Epoch AI files models under. Listed rather than derived so the filter row is
+// stable whatever this page happens to be showing.
+const DOMAINS = ['Language', 'Vision', 'Multimodal', 'Speech', 'Image generation', 'Robotics'];
+
+function withParam(name: string, value: string): string {
+  const next = new URLSearchParams(Astro.url.searchParams);
+  if (value) next.set(name, value);
+  else next.delete(name);
+  next.delete('page');
+  const query = next.toString();
+  return query ? `/models?${query}` : '/models';
+}
+
+function pageLink(target: number): string {
+  const next = new URLSearchParams(Astro.url.searchParams);
+  next.set('page', String(target));
+  return `/models?${next}`;
+}
+
+/** 1.76e12 parameters reads as "1.76T"; a number that long reads as nothing. */
+function compact(value: number | null): string {
+  if (value === null) return '';
+  for (const [size, suffix] of [
+    [1e12, 'T'],
+    [1e9, 'B'],
+    [1e6, 'M'],
+    [1e3, 'K'],
+  ] as const) {
+    if (value >= size) return `${(value / size).toFixed(value / size < 10 ? 1 : 0)}${suffix}`;
+  }
+  return String(Math.round(value));
+}
+
+/** Training compute spans twelve orders of magnitude, so it is shown as one. */
+function exponent(value: number | null): string {
+  if (value === null || value <= 0) return '';
+  return `1e${Math.round(Math.log10(value))}`;
+}
+
+function weights(model: AiModel): string {
+  if (model.open_weights === null) return 'unknown';
+  return model.open_weights ? 'open' : 'closed';
+}
+
+/** Epoch AI files a model under domains; the Hub knows only its task. Either will do. */
+function field(model: AiModel): string {
+  return model.domains.join(', ') || model.task || '';
+}
+
+const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
+---
+
+<Base title="Models">
+  <h1 class="page-title">AI models</h1>
+  <p class="lede">
+    Language, vision and multimodal models with the facts that let you compare them: who built
+    them, how large, on how much compute, and whether the weights are yours to run. Models whose
+    paper is in this corpus link straight to it.
+  </p>
+
+  <div class="filters" role="group" aria-label="Filter models">
+    <a class:list={['chip-toggle', { on: !domain }]} href={withParam('domain', '')}>All fields</a>
+    {
+      DOMAINS.map((name) => (
+        <a
+          class:list={['chip-toggle', { on: domain === name }]}
+          href={withParam('domain', domain === name ? '' : name)}
+        >
+          {name}
+        </a>
+      ))
+    }
+    <span class="spacer"></span>
+    <a
+      class:list={['chip-toggle', { on: openWeights === 'true' }]}
+      href={withParam('open_weights', openWeights === 'true' ? '' : 'true')}
+    >
+      Open weights
+    </a>
+    <a
+      class:list={['chip-toggle', { on: withPaper }]}
+      href={withParam('with_paper', withPaper ? '' : 'true')}
+    >
+      Has a paper here
+    </a>
+  </div>
+
+  {
+    models === null && (
+      <div class="card empty is-error">
+        <Icon name="lucide:cloud-off" aria-hidden="true" />
+        <p>The API is unreachable — try again in a moment.</p>
+      </div>
+    )
+  }
+  {
+    models !== null && models.length === 0 && (
+      <div class="card empty">
+        <Icon name="lucide:box" aria-hidden="true" />
+        <p>
+          No models match those filters — widen them, or run <code>scout catalog</code> if the
+          catalogue has never been refreshed.
+        </p>
+      </div>
+    )
+  }
+
+  {
+    models !== null && models.length > 0 && (
+      <Fragment>
+        <p class="count">
+          {total} model{total === 1 ? '' : 's'}
+        </p>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Model</th>
+                <th scope="col">Organisation</th>
+                <th scope="col">Released</th>
+                <th scope="col">Field</th>
+                <th scope="col" class="cell-num">
+                  Parameters
+                </th>
+                <th scope="col" class="cell-num">
+                  Compute
+                </th>
+                <th scope="col">Weights</th>
+                <th scope="col" class="cell-num">
+                  Downloads
+                </th>
+                <th scope="col">Paper</th>
+              </tr>
+            </thead>
+            <tbody>
+              {models.map((model) => (
+                <tr>
+                  <th scope="row" class="cell-name">
+                    {model.link ? (
+                      <a href={model.link} rel="noopener noreferrer nofollow" target="_blank">
+                        {model.name}
+                      </a>
+                    ) : (
+                      model.name
+                    )}
+                  </th>
+                  <td class="cell-muted cell-clip" title={model.organization ?? undefined}>
+                    {model.organization ?? ''}
+                  </td>
+                  <td class="cell-muted">{model.publication_date ?? ''}</td>
+                  <td class="cell-muted cell-clip" title={field(model) || undefined}>
+                    {field(model)}
+                  </td>
+                  <td class="cell-num" title={model.parameters ? String(model.parameters) : undefined}>
+                    {compact(model.parameters)}
+                  </td>
+                  <td
+                    class="cell-num"
+                    title={model.training_compute_flop ? `${model.training_compute_flop} FLOP` : undefined}
+                  >
+                    {exponent(model.training_compute_flop)}
+                  </td>
+                  <td>
+                    <span class:list={['badge', `w-${weights(model)}`]}>{weights(model)}</span>
+                  </td>
+                  <td class="cell-num cell-muted">
+                    {model.hf_downloads === null ? '' : model.hf_downloads.toLocaleString('en-US')}
+                  </td>
+                  <td>
+                    {model.paper_id && (
+                      <a class="paper-link" href={`/papers/${model.paper_id}`}>
+                        <Icon name="lucide:file-text" aria-hidden="true" />
+                        Read
+                      </a>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Fragment>
+    )
+  }
+
+  {
+    models !== null && pageCount > 1 && (
+      <nav class="pager" aria-label="Pagination">
+        {page > 1 && <a href={pageLink(page - 1)}>Previous</a>}
+        <span>
+          Page {page} of {pageCount}
+        </span>
+        {page < pageCount && <a href={pageLink(page + 1)}>Next</a>}
+      </nav>
+    )
+  }
+
+  <p class="credit">
+    Model facts from <a href="https://epoch.ai" rel="noopener noreferrer">Epoch AI</a> (CC BY),
+    download counts from the
+    <a href="https://huggingface.co" rel="noopener noreferrer">Hugging Face Hub</a>. Refreshed
+    daily; see <a href="/about">About</a>.
+  </p>
+</Base>
+
+<style>
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin-bottom: var(--space-4);
+  }
+  /* Pushes the two boolean filters away from the field list, so they read as a different
+     question rather than as two more fields. */
+  .spacer {
+    flex: 1 1 1rem;
+  }
+  .chip-toggle {
+    padding: 0.28rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-full);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: var(--text-sm);
+    text-decoration: none;
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out);
+  }
+  .chip-toggle:hover {
+    border-color: var(--line-strong);
+    color: var(--ink);
+  }
+  .chip-toggle.on {
+    border-color: transparent;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-weight: 600;
+  }
+  .count {
+    margin: 0 0 0.5rem;
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  .w-open {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  .paper-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    font-size: var(--text-sm);
+    white-space: nowrap;
+  }
+  .paper-link :global(svg) {
+    width: 0.95em;
+    height: 0.95em;
+  }
+  .pager {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: var(--space-5);
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  .credit {
+    margin-top: var(--space-5);
+    color: var(--muted);
+    font-size: var(--text-xs);
+    line-height: 1.6;
+  }
+
+  /* Below this a nine-column table is a scroll bar with a table attached. The container still
+     scrolls, so nothing is unreachable; the columns that carry the comparison just go first. */
+  @media (max-width: 60rem) {
+    .data-table :global(td:nth-child(6)),
+    .data-table :global(th:nth-child(6)),
+    .data-table :global(td:nth-child(8)),
+    .data-table :global(th:nth-child(8)) {
+      display: none;
+    }
+  }
+  @media (max-width: 42rem) {
+    .data-table :global(td:nth-child(4)),
+    .data-table :global(th:nth-child(4)),
+    .data-table :global(td:nth-child(5)),
+    .data-table :global(th:nth-child(5)) {
+      display: none;
+    }
+  }
+</style>
