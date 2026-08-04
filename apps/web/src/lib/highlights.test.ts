@@ -1,18 +1,18 @@
-// A highlight has to stay on its words. These pin the property that makes that true - that
-// rectangles are stored independently of the zoom they were made at - plus the storage
-// failures a reader must survive rather than crash on.
+// A highlight is a box that snaps onto whatever is inside it. These pin the two properties
+// that make that work - that a rectangle is stored independently of the zoom it was drawn at,
+// and that the snap finds the ink and nothing else - plus the storage failures a reader has to
+// survive rather than crash on.
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   clampRect,
   highlightAt,
+  inkBounds,
   loadHighlights,
   newId,
-  pageOfRect,
   rectFromDrag,
   saveHighlights,
-  toPageRects,
   toScreenRects,
   type Highlight,
 } from './highlights';
@@ -38,37 +38,30 @@ beforeEach(() => {
   vi.stubGlobal('localStorage', memoryStorage());
 });
 
-describe('coordinates', () => {
-  const page = { left: 100, top: 200, width: 800, height: 1000 };
-
-  it('stores a selection relative to its page, at scale 1', () => {
-    const rects = toPageRects([{ left: 150, top: 250, width: 60, height: 12 }], page, 2);
-    expect(rects).toEqual([{ x: 25, y: 25, w: 30, h: 6 }]);
+/** Builds RGBA pixels from rows of characters: '#' is ink, '.' is paper, ' ' is transparent. */
+function pixels(rows: string[]): { data: Uint8ClampedArray; width: number; height: number } {
+  const width = rows[0].length;
+  const height = rows.length;
+  const data = new Uint8ClampedArray(width * height * 4);
+  rows.forEach((row, y) => {
+    [...row].forEach((cell, x) => {
+      const i = (y * width + x) * 4;
+      const value = cell === '#' ? 0 : 255;
+      data[i] = value;
+      data[i + 1] = value;
+      data[i + 2] = value;
+      data[i + 3] = cell === ' ' ? 0 : 255;
+    });
   });
+  return { data, width, height };
+}
 
+describe('toScreenRects', () => {
   it('survives a change of zoom', () => {
-    // Made at 2x, painted at 3x: the highlight lands where the same words now are.
-    const stored = toPageRects([{ left: 150, top: 250, width: 60, height: 12 }], page, 2);
+    const stored = [{ x: 25, y: 25, w: 30, h: 6 }];
+    // Drawn at 2x, painted at 3x: the mark lands where the same content now is.
     expect(toScreenRects(stored, 3)).toEqual([{ left: 75, top: 75, width: 90, height: 18 }]);
-    // And painting at the scale it was made at returns the original offsets.
     expect(toScreenRects(stored, 2)).toEqual([{ left: 50, top: 50, width: 60, height: 12 }]);
-  });
-
-  it('drops the empty rectangles a selection produces at its edges', () => {
-    const rects = toPageRects(
-      [
-        { left: 150, top: 250, width: 0, height: 12 },
-        { left: 150, top: 250, width: 60, height: 12 },
-        { left: 150, top: 262, width: 60, height: 0 },
-      ],
-      page,
-      1,
-    );
-    expect(rects).toHaveLength(1);
-  });
-
-  it('refuses a nonsense scale rather than dividing by zero', () => {
-    expect(toPageRects([{ left: 1, top: 1, width: 1, height: 1 }], page, 0)).toEqual([]);
   });
 });
 
@@ -117,19 +110,49 @@ describe('clampRect', () => {
   });
 });
 
-describe('pageOfRect', () => {
-  const pages = [
-    { page: 1, box: { left: 0, top: 0, width: 100, height: 100 } },
-    { page: 2, box: { left: 0, top: 110, width: 100, height: 100 } },
-  ];
-
-  it('assigns each rectangle to the page it sits on', () => {
-    expect(pageOfRect({ left: 10, top: 10, width: 20, height: 10 }, pages)).toBe(1);
-    expect(pageOfRect({ left: 10, top: 150, width: 20, height: 10 }, pages)).toBe(2);
+describe('inkBounds', () => {
+  it('finds the box around the ink and drops the paper around it', () => {
+    const { data, width, height } = pixels([
+      '........',
+      '..###...',
+      '..###...',
+      '........',
+    ]);
+    expect(inkBounds(data, width, height)).toEqual({ x: 2, y: 1, w: 3, h: 2 });
   });
 
-  it('returns nothing for a rectangle in the gap between pages', () => {
-    expect(pageOfRect({ left: 10, top: 102, width: 20, height: 4 }, pages)).toBeNull();
+  it('spans everything drawn, however scattered', () => {
+    // A displayed equation is ink in several disconnected places; the mark covers all of it.
+    const { data, width, height } = pixels([
+      '#......#',
+      '........',
+      '....#...',
+    ]);
+    expect(inkBounds(data, width, height)).toEqual({ x: 0, y: 0, w: 8, h: 3 });
+  });
+
+  it('reports nothing for a patch of blank paper', () => {
+    const { data, width, height } = pixels(['....', '....']);
+    expect(inkBounds(data, width, height)).toBeNull();
+  });
+
+  it('treats transparent pixels as paper', () => {
+    const { data, width, height } = pixels(['    ', '    ']);
+    expect(inkBounds(data, width, height)).toBeNull();
+  });
+
+  it('ignores near-white antialiasing but keeps real marks', () => {
+    const { data, width, height } = pixels(['....', '....']);
+    // Two pixels just under and just over the threshold.
+    data[0] = data[1] = data[2] = 250;
+    data[4] = data[5] = data[6] = 200;
+    expect(inkBounds(data, width, height)).toEqual({ x: 1, y: 0, w: 1, h: 1 });
+  });
+
+  it('takes a threshold, for pages that are not quite white', () => {
+    const { data, width, height } = pixels(['..', '..']);
+    data[0] = data[1] = data[2] = 250;
+    expect(inkBounds(data, width, height, 252)).toEqual({ x: 0, y: 0, w: 1, h: 1 });
   });
 });
 
@@ -137,7 +160,6 @@ describe('storage', () => {
   const one: Highlight = {
     id: 'a',
     page: 2,
-    kind: 'text',
     color: 'yellow',
     text: 'attention',
     rects: [{ x: 1, y: 2, w: 3, h: 4 }],
@@ -175,18 +197,6 @@ describe('storage', () => {
     expect(loadHighlights(PAPER)).toEqual([one]);
   });
 
-  it('reads a highlight written before area marking existed as a text one', () => {
-    const { kind, ...legacy } = one;
-    store.set(`rs-highlights:${PAPER}`, JSON.stringify([legacy]));
-    expect(loadHighlights(PAPER)[0].kind).toBe('text');
-  });
-
-  it('keeps an area highlight an area', () => {
-    const area: Highlight = { ...one, kind: 'area', text: '' };
-    saveHighlights(PAPER, [area]);
-    expect(loadHighlights(PAPER)[0].kind).toBe('area');
-  });
-
   it('reports a refused write instead of throwing', () => {
     // Private browsing refuses writes; reading a paper must not break because of it.
     vi.stubGlobal('localStorage', {
@@ -207,9 +217,9 @@ describe('storage', () => {
 
 describe('highlightAt', () => {
   const items: Highlight[] = [
-    { id: 'under', page: 1, kind: 'text', color: 'yellow', text: 'a', rects: [{ x: 0, y: 0, w: 50, h: 10 }] },
-    { id: 'over', page: 1, kind: 'text', color: 'green', text: 'b', rects: [{ x: 20, y: 0, w: 50, h: 10 }] },
-    { id: 'other', page: 2, kind: 'area', color: 'pink', text: '', rects: [{ x: 0, y: 0, w: 50, h: 10 }] },
+    { id: 'under', page: 1, color: 'yellow', text: 'a', rects: [{ x: 0, y: 0, w: 50, h: 10 }] },
+    { id: 'over', page: 1, color: 'green', text: 'b', rects: [{ x: 20, y: 0, w: 50, h: 10 }] },
+    { id: 'other', page: 2, color: 'pink', text: 'c', rects: [{ x: 0, y: 0, w: 50, h: 10 }] },
   ];
 
   it('finds the highlight under a point', () => {
