@@ -17,15 +17,13 @@ sources:
       terms: https://info.arxiv.org/help/api/tou.html
       data_license: Metadata CC0 1.0; each paper stays under the license its author chose
       provides: Titles, abstracts, authors, categories, ids and links, plus full text for papers you save or open
-    # All arXiv groups: tech (cs/stat/eess) plus every non-tech archive, so the tech vs
-    # non-tech facet has real data. Trim this list to cut ingest volume; deep backfills
-    # should run per group (`scout ingest --category cs.* --resume`).
-    categories:
-      [
-        cs.*, stat.*, eess.*, math.*, econ.*, q-bio.*, q-fin.*,
-        astro-ph.*, cond-mat.*, physics.*, nlin.*,
-        gr-qc, hep-ex, hep-lat, hep-ph, hep-th, math-ph, nucl-ex, nucl-th, quant-ph,
-      ]
+    # Exactly the scope rule in researchscout/taxonomy.py, expressed as a query. arXiv's `cat:`
+    # matches a paper's whole category list rather than only its primary, so this returns every
+    # paper touching computing, statistics or mathematics - including the biology, physics,
+    # economics and finance work that cross-lists into them, which is the intersection material
+    # this radar wants. Nothing outside the scope is fetched, so nothing has to be discarded.
+    # Deep backfills should still run per archive (`scout ingest --category cs.* --resume`).
+    categories: [cs.*, stat.*, eess.*, math.*]
   semantic_scholar:
     enabled: true
     kind: signal
@@ -100,6 +98,30 @@ sources:
       data_license: CC0 1.0
       provides: Citation counts, as a keyless cross-check on Semantic Scholar
     # mailto: you@example.com
+  epoch_ai:
+    # The model and benchmark catalogue behind /models and /benchmarks. Two CC-BY CSVs, no key,
+    # refreshed once a day. The licence requires the credit below, which is why it is served.
+    enabled: true
+    kind: catalog
+    cadence: daily
+    attribution:
+      name: Epoch AI
+      homepage: https://epoch.ai
+      terms: https://epoch.ai/benchmarks/use-this-data
+      data_license: CC BY 4.0 - Epoch AI, "Data on AI Models", published online at epoch.ai
+      provides: Notable AI models with organisation, parameters, training compute and licensing, plus benchmark scores
+  huggingface_models:
+    # Open-weight models by download count, and the arXiv tags on their model cards - which is
+    # what links a model to the paper it came from in this corpus.
+    enabled: true
+    kind: catalog
+    cadence: daily
+    attribution:
+      name: Hugging Face Hub
+      homepage: https://huggingface.co
+      terms: https://huggingface.co/terms-of-service
+      data_license: Public repository metadata; each model stays under the licence its authors chose
+      provides: Open-weight model names, task, download and like counts, and the papers their cards cite
   openreview:
     # Off by default: best-effort review scores via the search endpoint (the /notes listing is
     # bot-challenged as of 2026-07); partial and bursty around conference review cycles. Flip
