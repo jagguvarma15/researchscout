@@ -18,7 +18,11 @@ from pydantic import BaseModel, Field, ValidationError
 from researchscout.config import get_settings
 from researchscout.schema import Paper, Signal
 
-SourceKind = Literal["content", "signal"]
+# "catalog" sources describe the world around the corpus (models, benchmarks) rather than
+# feeding papers or signals into it. They have no Source class - there is nothing to normalize
+# into a Paper or a Signal - but they are data from somebody else all the same, so they declare
+# attribution in the same file and reach the /about page by the same route.
+SourceKind = Literal["content", "signal", "catalog"]
 HealthStatus = Literal["ok", "rate_limited", "error"]
 
 
@@ -112,31 +116,61 @@ def get_source(name: str) -> Source:
     return _REGISTRY[name]()
 
 
-def describe_sources() -> list[SourceDescription]:
-    """Every registered source with its enabled state and attribution, sorted by name.
+def _attribution_of(cfg: dict[str, Any]) -> SourceAttribution | None:
+    """The declared attribution, or None when it is absent or malformed.
 
-    Reads config directly rather than instantiating connectors: this feeds an HTTP route
-    and must not touch the network or a database. Malformed attribution reads as missing
-    so the page shows the gap instead of failing the whole listing.
+    Malformed reads as missing so the /about page shows the gap rather than failing the whole
+    listing over one bad block.
+    """
+    block = cfg.get("attribution")
+    if not isinstance(block, dict):
+        return None
+    try:
+        return SourceAttribution.model_validate(block)
+    except ValidationError:
+        return None
+
+
+def describe_sources() -> list[SourceDescription]:
+    """Every source with its enabled state and attribution, sorted by name.
+
+    Reads config directly rather than instantiating connectors: this feeds an HTTP route and
+    must not touch the network or a database.
+
+    Registered connectors come first, then any source declared in config with no class behind
+    it. That second group is how catalog sources get here: they have nothing to normalize into
+    a Paper or a Signal, so there is no Source subclass, but they are still somebody else's
+    data being republished and the page has to say so.
     """
     config = _load_config()
     out: list[SourceDescription] = []
     for cls in registered_sources():
         cfg = config.get(cls.name, {})
         cfg = cfg if isinstance(cfg, dict) else {}
-        block = cfg.get("attribution")
-        attribution = None
-        if isinstance(block, dict):
-            try:
-                attribution = SourceAttribution.model_validate(block)
-            except ValidationError:
-                attribution = None
         out.append(
             SourceDescription(
                 name=cls.name,
                 kind=cls.kind,
                 enabled=bool(cfg.get("enabled", False)),
-                attribution=attribution,
+                attribution=_attribution_of(cfg),
+            )
+        )
+    registered = {cls.name for cls in registered_sources()}
+    for name in sorted(config):
+        if name in registered:
+            continue
+        cfg = config[name]
+        if not isinstance(cfg, dict):
+            continue
+        kind = cfg.get("kind")
+        if kind not in ("content", "signal", "catalog"):
+            continue
+        out.append(
+            SourceDescription(
+                name=name,
+                kind=kind,
+                enabled=bool(cfg.get("enabled", False)),
+                attribution=_attribution_of(cfg),
             )
         )
     return out
