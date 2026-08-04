@@ -31,21 +31,23 @@
 </button>
 
 <style>
+  /* Keeps its border: one of the three header controls that is a control rather than a link. */
   .toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 2.15rem;
     height: 2.15rem;
+    flex-shrink: 0;
     border: 1px solid var(--line, #e6e1d5);
     border-radius: 999px;
     background: var(--surface, #fff);
     color: var(--muted, #5d6570);
     cursor: pointer;
     transition:
-      background-color 0.15s ease,
-      border-color 0.15s ease,
-      color 0.15s ease;
+      background-color var(--dur-fast, 0.15s) var(--ease-out, ease),
+      border-color var(--dur-fast, 0.15s) var(--ease-out, ease),
+      color var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
   .toggle:hover {
     background: var(--surface-2, #f4f0e8);
