@@ -5,7 +5,15 @@ import PdfReader from '../../components/PdfReader.svelte';
 import SaveButton from '../../components/SaveButton.svelte';
 import Telemetry from '../../components/Telemetry.svelte';
 import Base from '../../layouts/Base.astro';
-import { fetchPaper, fetchPapers, fetchSaved, formatDate, type PaperSummary } from '../../lib/api';
+import {
+  fetchModels,
+  fetchPaper,
+  fetchPapers,
+  fetchSaved,
+  formatDate,
+  type AiModel,
+  type PaperSummary,
+} from '../../lib/api';
 import { renderMathHTML, stripMath } from '../../lib/math';
 import { categoryName } from '../../lib/taxonomy';
 
@@ -23,9 +31,16 @@ if (paper !== null) {
 
 // Related papers ride the hybrid search with the title as the query — no new backend.
 let related: PaperSummary[] = [];
+// Models the catalogue says came out of this paper. Usually none: most papers are not a model
+// release, and the section is simply absent when that is so.
+let models: AiModel[] = [];
 if (paper !== null) {
-  const hits = await fetchPapers({ q: paper.title });
+  const [hits, catalogue] = await Promise.all([
+    fetchPapers({ q: paper.title }),
+    fetchModels({ paperId: paper.id }),
+  ]);
   related = (hits?.items ?? []).filter((hit) => hit.id !== paper.id).slice(0, 4);
+  models = catalogue?.items ?? [];
 }
 
 const orderedCategories =
@@ -145,6 +160,31 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
           />
         )}
         <Telemetry client:idle surface="detail" paperId={paper.id} enabled={Astro.locals.user !== null} />
+        {models.length > 0 && (
+          <section class="related">
+            <h2 class="related-title">Models from this paper</h2>
+            <ul class="models">
+              {models.map((model) => (
+                <li>
+                  {model.link ? (
+                    <a href={model.link} rel="noopener noreferrer nofollow" target="_blank">
+                      {model.name}
+                    </a>
+                  ) : (
+                    <span>{model.name}</span>
+                  )}
+                  {model.organization && <span class="model-org">{model.organization}</span>}
+                  {model.hf_downloads !== null && (
+                    <span class="badge" title="Hugging Face downloads">
+                      {model.hf_downloads.toLocaleString('en-US')}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <a class="all-models" href="/models">Every model in the catalogue</a>
+          </section>
+        )}
         {related.length > 0 && (
           <section class="related">
             <h2 class="related-title">Related papers</h2>
@@ -290,5 +330,23 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
   }
   .related-link:hover {
     color: var(--accent);
+  }
+  /* A model row is a name, who built it, and how used it is - the three things that say
+     whether it is worth following. The first takes the space the other two do not need. */
+  .models li a,
+  .models li > span:first-child {
+    flex: 1;
+    min-width: 0;
+    font-weight: 550;
+    font-size: 0.95rem;
+  }
+  .model-org {
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  .all-models {
+    display: inline-block;
+    margin-top: 0.6rem;
+    font-size: var(--text-sm);
   }
 </style>
