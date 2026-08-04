@@ -1,4 +1,12 @@
-"""Idempotent persistence for canonical papers and their external-id map."""
+"""Idempotent persistence for canonical papers and their external-id map.
+
+Listing and loading are deliberately different reads. A paper row carries its full article
+text, which averages 18 kB and is what the chunker and the answer path work from -- and which
+nothing in a list of papers ever shows. Selecting it anyway cost 469 kB per feed page, over 90%
+of it thrown away by ``PaperSummary`` before the response was built, on every feed render and
+every keystroke in the omnibox. So ``list_papers`` defers that column and the detail reads keep
+it. The two are one line apart and easy to conflate, which is why they say so here.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from researchscout.config import get_settings
 from researchscout.schema import Author, Paper, PaperLabel
@@ -144,12 +152,14 @@ def list_papers(
     """
     if facets is None:
         facets = PaperFacets(days=days, categories=categories)
-    stmt = select(PaperRow)
+    # raiseload=False so a caller that does touch full_text on a listed paper gets a lazy load
+    # rather than an exception; nothing in the API does, and the point is the bytes not moved.
+    stmt = select(PaperRow).options(defer(PaperRow.full_text, raiseload=False))
     where = facets_where(facets)
     if where is not None:
         stmt = stmt.where(where)
     rows = session.execute(_apply_sort(stmt, sort).limit(limit).offset(offset)).scalars().all()
-    return _rows_to_papers(session, rows)
+    return _rows_to_papers(session, rows, full_text=False)
 
 
 def count_papers(session: Session, facets: PaperFacets) -> int:
@@ -211,11 +221,24 @@ def papers_missing_full_text(
 
 
 def get_papers(session: Session, paper_ids: Sequence[str]) -> dict[str, Paper]:
-    """Load many canonical papers by id in two queries; unknown ids are simply absent."""
+    """Load many canonical papers by id in two queries; unknown ids are simply absent.
+
+    This is retrieval's hydration step, so it is on the latency path of every answer and every
+    search. Full text is left behind for the same reason as the feed: the callers rank, cite
+    and summarize from titles, abstracts and chunks, never from this column.
+    """
     if not paper_ids:
         return {}
-    rows = session.execute(select(PaperRow).where(PaperRow.id.in_(list(paper_ids)))).scalars().all()
-    return {paper.id: paper for paper in _rows_to_papers(session, rows)}
+    rows = (
+        session.execute(
+            select(PaperRow)
+            .options(defer(PaperRow.full_text, raiseload=False))
+            .where(PaperRow.id.in_(list(paper_ids)))
+        )
+        .scalars()
+        .all()
+    )
+    return {paper.id: paper for paper in _rows_to_papers(session, rows, full_text=False)}
 
 
 def get_paper(session: Session, paper_id: str) -> Paper | None:
@@ -229,8 +252,14 @@ def get_paper(session: Session, paper_id: str) -> Paper | None:
     return _row_to_paper(row, {scheme: value for scheme, value in pairs})
 
 
-def _rows_to_papers(session: Session, rows: Sequence[PaperRow]) -> list[Paper]:
-    """Convert rows in order, loading all external ids in one query (no per-row round trips)."""
+def _rows_to_papers(
+    session: Session, rows: Sequence[PaperRow], *, full_text: bool = True
+) -> list[Paper]:
+    """Convert rows in order, loading all external ids in one query (no per-row round trips).
+
+    ``full_text=False`` goes with a deferred column: reading the attribute would otherwise
+    lazy-load it one row at a time, which is slower than never having deferred it.
+    """
     ids = [row.id for row in rows]
     external: dict[str, dict[str, str]] = {}
     if ids:
@@ -241,10 +270,10 @@ def _rows_to_papers(session: Session, rows: Sequence[PaperRow]) -> list[Paper]:
         ).all()
         for paper_id, scheme, value in pairs:
             external.setdefault(paper_id, {})[scheme] = value
-    return [_row_to_paper(row, external.get(row.id, {})) for row in rows]
+    return [_row_to_paper(row, external.get(row.id, {}), full_text=full_text) for row in rows]
 
 
-def _row_to_paper(row: PaperRow, external_ids: dict[str, str]) -> Paper:
+def _row_to_paper(row: PaperRow, external_ids: dict[str, str], *, full_text: bool = True) -> Paper:
     return Paper(
         id=row.id,
         external_ids=external_ids,
@@ -260,7 +289,7 @@ def _row_to_paper(row: PaperRow, external_ids: dict[str, str]) -> Paper:
         source=row.source,
         url=row.url,
         pdf_url=row.pdf_url,
-        full_text=row.full_text,
+        full_text=row.full_text if full_text else None,
         keywords=row.keywords,
         sections=row.sections,
         labels=([PaperLabel(**label) for label in row.labels] if row.labels is not None else None),
