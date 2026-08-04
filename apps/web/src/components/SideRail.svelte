@@ -9,19 +9,48 @@
   // the viewport width. The script below owns only the open state, which exists solely for
   // the narrow case.
 
-  import { Bookmark, Info, Newspaper, Sparkles, TrendingUp, X } from 'lucide-svelte';
+  import {
+    Bookmark,
+    Boxes,
+    Gauge,
+    Info,
+    Newspaper,
+    Sparkles,
+    TrendingUp,
+    X,
+  } from 'lucide-svelte';
   import type { Component } from 'svelte';
 
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
 
   let { current }: { current: string } = $props();
 
-  const ITEMS: { href: string; label: string; icon: Component }[] = [
-    { href: '/about', label: 'About', icon: Info },
-    { href: '/for-you', label: 'For you', icon: Sparkles },
-    { href: '/topics', label: 'Trends', icon: TrendingUp },
-    { href: '/digests', label: 'Digests', icon: Newspaper },
-    { href: '/saved', label: 'Reading list', icon: Bookmark },
+  // Grouped rather than listed: the rail carries three different kinds of destination now, and
+  // eight undifferentiated rows read as a pile. The headings are list items with a
+  // presentation role, so the whole rail stays one list to a screen reader.
+  const SECTIONS: { title: string; items: { href: string; label: string; icon: Component }[] }[] = [
+    {
+      title: 'Discover',
+      items: [
+        { href: '/for-you', label: 'For you', icon: Sparkles },
+        { href: '/topics', label: 'Trends', icon: TrendingUp },
+        { href: '/digests', label: 'Digests', icon: Newspaper },
+      ],
+    },
+    {
+      title: 'AI landscape',
+      items: [
+        { href: '/models', label: 'Models', icon: Boxes },
+        { href: '/benchmarks', label: 'Benchmarks', icon: Gauge },
+      ],
+    },
+    {
+      title: 'Library',
+      items: [
+        { href: '/saved', label: 'Reading list', icon: Bookmark },
+        { href: '/about', label: 'About', icon: Info },
+      ],
+    },
   ];
 
   let open = $state(false);
@@ -98,17 +127,20 @@
     <X size={18} aria-hidden="true" />
   </button>
   <ul>
-    {#each ITEMS as item}
-      <li>
-        <a
-          class="btn btn-nav"
-          href={item.href}
-          aria-current={isCurrent(item.href) ? 'page' : undefined}
-        >
-          <item.icon size={16} aria-hidden="true" />
-          <span>{item.label}</span>
-        </a>
-      </li>
+    {#each SECTIONS as section}
+      <li class="section-title" role="presentation">{section.title}</li>
+      {#each section.items as item}
+        <li>
+          <a
+            class="btn btn-nav"
+            href={item.href}
+            aria-current={isCurrent(item.href) ? 'page' : undefined}
+          >
+            <item.icon size={16} aria-hidden="true" />
+            <span>{item.label}</span>
+          </a>
+        </li>
+      {/each}
     {/each}
   </ul>
 </nav>
@@ -135,6 +167,20 @@
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
+  }
+  /* Small, quiet and set in from the links it heads, so the eye reads the destinations first
+     and the grouping only when it is looking for one. */
+  .section-title {
+    margin-top: 1.1rem;
+    padding: 0 0.7rem 0.3rem;
+    color: var(--muted, #5d6570);
+    font-size: 0.7rem;
+    font-weight: 650;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+  .section-title:first-child {
+    margin-top: 0;
   }
   /* Full width and left-aligned: these are destinations in a list, not buttons in a row. */
   .rail a {
