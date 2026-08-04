@@ -109,6 +109,11 @@
         {message.text}{#if streamingCaret}<span class="cursor" aria-hidden="true"></span>{/if}
       </p>
     {/if}
+    {#if message.needsSignIn}
+      <p class="actions">
+        <a class="ghost" href="/login">Sign in to continue</a>
+      </p>
+    {/if}
     {#if message.stopped}
       <p class="note">Stopped</p>
     {/if}
@@ -208,15 +213,9 @@
     border-bottom-left-radius: 4px;
   }
   .msg.error .bubble {
-    background: #fdecec;
-    border-color: #f5c8c8;
-    color: #8b1d1d;
-  }
-  /* The design system has no error tokens, so the dark values live here. */
-  :global([data-theme='dark']) .msg.error .bubble {
-    background: #3a2020;
-    border-color: #5c3434;
-    color: #f2b8b8;
+    background: var(--danger-soft, #fee2e2);
+    border-color: var(--danger, #b91c1c);
+    color: var(--danger-ink, #7f1d1d);
   }
   .prose {
     white-space: normal;
@@ -343,7 +342,10 @@
     margin: 0;
     padding: 0.4rem 0 0;
   }
+  /* Shared by the action buttons and the sign-in link, which is an anchor because it
+     navigates - hence the display and text-decoration resets. */
   .ghost {
+    display: inline-block;
     border: 1px solid var(--line, #e6e1d5);
     border-radius: 999px;
     background: var(--surface, #fff);
@@ -352,9 +354,11 @@
     font-size: 0.78rem;
     font-weight: 500;
     padding: 0.25rem 0.75rem;
+    text-decoration: none;
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
+  a.ghost:hover,
   .ghost:hover:not(:disabled) {
     background: var(--surface-2, #f4f0e8);
   }
