@@ -93,9 +93,9 @@ def test_papers_forwards_facets_and_sort(monkeypatch: pytest.MonkeyPatch) -> Non
     response = _client().get(
         "/v1/papers",
         params=[
-            ("kind", "tech"),
-            ("group", "cs"),
-            ("group", "stat"),
+            ("subject", "ai"),
+            ("subject", "stats"),
+            ("topic", "rl"),
             ("category", "cs.LG"),
             ("category", "math.CO"),
             ("year", "2024"),
@@ -109,8 +109,8 @@ def test_papers_forwards_facets_and_sort(monkeypatch: pytest.MonkeyPatch) -> Non
     assert response.status_code == 200
     facets = seen["facets"]
     assert isinstance(facets, PaperFacets)
-    assert facets.kind == "tech"
-    assert facets.groups == ["cs", "stat"]
+    assert facets.subjects == ["ai", "stats"]
+    assert facets.topics == ["rl"]
     assert facets.categories == ["cs.LG", "math.CO"]
     assert (facets.year, facets.month) == (2024, 1)
     assert facets.author == "lovelace"
@@ -127,14 +127,14 @@ def test_papers_query_forwards_facets(monkeypatch: pytest.MonkeyPatch) -> None:
         return []
 
     monkeypatch.setattr(papers_router, "retrieve", fake_retrieve)
-    response = _client().get("/v1/papers", params={"q": "ssm", "kind": "non_tech"})
+    response = _client().get("/v1/papers", params={"q": "ssm", "subject": "physical"})
     assert response.status_code == 200
     facets = seen["facets"]
     assert isinstance(facets, PaperFacets)
-    assert facets.kind == "non_tech"
+    assert facets.subjects == ["physical"]
 
 
-def test_papers_kind_ai_forwards_on_both_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_papers_subject_forwards_on_both_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     seen: dict[str, object] = {}
 
     def fake_list(session: object, **kwargs: object) -> list:
@@ -143,10 +143,10 @@ def test_papers_kind_ai_forwards_on_both_paths(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(papers_router, "list_papers", fake_list)
     monkeypatch.setattr(papers_router, "count_papers", lambda *a, **k: 0)
-    assert _client().get("/v1/papers", params={"kind": "ai"}).status_code == 200
+    assert _client().get("/v1/papers", params={"subject": "ai"}).status_code == 200
     facets = seen["facets"]
     assert isinstance(facets, PaperFacets)
-    assert facets.kind == "ai"
+    assert facets.subjects == ["ai"]
 
     seen.clear()
 
@@ -155,14 +155,21 @@ def test_papers_kind_ai_forwards_on_both_paths(monkeypatch: pytest.MonkeyPatch) 
         return []
 
     monkeypatch.setattr(papers_router, "retrieve", fake_retrieve)
-    assert _client().get("/v1/papers", params={"q": "ssm", "kind": "ai"}).status_code == 200
+    assert _client().get("/v1/papers", params={"q": "ssm", "subject": "ai"}).status_code == 200
     facets = seen["facets"]
     assert isinstance(facets, PaperFacets)
-    assert facets.kind == "ai"
+    assert facets.subjects == ["ai"]
 
 
-def test_papers_bogus_kind_is_422() -> None:
-    assert _client().get("/v1/papers", params={"kind": "banana"}).status_code == 422
+def test_papers_bogus_subject_is_422() -> None:
+    # Named rather than silently empty: "no such subject" and "no papers" are different answers.
+    response = _client().get("/v1/papers", params={"subject": "banana"})
+    assert response.status_code == 422
+    assert "banana" in response.json()["detail"]
+
+
+def test_papers_bogus_topic_is_422() -> None:
+    assert _client().get("/v1/papers", params={"topic": "banana"}).status_code == 422
 
 
 def test_month_without_year_is_422() -> None:
