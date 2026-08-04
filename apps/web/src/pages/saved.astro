@@ -28,7 +28,7 @@ function formatDayHeading(iso: string): string {
 
   {
     items === null && (
-      <div class="card empty">
+      <div class="card empty is-error">
         <Icon name="lucide:cloud-off" aria-hidden="true" />
         <p>The API is unreachable — try again in a moment.</p>
       </div>
@@ -76,9 +76,6 @@ function formatDayHeading(iso: string): string {
 </Base>
 
 <style>
-  .empty p {
-    margin: 0;
-  }
   .day {
     margin-bottom: var(--space-6);
   }
