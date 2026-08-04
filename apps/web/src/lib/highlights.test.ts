@@ -5,10 +5,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  clampRect,
   highlightAt,
   loadHighlights,
   newId,
   pageOfRect,
+  rectFromDrag,
   saveHighlights,
   toPageRects,
   toScreenRects,
@@ -70,6 +72,51 @@ describe('coordinates', () => {
   });
 });
 
+describe('rectFromDrag', () => {
+  it('reads a drag down and to the right', () => {
+    expect(rectFromDrag({ x: 10, y: 20 }, { x: 40, y: 60 })).toEqual({ x: 10, y: 20, w: 30, h: 40 });
+  });
+
+  it('reads a drag up and to the left the same way', () => {
+    // Dragging back towards the start is as natural as dragging forwards, and a rectangle
+    // with negative width would paint nothing and hit-test as empty.
+    expect(rectFromDrag({ x: 40, y: 60 }, { x: 10, y: 20 })).toEqual({ x: 10, y: 20, w: 30, h: 40 });
+  });
+
+  it('gives a zero rectangle for a click that never moved', () => {
+    expect(rectFromDrag({ x: 5, y: 5 }, { x: 5, y: 5 })).toEqual({ x: 5, y: 5, w: 0, h: 0 });
+  });
+});
+
+describe('clampRect', () => {
+  it('leaves a rectangle inside the page alone', () => {
+    expect(clampRect({ x: 10, y: 10, w: 20, h: 20 }, 100, 100)).toEqual({
+      x: 10,
+      y: 10,
+      w: 20,
+      h: 20,
+    });
+  });
+
+  it('trims a rectangle that runs off the edge', () => {
+    expect(clampRect({ x: 90, y: 90, w: 40, h: 40 }, 100, 100)).toEqual({
+      x: 90,
+      y: 90,
+      w: 10,
+      h: 10,
+    });
+  });
+
+  it('pulls a rectangle that starts off the page back on', () => {
+    expect(clampRect({ x: -10, y: -5, w: 30, h: 30 }, 100, 100)).toEqual({
+      x: 0,
+      y: 0,
+      w: 30,
+      h: 30,
+    });
+  });
+});
+
 describe('pageOfRect', () => {
   const pages = [
     { page: 1, box: { left: 0, top: 0, width: 100, height: 100 } },
@@ -90,6 +137,7 @@ describe('storage', () => {
   const one: Highlight = {
     id: 'a',
     page: 2,
+    kind: 'text',
     color: 'yellow',
     text: 'attention',
     rects: [{ x: 1, y: 2, w: 3, h: 4 }],
@@ -127,6 +175,18 @@ describe('storage', () => {
     expect(loadHighlights(PAPER)).toEqual([one]);
   });
 
+  it('reads a highlight written before area marking existed as a text one', () => {
+    const { kind, ...legacy } = one;
+    store.set(`rs-highlights:${PAPER}`, JSON.stringify([legacy]));
+    expect(loadHighlights(PAPER)[0].kind).toBe('text');
+  });
+
+  it('keeps an area highlight an area', () => {
+    const area: Highlight = { ...one, kind: 'area', text: '' };
+    saveHighlights(PAPER, [area]);
+    expect(loadHighlights(PAPER)[0].kind).toBe('area');
+  });
+
   it('reports a refused write instead of throwing', () => {
     // Private browsing refuses writes; reading a paper must not break because of it.
     vi.stubGlobal('localStorage', {
@@ -147,9 +207,9 @@ describe('storage', () => {
 
 describe('highlightAt', () => {
   const items: Highlight[] = [
-    { id: 'under', page: 1, color: 'yellow', text: 'a', rects: [{ x: 0, y: 0, w: 50, h: 10 }] },
-    { id: 'over', page: 1, color: 'green', text: 'b', rects: [{ x: 20, y: 0, w: 50, h: 10 }] },
-    { id: 'other', page: 2, color: 'pink', text: 'c', rects: [{ x: 0, y: 0, w: 50, h: 10 }] },
+    { id: 'under', page: 1, kind: 'text', color: 'yellow', text: 'a', rects: [{ x: 0, y: 0, w: 50, h: 10 }] },
+    { id: 'over', page: 1, kind: 'text', color: 'green', text: 'b', rects: [{ x: 20, y: 0, w: 50, h: 10 }] },
+    { id: 'other', page: 2, kind: 'area', color: 'pink', text: '', rects: [{ x: 0, y: 0, w: 50, h: 10 }] },
   ];
 
   it('finds the highlight under a point', () => {
