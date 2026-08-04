@@ -3,21 +3,32 @@
 ``PaperFacets`` is the value object the API builds from query params; ``facets_where`` turns it
 into a single SQL clause. Keeping the compiler here means the recency feed, the vector leg, and
 the lexical leg can never drift apart on filter semantics.
+
+Two axes describe a paper: ``subjects`` (the field it is in) and ``topics`` (the technique it
+uses). Values within an axis are alternatives, so asking for two subjects widens the result;
+the axes themselves narrow, so a subject and a topic together mean both. That is the reading a
+filter panel implies, and the one a reader gets whether they arrive through the sidebar or by
+editing the URL.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Any, Literal
 
-from sqlalchemy import ColumnElement, and_, cast, false, func, literal_column
+from sqlalchemy import ColumnClause, ColumnElement, and_, cast, false, func, literal_column, or_
 from sqlalchemy.dialects.postgresql import ARRAY, TEXT
 
 from researchscout.store.models import PaperRow
-from researchscout.taxonomy import AI_CATEGORIES, archives_for, archives_for_group
+from researchscout.taxonomy import phrase_query, subject_for, topic_for
 
 SortKey = Literal["newest", "citations", "activity"]
+
+# The generated tsvector (migration 0007) and the archive expression index (migration 0020).
+# Both are referenced as literal SQL because neither is a mapped column.
+_SEARCH_TSV: ColumnClause[Any] = literal_column("papers.search_tsv")
+_ARCHIVES = func.paper_archives(PaperRow.categories)
 
 
 @dataclass(frozen=True)
@@ -26,8 +37,8 @@ class PaperFacets:
     year: int | None = None
     month: int | None = None  # only meaningful with year
     categories: list[str] | None = None
-    kind: Literal["tech", "non_tech", "ai"] | None = None
-    groups: list[str] | None = None
+    subjects: list[str] | None = None
+    topics: list[str] | None = None
     author: str | None = None
     venue: str | None = None
     min_citations: int | None = None
@@ -37,23 +48,61 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _archives(facets: PaperFacets) -> frozenset[str] | None:
-    """The archive prefixes implied by kind/groups; None when neither narrows by archive.
+def _overlaps_categories(codes: list[str]) -> ColumnElement[bool]:
+    """Any of these category codes appears in the paper's list (GIN, cross-lists included)."""
+    return PaperRow.categories.op("?|")(cast(sorted(codes), ARRAY(TEXT)))
 
-    kind=ai filters by category overlap in ``facets_where`` instead, so groups still AND
-    independently: ``kind=ai&group=cs`` means AI-overlapping papers with a cs primary archive.
+
+def _overlaps_archives(archives: list[str]) -> ColumnElement[bool]:
+    """The paper touches any of these archives (GIN over the paper_archives expression)."""
+    return _ARCHIVES.op("&&")(cast(sorted(archives), ARRAY(TEXT)))
+
+
+def _subjects_clause(keys: list[str]) -> ColumnElement[bool]:
+    """Match any of the named subjects; an unknown key contributes nothing.
+
+    A subject is a set of whole archives plus a set of individual codes, and each half has its
+    own index, so the clause is a union of the two rather than one expression over both.
     """
-    kind_set: frozenset[str] | None = None
-    if facets.kind == "tech" or facets.kind == "non_tech":
-        kind_set = archives_for(facets.kind)
-    group_set: frozenset[str] | None = None
-    if facets.groups:
-        group_set = frozenset().union(*(archives_for_group(g) for g in facets.groups))
-    if kind_set is None:
-        return group_set
-    if group_set is None:
-        return kind_set
-    return kind_set & group_set
+    archives: set[str] = set()
+    codes: set[str] = set()
+    for key in keys:
+        subject = subject_for(key)
+        if subject is None:
+            continue
+        archives |= subject.archives
+        codes |= subject.categories
+    parts: list[ColumnElement[bool]] = []
+    if archives:
+        parts.append(_overlaps_archives(sorted(archives)))
+    if codes:
+        parts.append(_overlaps_categories(sorted(codes)))
+    if not parts:
+        return false()  # every key was unknown: match nothing rather than everything
+    return or_(*parts)
+
+
+def _topics_clause(keys: list[str]) -> ColumnElement[bool]:
+    """Match any of the named topics, by category or by phrase depending on the topic."""
+    codes: set[str] = set()
+    phrases: list[str] = []
+    for key in keys:
+        topic = topic_for(key)
+        if topic is None:
+            continue
+        codes |= topic.categories
+        phrases.extend(topic.phrases)
+    parts: list[ColumnElement[bool]] = []
+    if codes:
+        parts.append(_overlaps_categories(sorted(codes)))
+    if phrases:
+        # websearch_to_tsquery never raises on odd input, so a phrase list that yields no
+        # lexemes simply matches nothing instead of failing the whole query.
+        tsquery = func.websearch_to_tsquery("english", phrase_query(phrases))
+        parts.append(_SEARCH_TSV.op("@@")(tsquery))
+    if not parts:
+        return false()
+    return or_(*parts)
 
 
 def facets_where(facets: PaperFacets) -> ColumnElement[bool] | None:
@@ -72,17 +121,11 @@ def facets_where(facets: PaperFacets) -> ColumnElement[bool] | None:
         clauses.append(PaperRow.published_at >= start)
         clauses.append(PaperRow.published_at < end)
     if facets.categories:
-        clauses.append(PaperRow.categories.op("?|")(cast(facets.categories, ARRAY(TEXT))))
-    if facets.kind == "ai":
-        # Same GIN-indexed overlap path as the categories facet, so cross-lists count.
-        clauses.append(PaperRow.categories.op("?|")(cast(sorted(AI_CATEGORIES), ARRAY(TEXT))))
-    archives = _archives(facets)
-    if archives is not None:
-        if archives:
-            # Matches the expression index on split_part(primary_category, '.', 1).
-            clauses.append(func.split_part(PaperRow.primary_category, ".", 1).in_(sorted(archives)))
-        else:
-            clauses.append(false())  # kind and groups intersect to nothing
+        clauses.append(_overlaps_categories(facets.categories))
+    if facets.subjects:
+        clauses.append(_subjects_clause(facets.subjects))
+    if facets.topics:
+        clauses.append(_topics_clause(facets.topics))
     if facets.author:
         pattern = f"%{_escape_like(facets.author)}%"
         clauses.append(literal_column("papers.author_names").ilike(pattern, escape="\\"))
