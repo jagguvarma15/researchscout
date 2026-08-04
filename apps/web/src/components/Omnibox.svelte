@@ -10,7 +10,15 @@
   // highlighted first, so guessing wrong costs one arrow key. The conversation itself, and
   // the transport behind it, belong to ScoutPanel.
 
-  import { CornerDownLeft, FileText, Globe, Search, Sparkles, Square } from 'lucide-svelte';
+  import {
+    CornerDownLeft,
+    FileText,
+    Globe,
+    History,
+    Search,
+    Sparkles,
+    Square,
+  } from 'lucide-svelte';
 
   import type { KeywordCount } from '../lib/chat-types';
   import { commandHint, parseInput } from '../lib/commands';
@@ -31,6 +39,7 @@
     | { kind: 'web'; label: string; query: string }
     | { kind: 'paper'; label: string; href: string; score: number | null }
     | { kind: 'search'; label: string; href: string }
+    | { kind: 'recent'; label: string; href: string }
     | { kind: 'nav'; label: string; href: string };
 
   // Home only. Every other destination is one glance away in the navigation rail, and a
@@ -42,6 +51,7 @@
     web: 'Scout',
     paper: 'Papers',
     search: 'Papers',
+    recent: 'Recent',
     nav: 'Jump to',
   };
 
@@ -53,6 +63,9 @@
   let asked = $state(false);
   let searching = $state(false);
   let dictionary = $state<KeywordCount[] | null>(null);
+  // Phrases this account searched for before. Signed-in only, and the request simply 401s
+  // otherwise, so nothing here needs to know whether anybody is signed in.
+  let history = $state<string[]>([]);
 
   let root: HTMLElement | undefined = $state();
   let inputEl: HTMLInputElement | undefined = $state();
@@ -118,6 +131,19 @@
       : [],
   );
 
+  // Offered only on an empty field. Once there is something typed, matching papers are a
+  // better answer than what was typed last week, and a list that keeps reordering under the
+  // cursor is worse than no list.
+  const recentEntries = $derived<Entry[]>(
+    trimmed
+      ? []
+      : history.slice(0, 5).map((phrase) => ({
+          kind: 'recent' as const,
+          label: phrase,
+          href: searchUrl(phrase),
+        })),
+  );
+
   // A question puts Scout first, a lookup puts papers first, and both are always present.
   // The paper hits and the search-all row stay adjacent either way, so a group heading is
   // never drawn twice for the same group.
@@ -126,7 +152,13 @@
       ? (askEntry ? [askEntry] : [])
       : intent === 'question'
         ? [...(askEntry ? [askEntry] : []), ...paperEntries, ...searchEntry, ...navEntries]
-        : [...paperEntries, ...searchEntry, ...(askEntry ? [askEntry] : []), ...navEntries],
+        : [
+            ...paperEntries,
+            ...searchEntry,
+            ...(askEntry ? [askEntry] : []),
+            ...recentEntries,
+            ...navEntries,
+          ],
   );
 
   const search = debounce(async () => {
@@ -172,9 +204,13 @@
   });
 
   $effect(() => {
-    // The dictionary is refetched whenever the panel opens: imports and stream enrichment
-    // between opens should show up, and the read is a few milliseconds server-side.
-    if (open) void loadDictionary();
+    // Both are refetched whenever the panel opens: imports and stream enrichment between opens
+    // should show up, searches made in another tab likewise, and each read is a few
+    // milliseconds server-side.
+    if (open) {
+      void loadDictionary();
+      void loadHistory();
+    }
   });
 
   async function loadDictionary() {
@@ -185,6 +221,35 @@
     } catch {
       dictionary = null;
     }
+  }
+
+  /** A 401 here means signed out, which is not an error - it means there is no history. */
+  async function loadHistory() {
+    try {
+      const response = await fetch('/api/me/history');
+      if (!response.ok) {
+        history = [];
+        return;
+      }
+      history = (await response.json()).items ?? [];
+    } catch {
+      history = [];
+    }
+  }
+
+  /**
+   * Remember a phrase that was actually searched for.
+   *
+   * Fired on the way out, so the list reflects searches rather than keystrokes. Not awaited:
+   * the navigation is already happening and a cache write must not be in front of it.
+   */
+  function rememberSearch(phrase: string) {
+    void fetch('/api/me/history', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: phrase }),
+      keepalive: true,
+    }).catch(() => undefined);
   }
 
   function scrollToLatest() {
@@ -219,6 +284,9 @@
       asked = true;
       void panel?.runWebSearch(entry.query);
     } else {
+      // A full search is the only thing worth remembering: opening one paper is a click, and
+      // a list of them is the reading history, which is somewhere else.
+      if (entry.kind === 'search' && trimmed) rememberSearch(trimmed);
       window.location.href = entry.href;
     }
   }
@@ -339,6 +407,8 @@
                     <Globe size={14} aria-hidden="true" />
                   {:else if entry.kind === 'ask'}
                     <Sparkles size={14} aria-hidden="true" />
+                  {:else if entry.kind === 'recent'}
+                    <History size={14} aria-hidden="true" />
                   {:else}
                     <CornerDownLeft size={14} aria-hidden="true" />
                   {/if}
