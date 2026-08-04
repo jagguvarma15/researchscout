@@ -1,0 +1,193 @@
+"""The models and benchmarks routes.
+
+Public, like the papers endpoints: this is published data about the world and none of it is
+about the caller. The store is exercised against a real database in test_catalog.py; these pin
+the HTTP shapes, the 404s, and the one field that makes these pages this site's rather than
+anyone's - ``paper_id``.
+"""
+
+from datetime import date
+from types import SimpleNamespace
+
+import pytest
+from fastapi.testclient import TestClient
+
+import researchscout.api.routers.catalog as catalog_router
+from researchscout.api.deps import get_session
+from researchscout.api.main import create_app
+
+
+def _client() -> TestClient:
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: None
+    return TestClient(app)
+
+
+def _model(**overrides: object) -> SimpleNamespace:
+    fields: dict[str, object] = {
+        "id": "whisper",
+        "name": "Whisper",
+        "organization": "OpenAI",
+        "publication_date": date(2022, 12, 6),
+        "domains": "Speech,Language",
+        "task": "automatic-speech-recognition",
+        "parameters": 1.55e9,
+        "training_compute_flop": 1.0e22,
+        "accessibility": "Open weights (unrestricted)",
+        "open_weights": True,
+        "link": "https://arxiv.org/abs/2212.04356",
+        "paper_id": "arxiv:2212.04356",
+        "hf_repo": "openai/whisper-large-v3",
+        "hf_downloads": 4_000_000,
+        "hf_likes": 3_000,
+        "sources": "epoch_ai",
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+def _benchmark(**overrides: object) -> SimpleNamespace:
+    fields: dict[str, object] = {
+        "id": "gpqa-diamond",
+        "name": "GPQA diamond",
+        "released_on": date(2023, 11, 20),
+        "result_count": 133,
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+def test_models_list_carries_the_paper_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog_router.catalog, "list_models", lambda *a, **k: [_model()])
+    monkeypatch.setattr(catalog_router.catalog, "count_models", lambda *a, **k: 1)
+    body = _client().get("/v1/models").json()
+    assert body["total"] == 1
+    item = body["items"][0]
+    assert item["id"] == "whisper"
+    assert item["paper_id"] == "arxiv:2212.04356"
+    # Comma-joined in the column, a list on the wire.
+    assert item["domains"] == ["Speech", "Language"]
+    assert item["sources"] == ["epoch_ai"]
+
+
+def test_a_model_with_no_domains_reads_as_an_empty_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        catalog_router.catalog, "list_models", lambda *a, **k: [_model(domains=None, sources="")]
+    )
+    monkeypatch.setattr(catalog_router.catalog, "count_models", lambda *a, **k: 1)
+    item = _client().get("/v1/models").json()["items"][0]
+    assert item["domains"] == []
+    assert item["sources"] == []
+
+
+def test_model_filters_reach_the_store(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_list(session: object, **kwargs: object) -> list:
+        seen.update(kwargs)
+        return []
+
+    monkeypatch.setattr(catalog_router.catalog, "list_models", fake_list)
+    monkeypatch.setattr(catalog_router.catalog, "count_models", lambda *a, **k: 0)
+    response = _client().get(
+        "/v1/models",
+        params={
+            "organization": "OpenAI",
+            "domain": "Language",
+            "open_weights": "true",
+            "with_paper": "true",
+            "limit": 10,
+            "offset": 20,
+        },
+    )
+    assert response.status_code == 200
+    assert seen["organization"] == "OpenAI"
+    assert seen["domain"] == "Language"
+    assert seen["open_weights"] is True
+    assert seen["with_paper"] is True
+    assert (seen["limit"], seen["offset"]) == (10, 20)
+
+
+def test_asking_for_one_paper_lists_what_came_out_of_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_for_paper(session: object, paper_id: str) -> list:
+        seen["paper_id"] = paper_id
+        return [_model()]
+
+    monkeypatch.setattr(catalog_router.catalog, "models_for_paper", fake_for_paper)
+    body = _client().get("/v1/models", params={"paper_id": "arxiv:2212.04356"}).json()
+    assert seen["paper_id"] == "arxiv:2212.04356"
+    assert [item["name"] for item in body["items"]] == ["Whisper"]
+    assert body["total"] == 1
+
+
+def test_a_model_detail_carries_its_scores(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog_router.catalog, "get_model", lambda *a, **k: _model())
+    monkeypatch.setattr(
+        catalog_router.catalog, "results_for_model", lambda *a, **k: [("MMLU", 0.76)]
+    )
+    body = _client().get("/v1/models/whisper").json()
+    assert body["scores"] == [
+        {
+            "benchmark": "MMLU",
+            "model": "Whisper",
+            "model_id": "whisper",
+            "score": 0.76,
+            "measured_on": None,
+            "origin": None,
+        }
+    ]
+
+
+def test_an_unknown_model_is_404(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog_router.catalog, "get_model", lambda *a, **k: None)
+    assert _client().get("/v1/models/nope").status_code == 404
+
+
+def test_benchmarks_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog_router.catalog, "list_benchmarks", lambda *a, **k: [_benchmark()])
+    body = _client().get("/v1/benchmarks").json()
+    assert body["items"] == [
+        {
+            "id": "gpqa-diamond",
+            "name": "GPQA diamond",
+            "released_on": "2023-11-20",
+            "result_count": 133,
+        }
+    ]
+
+
+def test_a_benchmark_detail_is_a_leaderboard(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog_router.catalog, "get_benchmark", lambda *a, **k: _benchmark())
+    monkeypatch.setattr(
+        catalog_router.catalog,
+        "leaderboard",
+        lambda *a, **k: [
+            SimpleNamespace(
+                model_name="Gemini 3.6 Flash",
+                model_id=None,
+                score=0.922,
+                measured_on=date(2026, 2, 1),
+                origin="Epoch",
+            ),
+            SimpleNamespace(
+                model_name="Claude Opus 5",
+                model_id="claude-opus-5",
+                score=0.918,
+                measured_on=None,
+                origin="Epoch",
+            ),
+        ],
+    )
+    body = _client().get("/v1/benchmarks/gpqa-diamond").json()
+    assert body["name"] == "GPQA diamond"
+    assert [(r["model"], r["model_id"]) for r in body["results"]] == [
+        ("Gemini 3.6 Flash", None),  # not in the catalogue, still on the board
+        ("Claude Opus 5", "claude-opus-5"),
+    ]
+
+
+def test_an_unknown_benchmark_is_404(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog_router.catalog, "get_benchmark", lambda *a, **k: None)
+    assert _client().get("/v1/benchmarks/nope").status_code == 404
