@@ -1,14 +1,23 @@
 """In-process refresh loop for the derived products the stream does not build.
 
-Three tasks always run on independent intervals: the weekly digest, the topic rebuild, and the
-daily report. Ingestion, embedding, full text and signal refresh normally come from the
-streaming pipeline (``scout stream serve``).
+Three tasks always run: the weekly digest, the topic rebuild, and the daily report. Ingestion,
+embedding, full text and signal refresh normally come from the streaming pipeline
+(``scout stream serve``).
 
 ``RS_SCHEDULER_BATCH_PIPELINE`` adds those four here instead, driving the same batch functions
 ``scout ingest`` / ``index`` / ``fulltext`` use. That is for an install that does not run the
 stream - a deployment where Kafka is not worth its memory, say - which would otherwise never
 see another paper. Running both at once means two processes fetching from the same upstreams
 on one address, which is what the three-second arXiv floor is not designed for; pick one.
+
+A task runs either on an interval or at named times of day. Intervals are the default and are
+what a local checkout wants; wall-clock times are for a deployment that should follow a
+publisher's day rather than an arbitrary phase set by whenever the process last restarted. Set
+``RS_SCHEDULER_PIPELINE_AT`` and the fetch-and-enrich tasks move onto the clock;
+``RS_SCHEDULER_DAILY_AT`` does the same for the once-a-day products. There is deliberately no
+catch-up for a missed slot: the ingest window is several days wide, so the next run covers
+whatever a restart stepped over, and firing immediately on start-up would instead mean a
+restart loop hammering arXiv.
 
 The same task set backs both ``scout serve scheduler`` (a long-lived loop) and ``--once`` (a
 single pass), so a host cron can drive it too. A task that raises is logged and skipped, so one
@@ -20,11 +29,15 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from datetime import time as clock_time
 from functools import partial
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from researchscout.config import Settings
+from researchscout.schedule import describe, parse_times, seconds_until
 
 if TYPE_CHECKING:
     from researchscout.embed.base import Embedder
@@ -33,16 +46,23 @@ logger = logging.getLogger(__name__)
 
 Clock = Callable[[], float]
 Sleep = Callable[[float], None]
+Wall = Callable[[], datetime]
 
 
 @dataclass
 class Task:
-    """One unit of scheduled work plus the monotonic deadline for its next run."""
+    """One unit of scheduled work plus the monotonic deadline for its next run.
+
+    ``at`` turns an interval task into a wall-clock one: when it is set, ``interval_sec`` is
+    ignored and each deadline is computed from the next of those times in ``zone``.
+    """
 
     name: str
     interval_sec: float
     run: Callable[[], None]
     next_at: float = 0.0
+    at: tuple[clock_time, ...] = ()
+    zone: ZoneInfo = field(default_factory=lambda: ZoneInfo("UTC"))
 
     def due(self, now: float) -> bool:
         """True once ``now`` (monotonic seconds) has reached the next-run deadline."""
@@ -50,7 +70,7 @@ class Task:
 
 
 class Scheduler:
-    """Runs tasks on their intervals, sequentially, in a single process."""
+    """Runs tasks on their intervals or at their times of day, sequentially, in one process."""
 
     def __init__(
         self,
@@ -59,18 +79,35 @@ class Scheduler:
         tick_sec: float = 30.0,
         clock: Clock = time.monotonic,
         sleep: Sleep = time.sleep,
+        wall: Wall = lambda: datetime.now(UTC),
     ) -> None:
         self._tasks = tasks
         self._tick_sec = tick_sec
         self._clock = clock
         self._sleep = sleep
+        self._wall = wall
+        for task in tasks:
+            if task.at:
+                # An interval task starts due, so a fresh process does its work at once. A
+                # wall-clock task starts at its next slot instead: waking at 15:02 must not be
+                # read as "the 14:00 run has not happened", which on a restart loop would mean
+                # a fetch every time the process came up.
+                self._reschedule(task)
+                logger.info("task %s runs at %s", task.name, describe(task.at, task.zone))
+
+    def _reschedule(self, task: Task) -> None:
+        if task.at:
+            delay = seconds_until(task.at, self._wall(), task.zone)
+            task.next_at = self._clock() + (delay if delay is not None else task.interval_sec)
+        else:
+            task.next_at = self._clock() + task.interval_sec
 
     def _run(self, task: Task) -> None:
         try:
             task.run()
         except Exception:  # noqa: BLE001 - a failing task must not stop the loop
             logger.warning("scheduled task %s failed", task.name, exc_info=True)
-        task.next_at = self._clock() + task.interval_sec
+        self._reschedule(task)
 
     def run_pass(self) -> list[str]:
         """Run every task once regardless of interval; return the names run (backs ``--once``)."""
@@ -254,25 +291,83 @@ def _report(settings: Settings) -> None:
         logger.info("pruned %d lineage rows", pruned)
 
 
+def _catalog(settings: Settings) -> None:
+    """Refresh the model and benchmark catalogue from its upstreams."""
+    from researchscout.catalog import refresh_catalog
+    from researchscout.store.db import session_scope
+
+    with session_scope() as session:
+        summary = refresh_catalog(session)
+    logger.info(
+        "catalog: %d model(s), %d benchmark(s), %d result(s), %d linked to papers",
+        summary.models,
+        summary.benchmarks,
+        summary.results,
+        summary.linked,
+    )
+
+
 def build_tasks(settings: Settings) -> list[Task]:
-    """Construct the scheduler's tasks with intervals drawn from ``settings``."""
+    """Construct the scheduler's tasks from ``settings``.
+
+    Each task carries both an interval and, when the corresponding ``_at`` setting is present,
+    a set of times of day; ``Task`` prefers the times when it has them. Keeping the interval
+    on the task regardless means unsetting the times is all it takes to go back.
+    """
+    zone = ZoneInfo(settings.scheduler_timezone)
+    pipeline_at = parse_times(settings.scheduler_pipeline_at)
+    daily_at = parse_times(settings.scheduler_daily_at)
+
+    def task(
+        name: str, interval: float, run: Callable[[], None], at: tuple[clock_time, ...]
+    ) -> Task:
+        return Task(name, interval, run, at=at, zone=zone)
+
     tasks: list[Task] = []
     if settings.scheduler_batch_pipeline:
         # Ordered so a cycle flows the way a paper does: arrive, get embedded, get its text,
         # then collect the signals that rank it.
         tasks += [
-            Task("ingest", settings.scheduler_ingest_interval_sec, partial(_ingest, settings)),
-            Task("index", settings.scheduler_index_interval_sec, partial(_index, settings)),
-            Task(
+            task(
+                "ingest",
+                settings.scheduler_ingest_interval_sec,
+                partial(_ingest, settings),
+                pipeline_at,
+            ),
+            task(
+                "index",
+                settings.scheduler_index_interval_sec,
+                partial(_index, settings),
+                pipeline_at,
+            ),
+            task(
                 "fulltext",
                 settings.scheduler_fulltext_interval_sec,
                 partial(_fulltext, settings),
+                pipeline_at,
             ),
-            Task("signals", settings.scheduler_signals_interval_sec, partial(_signals, settings)),
+            task(
+                "signals",
+                settings.scheduler_signals_interval_sec,
+                partial(_signals, settings),
+                pipeline_at,
+            ),
         ]
     tasks += [
-        Task("digest", settings.scheduler_digest_interval_sec, partial(_digest, settings)),
-        Task("topics", settings.scheduler_topics_interval_sec, partial(_topics, settings)),
-        Task("report", settings.scheduler_report_interval_sec, partial(_report, settings)),
+        task(
+            "catalog",
+            settings.scheduler_catalog_interval_sec,
+            partial(_catalog, settings),
+            daily_at,
+        ),
+        task(
+            "digest", settings.scheduler_digest_interval_sec, partial(_digest, settings), daily_at
+        ),
+        task(
+            "topics", settings.scheduler_topics_interval_sec, partial(_topics, settings), daily_at
+        ),
+        task(
+            "report", settings.scheduler_report_interval_sec, partial(_report, settings), daily_at
+        ),
     ]
     return tasks
