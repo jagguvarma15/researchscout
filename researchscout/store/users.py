@@ -15,6 +15,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from researchscout.store import account as account_cache
 from researchscout.store.models import EventRow, SavedPaperRow, UserInterestRow, UserRow
 
 # Below this age a repeat visit does not rewrite last_seen_at: the column exists to spot
@@ -111,6 +112,9 @@ def export_user_data(session: Session, sub: str) -> dict[str, Any]:
             }
             for event, paper_id, surface, occurred_at in events
         ],
+        # Cached rather than kept, but stored about this person all the same, so the export
+        # the privacy notice promises has to include it.
+        "site_state": account_cache.export(session, sub),
     }
 
 
@@ -125,6 +129,7 @@ def delete_user(session: Session, sub: str) -> bool:
     session.execute(delete(SavedPaperRow).where(SavedPaperRow.user_sub == sub))
     session.execute(delete(UserInterestRow).where(UserInterestRow.user_sub == sub))
     session.execute(delete(EventRow).where(EventRow.user_sub == sub))
+    account_cache.forget(session, sub)
     existed = session.get(UserRow, sub) is not None
     session.execute(delete(UserRow).where(UserRow.sub == sub))
     return existed
