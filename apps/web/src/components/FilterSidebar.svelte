@@ -7,11 +7,11 @@
   import { SlidersHorizontal, X } from 'lucide-svelte';
 
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
-  import { GROUPS, techCategories } from '../lib/taxonomy';
+  import { SUBJECTS, subjectCategories, TOPICS } from '../lib/taxonomy';
 
   interface Filters {
-    kind: string;
-    groups: string[];
+    subjects: string[];
+    topics: string[];
     categories: string[];
     days: string;
     year: string;
@@ -30,16 +30,14 @@
   let previousFocus: Element | null = null;
   let unlockScroll: (() => void) | null = null;
 
-  const knownTechCodes = new Set(
-    GROUPS.flatMap((group) => techCategories(group.key).map((cat) => cat.code)),
+  const knownCodes = new Set(
+    SUBJECTS.flatMap((subject) => subjectCategories(subject.key).map((cat) => cat.code)),
   );
 
-  let kind = $state(initial.kind);
-  let groups = $state<string[]>([...initial.groups]);
-  let selectedCats = $state<string[]>(initial.categories.filter((cat) => knownTechCodes.has(cat)));
-  let categoriesText = $state(
-    initial.categories.filter((cat) => !knownTechCodes.has(cat)).join(', '),
-  );
+  let subjects = $state<string[]>([...initial.subjects]);
+  let topics = $state<string[]>([...initial.topics]);
+  let selectedCats = $state<string[]>(initial.categories.filter((cat) => knownCodes.has(cat)));
+  let categoriesText = $state(initial.categories.filter((cat) => !knownCodes.has(cat)).join(', '));
   let dateMode = $state<'days' | 'calendar'>(initial.year ? 'calendar' : 'days');
   let days = $state(initial.days);
   let year = $state(initial.year);
@@ -56,14 +54,12 @@
     'July', 'August', 'September', 'October', 'November', 'December',
   ];
 
-  function allowed(groupTech: boolean): boolean {
-    if (kind === 'tech' || kind === 'ai') return groupTech;
-    if (kind === 'non_tech') return !groupTech;
-    return true;
+  function toggleSubject(key: string) {
+    subjects = subjects.includes(key) ? subjects.filter((s) => s !== key) : [...subjects, key];
   }
 
-  function toggleGroup(key: string) {
-    groups = groups.includes(key) ? groups.filter((g) => g !== key) : [...groups, key];
+  function toggleTopic(key: string) {
+    topics = topics.includes(key) ? topics.filter((t) => t !== key) : [...topics, key];
   }
 
   function toggleCat(code: string) {
@@ -73,8 +69,8 @@
   }
 
   // Applied once at render; native <details> toggling takes over from there.
-  function initiallyExpanded(groupKey: string): boolean {
-    return techCategories(groupKey).some((cat) => initial.categories.includes(cat.code));
+  function initiallyExpanded(subjectKey: string): boolean {
+    return subjectCategories(subjectKey).some((cat) => initial.categories.includes(cat.code));
   }
 
   function show() {
@@ -111,16 +107,10 @@
 
   function extract() {
     const params = new URLSearchParams();
-    // Always explicit: kind=all is how the feed's ai default stays switched off.
-    params.set('kind', kind || 'all');
-    const active = groups.filter((key) => {
-      const option = GROUPS.find((g) => g.key === key);
-      return option !== undefined && allowed(option.tech);
-    });
-    for (const key of active) params.append('group', key);
+    for (const key of subjects) params.append('subject', key);
+    for (const key of topics) params.append('topic', key);
     const textCodes = categoriesText.split(/[\s,]+/).filter(Boolean);
-    const activeCats = allowed(true) ? selectedCats : [];
-    for (const cat of [...new Set([...activeCats, ...textCodes])]) {
+    for (const cat of [...new Set([...selectedCats, ...textCodes])]) {
       params.append('category', cat);
     }
     if (dateMode === 'days' && days) params.set('days', days);
@@ -198,37 +188,47 @@
       <div class="content">
         {#if tab === 'subjects'}
           <fieldset>
-            <legend>Kind</legend>
-            <div class="segmented" role="group" aria-label="Paper kind">
-              <button class:on={kind === 'all'} onclick={() => (kind = 'all')}>All</button>
-              <button class:on={kind === 'ai'} onclick={() => (kind = 'ai')}>AI</button>
-              <button class:on={kind === 'tech'} onclick={() => (kind = 'tech')}>Tech</button>
-              <button class:on={kind === 'non_tech'} onclick={() => (kind = 'non_tech')}>
-                Non-tech
-              </button>
+            <legend>Technique</legend>
+            <p class="hint">A paper can use more than one.</p>
+            <div class="segmented" role="group" aria-label="Technique">
+              {#each TOPICS as option}
+                <button
+                  class:on={topics.includes(option.key)}
+                  title={option.label}
+                  aria-pressed={topics.includes(option.key)}
+                  onclick={() => toggleTopic(option.key)}
+                >
+                  {option.short}
+                </button>
+              {/each}
             </div>
           </fieldset>
           <fieldset>
-            <legend>Subject groups</legend>
-            {#each GROUPS as option}
-              <label class="check" class:muted={!allowed(option.tech)}>
+            <legend>Field</legend>
+            <p class="hint">
+              The first four are what this radar is about; the rest are where it meets other
+              fields.
+            </p>
+            {#each SUBJECTS as option, index}
+              {#if index === 4}
+                <p class="group-break">Intersections</p>
+              {/if}
+              <label class="check">
                 <input
                   type="checkbox"
-                  checked={groups.includes(option.key)}
-                  disabled={!allowed(option.tech)}
-                  onchange={() => toggleGroup(option.key)}
+                  checked={subjects.includes(option.key)}
+                  onchange={() => toggleSubject(option.key)}
                 />
                 {option.label}
               </label>
-              {#if option.tech}
+              {#if subjectCategories(option.key).length > 0}
                 <details class="cats" open={initiallyExpanded(option.key)}>
                   <summary>Categories</summary>
-                  {#each techCategories(option.key) as cat}
-                    <label class="check sub" class:muted={!allowed(option.tech)}>
+                  {#each subjectCategories(option.key) as cat}
+                    <label class="check sub">
                       <input
                         type="checkbox"
                         checked={selectedCats.includes(cat.code)}
-                        disabled={!allowed(option.tech)}
                         onchange={() => toggleCat(cat.code)}
                       />
                       {cat.code} - {cat.name}
@@ -453,8 +453,14 @@
     color: var(--ink, #17191c);
     font-size: 0.9rem;
   }
-  .check.muted {
+  /* Separates the four core fields from the five where this radar meets other disciplines. */
+  .group-break {
+    margin: 0.9rem 0 0.2rem;
     color: var(--muted, #5d6570);
+    font-size: 0.7rem;
+    font-weight: 650;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
   }
   .cats {
     margin: 0 0 0.4rem 1.55rem;
@@ -478,9 +484,10 @@
     font-size: 0.85rem;
   }
   .hint {
-    margin: 0.4rem 0 0;
+    margin: 0.4rem 0 0.5rem;
     color: var(--muted, #5d6570);
     font-size: 0.8rem;
+    line-height: 1.5;
   }
   footer {
     display: flex;
