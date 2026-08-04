@@ -69,6 +69,15 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
         sources !== null && (
           <div class="table-scroll">
             <table class="sources">
+              {/* Fixed widths: the two prose columns hold full sentences, so letting the
+                  browser size columns from content lets one long "provides" string starve
+                  the rest. These proportions keep both prose columns equal. */}
+              <colgroup>
+                <col class="col-source" />
+                <col class="col-status" />
+                <col class="col-takes" />
+                <col class="col-terms" />
+              </colgroup>
               <thead>
                 <tr>
                   <th scope="col">Source</th>
@@ -337,17 +346,33 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
     overflow-x: auto;
     margin-top: 1.2rem;
   }
+  /* Centered on both axes, to sit with the centered headings and prose above it rather
+     than hugging the left edge on its own. `fixed` is what makes the colgroup widths
+     bind; without it the browser still sizes columns from their content. */
   .sources {
     width: 100%;
-    min-width: 44rem;
+    min-width: 46rem;
     border-collapse: collapse;
     font-size: var(--text-sm);
-    text-align: left;
+    table-layout: fixed;
+    text-align: center;
   }
+  .col-source {
+    width: 22%;
+  }
+  .col-status {
+    width: 12%;
+  }
+  .col-takes,
+  .col-terms {
+    width: 33%;
+  }
+  /* Padding on both sides now: the old rule zeroed the left side to sit flush against a
+     left-aligned column, which is what left the columns crowded together. */
   .sources th,
   .sources td {
-    padding: 0.7rem 0.9rem 0.7rem 0;
-    vertical-align: top;
+    padding: 0.8rem 1.25rem;
+    vertical-align: middle;
     border-bottom: 1px solid var(--line);
   }
   .sources thead th {
@@ -357,9 +382,10 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
+  /* Names wrap rather than hold one line: under a fixed column "Hacker News (Algolia API)"
+     is wider than its share and would spill into the next cell. */
   .sources tbody th {
     font-weight: 600;
-    white-space: nowrap;
   }
   .sources tbody tr:last-child th,
   .sources tbody tr:last-child td {
@@ -382,7 +408,11 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
   }
   @media (max-width: 640px) {
     .sources {
-      min-width: 32rem;
+      min-width: 34rem;
+    }
+    .sources th,
+    .sources td {
+      padding: 0.7rem 0.75rem;
     }
   }
 </style>
