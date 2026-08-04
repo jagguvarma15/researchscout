@@ -1,0 +1,6 @@
+Model,Organization,Publication date,Domain,Task,Parameters,Parameters notes,Training compute (FLOP),Training compute notes,Link,Model accessibility,Open model weights?
+Kimi K3,Moonshot AI,2026-07-16,"Language,Multimodal,Vision",Chat,2800000000000.0,,2.0001e+25,,https://arxiv.org/abs/2605.02881,Open weights (non-commercial),Yes
+Stable Point Aware 3D,Stability AI,2025-01-08,3D modeling,3D reconstruction,,,,,https://arxiv.org/abs/2501.04689,Open weights (unrestricted),Yes
+Closed Thing,SomeLab,,Language,,,,,,https://example.com/blog,API access,No
+,Nameless,2026-01-01,Language,,,,,,,,
+Bad Numbers,SomeLab,not-a-date,Language,,not-a-number,,also-not-a-number,,,,
