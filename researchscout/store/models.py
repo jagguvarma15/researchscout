@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from pgvector.sqlalchemy import HALFVEC, Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -179,6 +180,141 @@ class UserInterestRow(Base):
     )
     interest: Mapped[str] = mapped_column(String, primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiModelRow(Base):
+    """One AI model in the landscape, as the two upstreams jointly describe it.
+
+    Keyed by a slug of the name rather than an upstream identifier, so a model Epoch AI
+    describes and Hugging Face counts downloads for is one row carrying both. ``paper_id`` is
+    the join this site exists to make; it is null for most models, which have no paper here.
+    """
+
+    __tablename__ = "ai_models"
+    __table_args__ = (
+        Index("ix_ai_models_published", "publication_date"),
+        Index("ix_ai_models_paper", "paper_id"),
+        Index("ix_ai_models_organization", "organization"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    organization: Mapped[str | None] = mapped_column(Text, nullable=True)
+    publication_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    domains: Mapped[str | None] = mapped_column(Text, nullable=True)
+    task: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parameters: Mapped[float | None] = mapped_column(Float, nullable=True)
+    training_compute_flop: Mapped[float | None] = mapped_column(Float, nullable=True)
+    accessibility: Mapped[str | None] = mapped_column(Text, nullable=True)
+    open_weights: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    link: Mapped[str | None] = mapped_column(Text, nullable=True)
+    paper_id: Mapped[str | None] = mapped_column(
+        ForeignKey("papers.id", ondelete="SET NULL"), nullable=True
+    )
+    hf_repo: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hf_downloads: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    hf_likes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sources: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BenchmarkRow(Base):
+    """One benchmark, with how many model scores are recorded against it."""
+
+    __tablename__ = "benchmarks"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(Text)
+    released_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    result_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class BenchmarkResultRow(Base):
+    """One model's score on one benchmark.
+
+    ``model_name`` is part of the key and ``model_id`` is optional: only about half the
+    benchmarked models are in the notable-models catalogue, and a leaderboard missing half its
+    rows would be worse than one whose rows do not all link.
+    """
+
+    __tablename__ = "benchmark_results"
+    __table_args__ = (
+        Index("ix_benchmark_results_ranked", "benchmark_id", "score"),
+        Index("ix_benchmark_results_model", "model_id"),
+    )
+
+    benchmark_id: Mapped[str] = mapped_column(
+        ForeignKey("benchmarks.id", ondelete="CASCADE"), primary_key=True
+    )
+    model_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    model_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_models.id", ondelete="SET NULL"), nullable=True
+    )
+    score: Mapped[float] = mapped_column(Float)
+    measured_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    origin: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class AccountSearchRow(Base):
+    """A phrase this account searched for. Unlogged (migration 0021): a cache, not a record."""
+
+    __tablename__ = "account_searches"
+    __table_args__ = (
+        Index("uq_account_searches_query", "user_sub", "query", unique=True),
+        Index("ix_account_searches_recent", "user_sub", "searched_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_sub: Mapped[str] = mapped_column(ForeignKey("users.sub", ondelete="CASCADE"))
+    query: Mapped[str] = mapped_column(String(200))
+    searched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AccountRecentPaperRow(Base):
+    """A paper this account opened, for the continue-reading strip. Unlogged."""
+
+    __tablename__ = "account_recent_papers"
+    __table_args__ = (Index("ix_account_recent_papers_recent", "user_sub", "viewed_at"),)
+
+    user_sub: Mapped[str] = mapped_column(
+        ForeignKey("users.sub", ondelete="CASCADE"), primary_key=True
+    )
+    paper_id: Mapped[str] = mapped_column(
+        ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    viewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AccountDismissalRow(Base):
+    """A paper this account pushed to the end of the feed. Unlogged.
+
+    Not a hide: the paper still appears, last. The negative it implies is already recorded
+    properly in ``events``; this row only remembers where to put it.
+    """
+
+    __tablename__ = "account_dismissals"
+    __table_args__ = (Index("ix_account_dismissals_recent", "user_sub", "dismissed_at"),)
+
+    user_sub: Mapped[str] = mapped_column(
+        ForeignKey("users.sub", ondelete="CASCADE"), primary_key=True
+    )
+    paper_id: Mapped[str] = mapped_column(
+        ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    dismissed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class AccountFilterRow(Base):
+    """The feed query string this account last applied, one row per account. Unlogged."""
+
+    __tablename__ = "account_filters"
+
+    user_sub: Mapped[str] = mapped_column(
+        ForeignKey("users.sub", ondelete="CASCADE"), primary_key=True
+    )
+    query_string: Mapped[str] = mapped_column(String(2000))
+    saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class SignalRow(Base):
