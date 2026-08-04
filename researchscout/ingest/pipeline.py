@@ -1,8 +1,13 @@
-"""The ingest pipeline: fetch → normalize → strict dedup → store.
+"""The ingest pipeline: fetch → normalize → scope → strict dedup → store.
 
 Wires a source connector to storage. Idempotent and replayable: raw payloads are kept, the
 cursor is persisted, and a re-run over the same window writes zero new papers because dedup
 collapses already-seen external ids onto the existing canonical record.
+
+Papers outside what this radar covers are dropped before storage. The configured arXiv query
+already narrows to the same set, so in normal running this rejects nothing; it is here for a
+hand-run ``scout ingest --category`` and for whatever content source comes next, so the scope
+rule holds at the one point every paper passes through.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ from researchscout.store.papers import (
 from researchscout.store.raw import append_raw
 from researchscout.store.signals import append_signal
 from researchscout.store.state import get_state, save_state
+from researchscout.taxonomy import in_scope
 
 
 @dataclass
@@ -33,6 +39,8 @@ class IngestSummary:
     collapsed: int = 0
     signals: int = 0
     raw_stored: int = 0
+    #: Fetched, normalized, and then rejected for being outside this radar's subject.
+    out_of_scope: int = 0
 
 
 def resolve_existing(session: Session, paper: Paper) -> str | None:
@@ -79,6 +87,9 @@ def run_ingest(
                 if obj.type is SignalType.citation:
                     set_citation_count(session, obj.paper_id, int(obj.value))
                 summary.signals += 1
+                continue
+            if not in_scope(obj.categories):
+                summary.out_of_scope += 1
                 continue
             existing = resolve_existing(session, obj)
             if existing is not None:
