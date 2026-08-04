@@ -397,11 +397,11 @@
 </div>
 
 <style>
+  /* Fills the header's middle column, which is what centres it; the column carries the cap. */
   .omnibox {
     position: relative;
-    flex: 1;
+    width: 100%;
     min-width: 0;
-    max-width: 44rem;
   }
   /* One of the three controls that keeps a border: this is a text field, and a field with
      no edge is not obviously typeable. */
@@ -634,9 +634,6 @@
     }
   }
   @media (max-width: 52rem) {
-    .omnibox {
-      max-width: none;
-    }
     kbd {
       display: none;
     }
