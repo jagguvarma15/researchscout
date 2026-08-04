@@ -22,6 +22,7 @@
     Download,
     ExternalLink,
     Highlighter,
+    List,
     Maximize2,
     Minimize2,
     Minus,
@@ -91,6 +92,9 @@
   let baseSizes = $state<{ w: number; h: number }[]>([]);
   let highlights = $state<Highlight[]>([]);
 
+  // Off by default: the reader is for reading, so the pointer behaves like a pointer and text
+  // selects and copies as it would anywhere. Framing is something you switch on.
+  let marking = $state(false);
   // A mark being framed, before a colour has been chosen for it, in page units.
   let pending = $state<{ page: number; rect: HighlightRect } | null>(null);
   let anchor = $state<{ x: number; y: number } | null>(null);
@@ -149,7 +153,7 @@
   function wake() {
     chromeOn = true;
     clearTimeout(idleTimer);
-    if (reducedMotion() || pending || removing || listOpen) return;
+    if (reducedMotion() || pending || removing || listOpen || marking) return;
     idleTimer = setTimeout(() => (chromeOn = false), IDLE_MS);
   }
 
@@ -177,6 +181,7 @@
     minimized = false;
     clearPending();
     removing = null;
+    marking = false;
     listOpen = false;
     clearTimeout(idleTimer);
     unlockScroll?.();
@@ -501,7 +506,7 @@
   }
 
   function onPagePointerDown(event: PointerEvent, num: number) {
-    if (minimized || event.button !== 0) return;
+    if (!marking || minimized || event.button !== 0) return;
     event.preventDefault();
     const point = pagePoint(event, num);
     if (!point) return;
@@ -528,24 +533,45 @@
     if (dragging !== 'new') return;
     (event.currentTarget as HTMLElement).releasePointerCapture?.(event.pointerId);
     dragging = null;
-    const start = dragStart;
     dragStart = null;
     if (!pending) return;
 
-    // Barely moved: that was a click, so treat it as one and look for a mark to remove.
+    // Barely moved: that was a click, not a frame, and the click handler deals with it.
     if (pending.rect.w < DRAG_FLOOR || pending.rect.h < DRAG_FLOOR) {
-      const page = pending.page;
       pending = null;
-      if (start) {
-        const hit = highlightAt(highlights, page, start.x * effScale, start.y * effScale, effScale);
-        removing = hit ? { id: hit.id, x: event.clientX, y: event.clientY } : null;
-      }
       return;
     }
 
     pending = { page: pending.page, rect: snapToInk(pending.page, pending.rect) };
     anchorPending();
     chromeOn = true;
+  }
+
+  /**
+   * Clicking a mark offers to remove it, in either mode - reaching for the highlighter first
+   * would be a strange thing to have to do in order to undo one.
+   */
+  function onPageClick(event: MouseEvent, num: number) {
+    if (dragging || pending) return;
+    if (!window.getSelection()?.isCollapsed) return; // A selection just ended here.
+    const el = pageEls[num - 1];
+    if (!el) return;
+    const box = el.getBoundingClientRect();
+    const hit = highlightAt(
+      highlights,
+      num,
+      event.clientX - box.left,
+      event.clientY - box.top,
+      effScale,
+    );
+    removing = hit ? { id: hit.id, x: event.clientX, y: event.clientY } : null;
+  }
+
+  function toggleMarking() {
+    marking = !marking;
+    clearPending();
+    removing = null;
+    wake();
   }
 
   // Grips ---------------------------------------------------------------------
@@ -618,6 +644,7 @@
     if (event.key === 'Escape') {
       if (pending) clearPending();
       else if (removing) removing = null;
+      else if (marking) marking = false;
       else if (listOpen) listOpen = false;
       else if (!document.fullscreenElement) hide();
       return;
@@ -727,7 +754,13 @@
         </div>
       </div>
 
-      <div class="viewer" bind:this={viewer} onscroll={onScroll} onwheel={onWheel}>
+      <div
+        class="viewer"
+        class:marking
+        bind:this={viewer}
+        onscroll={onScroll}
+        onwheel={onWheel}
+      >
         {#if loading}
           <p class="status">Loading the PDF from arXiv…</p>
         {:else if failed}
@@ -745,6 +778,7 @@
               class="pdfpage"
               bind:this={pageEls[index]}
               style={`top:${boxes[index]?.top ?? 0}px;width:${size.w}px;height:${size.h}px`}
+              onclick={(event) => onPageClick(event, index + 1)}
               onpointerdown={(event) => onPagePointerDown(event, index + 1)}
               onpointermove={onPagePointerMove}
               onpointerup={onPagePointerUp}
@@ -830,6 +864,16 @@
         <span class="sep"></span>
         <button
           class="tool"
+          class:on={marking}
+          onclick={toggleMarking}
+          aria-pressed={marking}
+          aria-label="Highlight"
+          title="Drag a box over anything to highlight it"
+        >
+          <Highlighter size={15} aria-hidden="true" />
+        </button>
+        <button
+          class="tool"
           class:on={listOpen}
           onclick={() => {
             listOpen = !listOpen;
@@ -838,7 +882,7 @@
           aria-expanded={listOpen}
           aria-label={`Highlights (${highlights.length})`}
         >
-          <Highlighter size={15} aria-hidden="true" />
+          <List size={15} aria-hidden="true" />
           {#if highlights.length > 0}<span class="count">{highlights.length}</span>{/if}
         </button>
         <a class="tool" href={pdfUrl} download aria-label="Download the PDF">
@@ -860,9 +904,9 @@
           <h2>Highlights</h2>
           {#if ordered.length === 0}
             <p class="listnote">
-              Drag a box over anything on a page - a sentence, an equation, a figure - and it
-              snaps onto what is inside. Highlights are kept in this browser, so they stay on
-              this device.
+              Switch on the highlighter, then drag a box over anything on a page - a sentence,
+              an equation, a figure - and it snaps onto what is inside. Highlights are kept in
+              this browser, so they stay on this device.
             </p>
           {:else}
             <ul>
@@ -1107,13 +1151,14 @@
     border-radius: 2px;
     mix-blend-mode: multiply;
   }
-  /* A drag frames a region, so the text layer must not swallow it as a selection. The layer
-     stays in the tree because it is what gives a mark the words inside it for the list. */
-  .pdfpage :global(.textLayer) {
-    pointer-events: none;
-  }
-  .pdfpage {
+  /* Only while the highlighter is on does a drag frame a region; the text layer stops taking
+     pointer events so the drag is not swallowed as a selection. With it off the page behaves
+     like a page - an I-beam over text, which selects and copies as it would anywhere. */
+  .viewer.marking .pdfpage {
     cursor: crosshair;
+  }
+  .viewer.marking :global(.textLayer) {
+    pointer-events: none;
   }
   .marquee {
     position: absolute;
@@ -1364,6 +1409,11 @@
     white-space: pre;
     cursor: text;
   }
-  /* Nothing in the text layer is selectable any more - the layer is there so a framed mark
-     can report the words inside it - so the browser never paints a selection over a page. */
+  /* The alpha has to be in the colour. ::selection takes background-color, color and a few
+     text properties and nothing else - an `opacity` beside it is ignored, which turns this
+     into a solid block painted over the words you are trying to read. */
+  .pdfpage :global(.textLayer ::selection) {
+    background: rgb(194 65 12 / 0.28);
+    color: transparent;
+  }
 </style>
