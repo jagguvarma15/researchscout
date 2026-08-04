@@ -47,6 +47,9 @@ export interface Message {
   cited?: string[];
   used?: UsedPaper[];
   error?: boolean;
+  // The request needed an account. Not an error: the quick path is open to everyone and
+  // only generated answers, web search and import are not, so this offers the way in.
+  needsSignIn?: boolean;
   // The stream was aborted by the Stop button; partial text is kept.
   stopped?: boolean;
   // Structured fast-mode results; when present the raw token text is not rendered.
