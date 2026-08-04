@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Annotated, Literal
+from datetime import date, datetime
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -188,6 +188,125 @@ class TermsAcceptance(BaseModel):
 
 class AccountDeleted(BaseModel):
     deleted: bool
+
+
+# --- Per-account site state (a cache; see researchscout/store/account.py) ---
+
+
+class SearchRecord(BaseModel):
+    query: str = Field(min_length=1, max_length=200)
+
+
+class SearchHistory(BaseModel):
+    items: list[str]
+
+
+class ViewRecord(BaseModel):
+    paper_id: str = Field(min_length=1, max_length=200)
+
+
+class RecentPaperList(BaseModel):
+    items: list[str]
+
+
+class DismissRequest(BaseModel):
+    paper_id: str = Field(min_length=1, max_length=200)
+
+
+class DismissalList(BaseModel):
+    items: list[str]
+
+
+class FilterState(BaseModel):
+    """The feed's query string verbatim, which is already the whole filter state."""
+
+    query_string: str | None = Field(default=None, max_length=2000)
+
+
+# --- The AI landscape (see researchscout/catalog.py) ---
+
+
+class BenchmarkResultSummary(BaseModel):
+    """One model's score on one benchmark. ``model_id`` is null when it is not in the catalogue."""
+
+    benchmark: str
+    model: str
+    model_id: str | None = None
+    score: float
+    measured_on: date | None = None
+    origin: str | None = None
+
+
+class ModelSummary(BaseModel):
+    """One model in the landscape, merged from every source that describes it."""
+
+    id: str
+    name: str
+    organization: str | None
+    publication_date: date | None
+    domains: list[str]
+    task: str | None
+    parameters: float | None
+    training_compute_flop: float | None
+    accessibility: str | None
+    open_weights: bool | None
+    link: str | None
+    #: The paper this model came from, when this corpus holds it. The join the pages turn on.
+    paper_id: str | None
+    hf_repo: str | None
+    hf_downloads: int | None
+    hf_likes: int | None
+    sources: list[str]
+    scores: list[BenchmarkResultSummary] = Field(default_factory=list)
+
+    @classmethod
+    def from_row(cls, row: Any) -> ModelSummary:
+        return cls(
+            id=row.id,
+            name=row.name,
+            organization=row.organization,
+            publication_date=row.publication_date,
+            domains=[part for part in (row.domains or "").split(",") if part],
+            task=row.task,
+            parameters=row.parameters,
+            training_compute_flop=row.training_compute_flop,
+            accessibility=row.accessibility,
+            open_weights=row.open_weights,
+            link=row.link,
+            paper_id=row.paper_id,
+            hf_repo=row.hf_repo,
+            hf_downloads=row.hf_downloads,
+            hf_likes=row.hf_likes,
+            sources=[part for part in (row.sources or "").split(",") if part],
+        )
+
+
+class ModelList(BaseModel):
+    items: list[ModelSummary]
+    total: int = 0
+    limit: int = 50
+    offset: int = 0
+
+
+class BenchmarkSummary(BaseModel):
+    id: str
+    name: str
+    released_on: date | None
+    result_count: int
+
+    @classmethod
+    def from_row(cls, row: Any) -> BenchmarkSummary:
+        return cls(
+            id=row.id, name=row.name, released_on=row.released_on, result_count=row.result_count
+        )
+
+
+class BenchmarkList(BaseModel):
+    items: list[BenchmarkSummary]
+
+
+class BenchmarkDetail(BenchmarkSummary):
+    results: list[BenchmarkResultSummary] = Field(default_factory=list)
 
 
 class SourceInfo(BaseModel):
