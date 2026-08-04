@@ -52,13 +52,15 @@
     position: relative;
     display: inline-flex;
   }
+  /* One of the three header controls that keeps a border. With the navigation links now
+     borderless, the ring is what separates "who you are" from "where to go". */
   .avatar {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     width: 2.15rem;
     height: 2.15rem;
-    border: none;
+    border: 1px solid var(--line, #e6e1d5);
     border-radius: 999px;
     background: var(--accent-soft, #fef3c7);
     color: var(--accent-ink, #78350f);
@@ -67,10 +69,13 @@
     font-weight: 650;
     letter-spacing: 0.02em;
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition:
+      background-color var(--dur-fast, 0.15s) var(--ease-out, ease),
+      border-color var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
   .avatar:hover {
     background: var(--chip-hover, #fde68a);
+    border-color: var(--line-strong, #d1d6dc);
   }
   .avatar:focus-visible {
     outline: 2px solid var(--accent, #c2410c);
@@ -85,14 +90,14 @@
     display: flex;
     flex-direction: column;
     padding: 0.4rem;
-    border: 1px solid var(--line, #e4e7eb);
-    border-radius: 12px;
+    border: 1px solid var(--line, #e6e1d5);
+    border-radius: var(--radius-md, 14px);
     background: var(--surface, #fff);
-    box-shadow: var(--shadow-md, 0 12px 32px rgb(23 25 28 / 0.1));
+    box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
   }
   .menu-user {
     padding: 0.35rem 0.65rem 0.45rem;
-    border-bottom: 1px solid var(--line, #e4e7eb);
+    border-bottom: 1px solid var(--line, #e6e1d5);
     margin-bottom: 0.3rem;
     color: var(--muted, #5d6570);
     font-size: 0.78rem;
@@ -105,7 +110,7 @@
     text-decoration: none;
   }
   .menu a:hover {
-    background: var(--surface-2, #f5f7fa);
+    background: var(--surface-2, #f4f0e8);
   }
   .menu a:focus-visible {
     outline: 2px solid var(--accent, #c2410c);
