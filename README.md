@@ -5,7 +5,7 @@ ResearchScout ingests new AI/ML papers and their surrounding signals (citations,
 
 Everything runs as plain host processes — no Docker. Needs Homebrew Postgres with pgvector
 plus Kafka (`brew install postgresql@17 pgvector kafka`), [uv](https://docs.astral.sh/uv/), and
-pnpm; add `grafana` to the brew line for the monitoring dashboards (optional, see Monitoring). Chat needs an LLM: the defaults target local [Ollama](https://ollama.com) (`brew install
+pnpm. Chat needs an LLM: the defaults target local [Ollama](https://ollama.com) (`brew install
 ollama`, run `ollama serve`, then `ollama pull qwen2.5:3b-instruct` — one-time ~2.3GB), or point
 `RS_LLM_*` in `.env` at any OpenAI-compatible provider.
 
@@ -36,8 +36,8 @@ Bytewax worker consuming them through three stages: parse (deterministic normali
 cleanup), categorize (taxonomy group, topic-centroid match, statistical keywords with a
 small-LLM fallback, optional custom labels), and inject (idempotent upserts, embeddings,
 chunks, signals). Every packet carries per-stage lineage into Postgres: `GET /v1/stream/stats`
-serves hourly rollups, the `pipeline_rollups_hourly` view backs the Grafana dashboards (see
-Monitoring), and `scout stream tail` watches packets live on the `rs.parsed.v1` /
+serves hourly rollups over the `pipeline_rollups_hourly` view, and `scout stream tail` watches
+packets live on the `rs.parsed.v1` /
 `rs.enriched.v1` taps. Delivery is at-least-once with natural-key upserts everywhere, so
 replays converge. `make scheduler` still drives the derived products (weekly digest, topics,
 the daily report with its must-read five). The batch commands below remain the manual fallback
@@ -45,28 +45,24 @@ whenever the broker is down.
 
 ## Monitoring
 
-Four dashboards live in `config/grafana/dashboards/` as JSON, and are hosted on Grafana Cloud
-rather than by a local Grafana - the free tier costs nothing, and the machine at home has
-better uses for the memory:
+The Corpus dashboard lives in `config/grafana/dashboards/` as JSON, and is hosted on Grafana
+Cloud rather than by a local Grafana - the free tier costs nothing, and the machine at home has
+better uses for the memory. It shows paper, keyword, full-text, chunk, signal and topic totals,
+papers and signals per day, enrichment coverage, and topics by size.
 
-- Pipeline: throughput by stage and outcome, error rate, packet-weighted stage latency,
-  backlog (produced but not yet injected), freshness, kind/source/category breakdowns, top errors.
-- Traces: pick any event and see its produce/parse/categorize/inject stamps with durations and
-  errors, plus a recent-traces table with one colored cell per stage.
-- Architecture: a live node graph of the pipeline with per-stage counts, latencies, and outcome
-  arcs, stage freshness, and a system map.
-- Corpus: paper/keyword/fulltext/chunk/signal/topic totals, papers and signals per day,
-  enrichment coverage, topics by size.
+It reads the corpus tables in Postgres directly - no exporters and no metrics agent, and the
+numbers accrue whether anything is watching or not. Grafana Cloud reaches that database through
+Private Data Source Connect: an agent in the deployment stack opens an outbound tunnel, so the
+database needs no inbound rule and no public address. Setting it up, including the read-only
+login the dashboard uses, is section 4 of `deploy/PUBLISHING.md`.
 
-Everything reads the `pipeline_lineage` table and corpus tables in Postgres - no exporters and
-no metrics agent, and the numbers accrue whether anything is watching or not. Grafana Cloud
-reaches that database through Private Data Source Connect: an agent in the deployment stack
-opens an outbound tunnel, so the database needs no inbound rule and no public address. Setting
-it up, including the read-only login the dashboards use, is section 4 of
-`deploy/PUBLISHING.md`.
+Three further dashboards - pipeline throughput, per-event traces and a live architecture graph -
+were built against `pipeline_lineage`, which only the streaming worker writes. The deployment
+ingests in batches (`RS_SCHEDULER_BATCH_PIPELINE`), so they rendered empty and have been
+removed; `git log -- config/grafana/dashboards` has them if the stream comes back.
 
-To read them against a development database instead, run a Grafana yourself and point it at
-`.local/pgdata`; the JSON files are portable.
+To read the dashboard against a development database instead, run a Grafana yourself and point
+it at `.local/pgdata`; the JSON file is portable.
 
 ## Deep backfill
 
