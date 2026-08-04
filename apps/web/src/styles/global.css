@@ -30,12 +30,34 @@
      white glyph at 3.6:1 (non-text 3:1 bar). */
   --accent-grad: linear-gradient(135deg, #ea580c, #9a3412);
 
-  /* Shape and depth. */
+  /* Failure states. Components used to carry their own reds inline; these are the
+     shared ones. Contrast (WCAG, computed): danger 6.0:1 on the beige bg and 5.7:1 on
+     surface-2; danger-ink 8.2:1 on danger-soft. */
+  --danger: #b91c1c;
+  --danger-soft: #fee2e2;
+  --danger-ink: #7f1d1d;
+
+  /* Shape and depth. Three steps, each with a job: sm for resting panels, md for
+     dropdowns and dialogs, lg for the two surfaces that float over the whole page
+     (the omnibox panel and the reader's chrome). */
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-full: 999px;
   --shadow-sm: 0 1px 2px rgb(23 25 28 / 0.04);
   --shadow-md: 0 4px 12px rgb(23 25 28 / 0.08), 0 12px 32px rgb(23 25 28 / 0.1);
+  --shadow-lg: 0 2px 4px rgb(23 25 28 / 0.06), 0 16px 48px rgb(23 25 28 / 0.16);
+
+  /* Motion. One curve and two durations, so the rail, the panel and the reader move
+     alike instead of each declaring its own timing. The reduced-motion block at the
+     end of this file neutralizes every transition that uses them. */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --dur-fast: 0.15s;
+  --dur-slow: 0.25s;
+
+  /* Layout. The rail is fixed to the right edge below the header, so pages reserve
+     its width and the header pins its own height for the rail to start under. */
+  --rail-width: 13rem;
+  --nav-height: 3.75rem;
 
   /* Type and rhythm: display sizes, rhythm, and gutters flex with the window. */
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -82,8 +104,14 @@
   /* True yellow-to-orange shading; the dark glyph holds 8.3:1 on the orange stop. */
   --accent-grad: linear-gradient(135deg, #fcd34d, #f59e0b);
 
+  /* Contrast (computed): danger 9.4:1 on bg; danger-ink 7.8:1 on danger-soft. */
+  --danger: #fca5a5;
+  --danger-soft: #3d1f1f;
+  --danger-ink: #fca5a5;
+
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
   --shadow-md: 0 4px 12px rgb(0 0 0 / 0.4), 0 12px 32px rgb(0 0 0 / 0.5);
+  --shadow-lg: 0 2px 4px rgb(0 0 0 / 0.4), 0 16px 48px rgb(0 0 0 / 0.6);
 }
 
 * {
@@ -162,9 +190,9 @@ svg[data-icon] {
   text-decoration: none;
   cursor: pointer;
   transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
 .btn:focus-visible {
@@ -198,6 +226,24 @@ svg[data-icon] {
 .btn-ghost:hover:not(:disabled) {
   background: var(--surface-2);
   border-color: var(--line-strong);
+}
+
+/* Navigation: no border and no fill at rest, so a row of these reads as a row of links
+   rather than a row of boxes. The transparent border .btn already declares is what keeps
+   it the same size as .btn-ghost, so nothing shifts when a control changes register.
+   The shared :focus-visible ring above matters more here than anywhere else - without a
+   border it is the only thing telling a keyboard user where they are. */
+.btn-nav {
+  color: var(--ink);
+}
+
+.btn-nav:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.btn-nav[aria-current] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
 }
 
 .btn-icon {
@@ -252,7 +298,7 @@ svg[data-icon] {
   color: var(--ink);
   font: inherit;
   font-size: var(--text-sm);
-  transition: border-color 0.15s ease;
+  transition: border-color var(--dur-fast) var(--ease-out);
 }
 
 .input::placeholder {
@@ -275,6 +321,16 @@ svg[data-icon] {
   margin: 0 0 var(--space-5);
 }
 
+.lede {
+  color: var(--muted);
+  margin-top: -0.25rem;
+  max-width: 65ch;
+}
+
+/* Every page needs to say "nothing here" and "the API is down", and each used to style
+   its own. One shape: an icon, a line, and an optional hint. is-error is the second case
+   - a page that cannot reach the API is reporting a fault, not an empty shelf. */
+
 .empty {
   display: flex;
   align-items: center;
@@ -283,10 +339,59 @@ svg[data-icon] {
   font-size: var(--text-sm);
 }
 
+.empty p {
+  margin: 0;
+}
+
 .empty svg[data-icon] {
   width: 1.25em;
   height: 1.25em;
   color: var(--muted);
+}
+
+.empty.is-error {
+  background: var(--danger-soft);
+  color: var(--danger-ink);
+}
+
+.empty.is-error svg[data-icon] {
+  color: var(--danger);
+}
+
+.empty.is-error a {
+  color: var(--danger-ink);
+}
+
+/* Placeholders for content the server is still fetching. Pages render these instead of a
+   blank region, so the layout does not jump when the real rows arrive. The shimmer is
+   decorative and stills under reduced motion; the block itself stays. */
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--surface), transparent);
+  transform: translateX(-100%);
+  animation: skeleton-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-sweep {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after {
+    display: none;
+  }
 }
 
 /* Server-rendered KaTeX spans (renderMathHTML) appear inside scoped markup, so they are
