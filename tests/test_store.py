@@ -77,6 +77,25 @@ def test_reupsert_preserves_full_text(session: Session) -> None:
     assert row.full_text == "## Introduction\n\nBody text."
 
 
+def test_listing_leaves_the_article_text_in_the_database(session: Session) -> None:
+    """Averaging 18 kB a row, it was over 90% of what a feed page fetched and used none of.
+
+    Pinned as behaviour rather than left to a comment: reinstating the column would be a
+    one-word change and nothing else in the suite would notice.
+    """
+    from researchscout.store.papers import get_papers
+
+    upsert_paper(session, _paper())
+    set_full_text(session, "arxiv:2401.00001", "## Introduction\n\nBody text.")
+    session.flush()
+
+    assert list_papers(session)[0].full_text is None
+    assert get_papers(session, ["arxiv:2401.00001"])["arxiv:2401.00001"].full_text is None
+    # The detail read is the one that hands back a whole paper.
+    detail = get_paper(session, "arxiv:2401.00001")
+    assert detail is not None and detail.full_text == "## Introduction\n\nBody text."
+
+
 def test_enrichment_round_trips_and_survives_reupsert(session: Session) -> None:
     from researchscout.schema import PaperLabel
     from researchscout.store.papers import set_enrichment
@@ -196,21 +215,29 @@ def _ids(papers: list[Paper]) -> list[str]:
     return [paper.id for paper in papers]
 
 
-def test_kind_facet_partitions(session: Session) -> None:
+def test_subject_facet_selects_a_field(session: Session) -> None:
     _seed_mixed(session)
-    tech = list_papers(session, facets=PaperFacets(kind="tech"))
-    non_tech = list_papers(session, facets=PaperFacets(kind="non_tech"))
-    assert set(_ids(tech)) == {"arxiv:2401.00001", "arxiv:2402.00002"}
-    assert set(_ids(non_tech)) == {"arxiv:2401.00003", "arxiv:2501.00004"}
-    assert count_papers(session, PaperFacets(kind="tech")) == 2
+    ai = list_papers(session, facets=PaperFacets(subjects=["ai"]))
+    assert set(_ids(ai)) == {"arxiv:2401.00001", "arxiv:2402.00002"}
+    assert count_papers(session, PaperFacets(subjects=["ai"])) == 2
+    # Archive-defined subjects go through the paper_archives index rather than the code list.
+    assert _ids(list_papers(session, facets=PaperFacets(subjects=["math"]))) == ["arxiv:2501.00004"]
+    assert _ids(list_papers(session, facets=PaperFacets(subjects=["physical"]))) == [
+        "arxiv:2401.00003"
+    ]
 
 
-def test_group_facet_intersects_kind(session: Session) -> None:
+def test_subjects_within_the_axis_widen(session: Session) -> None:
     _seed_mixed(session)
-    physics = list_papers(session, facets=PaperFacets(groups=["physics"]))
-    assert _ids(physics) == ["arxiv:2401.00003"]
-    empty = list_papers(session, facets=PaperFacets(kind="tech", groups=["physics"]))
-    assert empty == []
+    both = list_papers(session, facets=PaperFacets(subjects=["math", "physical"]))
+    assert set(_ids(both)) == {"arxiv:2401.00003", "arxiv:2501.00004"}
+
+
+def test_an_unknown_subject_matches_nothing(session: Session) -> None:
+    # The API rejects these before they reach here; the compiler must not fall back to
+    # matching everything if one ever slips through.
+    _seed_mixed(session)
+    assert list_papers(session, facets=PaperFacets(subjects=["notreal"])) == []
 
 
 def test_full_text_batch_prioritizes_and_skips_checked(session: Session) -> None:
@@ -236,7 +263,7 @@ def test_full_text_batch_prioritizes_and_skips_checked(session: Session) -> None
     assert [paper_id for paper_id, _ in pending] == ["arxiv:2404.00001"]
 
 
-def test_kind_ai_matches_category_overlap(session: Session) -> None:
+def test_subjects_read_the_whole_category_list(session: Session) -> None:
     _seed_mixed(session)
     upsert_paper(
         session,
@@ -251,13 +278,30 @@ def test_kind_ai_matches_category_overlap(session: Session) -> None:
     )
     session.flush()
 
-    ai = list_papers(session, facets=PaperFacets(kind="ai"))
-    assert set(_ids(ai)) == {"arxiv:2401.00001", "arxiv:2402.00002", "arxiv:2502.00005"}
-    # Overlap vs primary-archive semantics: the cross-list counts as AI but not as tech.
-    tech = list_papers(session, facets=PaperFacets(kind="tech"))
-    assert "arxiv:2502.00005" not in _ids(tech)
-    # Groups AND independently with the AI overlap.
-    assert list_papers(session, facets=PaperFacets(kind="ai", groups=["physics"])) == []
+    # A cross-list puts one paper in two subjects, which is the point of overlapping lenses.
+    assert "arxiv:2502.00005" in _ids(list_papers(session, facets=PaperFacets(subjects=["ai"])))
+    assert "arxiv:2502.00005" in _ids(list_papers(session, facets=PaperFacets(subjects=["math"])))
+    # The axes narrow each other: AI papers that are also physics is nothing here.
+    assert list_papers(session, facets=PaperFacets(subjects=["ai"], topics=["rl"])) == []
+
+
+def test_topic_facet_matches_by_category_or_by_phrase(session: Session) -> None:
+    for pid, arxiv, title, cats, abstract in [
+        ("arxiv:2601.00001", "2601.00001", "Translating", ["cs.CL"], "An abstract."),
+        ("arxiv:2601.00002", "2601.00002", "Segmenting", ["cs.CV"], "An abstract."),
+        ("arxiv:2601.00003", "2601.00003", "Control", ["cs.LG"], "We use reinforcement learning."),
+        ("arxiv:2601.00004", "2601.00004", "Kernels", ["cs.LG"], "An abstract."),
+    ]:
+        paper = _paper(pid, arxiv, title, categories=cats)
+        upsert_paper(session, paper.model_copy(update={"abstract": abstract}))
+    session.flush()
+
+    assert _ids(list_papers(session, facets=PaperFacets(topics=["nlp"]))) == ["arxiv:2601.00001"]
+    assert _ids(list_papers(session, facets=PaperFacets(topics=["cv"]))) == ["arxiv:2601.00002"]
+    # arXiv has no RL category, so this one is found in the text and the plain cs.LG paper is not.
+    assert _ids(list_papers(session, facets=PaperFacets(topics=["rl"]))) == ["arxiv:2601.00003"]
+    both = list_papers(session, facets=PaperFacets(topics=["nlp", "rl"]))
+    assert set(_ids(both)) == {"arxiv:2601.00001", "arxiv:2601.00003"}
 
 
 def test_year_month_window(session: Session) -> None:
