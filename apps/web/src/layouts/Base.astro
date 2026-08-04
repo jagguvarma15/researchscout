@@ -54,7 +54,6 @@ const renderedAt = new Date().toISOString();
         </a>
         <Omnibox client:load />
         <nav class="site-nav" aria-label="Site">
-          <a class="btn btn-nav" href="/about">About</a>
           <ThemeToggle client:load />
           {
             user ? (
@@ -107,10 +106,14 @@ const renderedAt = new Date().toISOString();
     -webkit-backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--line);
   }
-  /* Pinned rather than left to the content, because --nav-height is where the rail starts
-     and a token that only approximates the header is a token that will drift. */
+  /* Three columns rather than a row: the two outer ones are equal, so the field lands in the
+     middle of the window instead of wherever the brand happens to end. The outer columns
+     never shrink below their contents, so the field gives way first on a narrow window.
+     Height is pinned rather than left to the content, because --nav-height is where the rail
+     starts and a token that only approximates the header is a token that will drift. */
   .site-header-inner {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr minmax(0, 44rem) 1fr;
     align-items: center;
     gap: 0.75rem;
     min-height: calc(var(--nav-height) - 1px);
@@ -118,6 +121,7 @@ const renderedAt = new Date().toISOString();
     padding-bottom: 0.5rem;
   }
   .brand {
+    justify-self: start;
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
@@ -142,8 +146,10 @@ const renderedAt = new Date().toISOString();
     width: 1.15rem;
     height: 1.15rem;
   }
+  /* Hard against the right edge: About, the theme switch and the account are where you
+     reach for them, not trailing the search field. */
   .site-nav {
-    flex-shrink: 0;
+    justify-self: end;
     display: flex;
     align-items: center;
     gap: 0.35rem;
@@ -218,10 +224,6 @@ const renderedAt = new Date().toISOString();
     }
     .site-nav .btn {
       padding: 0.35rem 0.6rem;
-    }
-    /* The omnibox takes the row it needs; About moves into the menu with the rest. */
-    .site-nav a[href='/about'] {
-      display: none;
     }
     .brand-word {
       display: none;
