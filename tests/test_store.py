@@ -356,3 +356,20 @@ def test_raw_append_returns_id(session: Session) -> None:
         external_id="2401.00001",
     )
     assert rid > 0
+
+
+def test_exclusion_removes_papers_from_the_list_and_the_count(session: Session) -> None:
+    """What dismissing does. Filtered in the query so the count describes the same page."""
+    _seed_mixed(session)
+    everything = _ids(list_papers(session))
+    assert len(everything) > 1
+
+    dropped = everything[0]
+    facets = PaperFacets(exclude=[dropped])
+    remaining = _ids(list_papers(session, facets=facets))
+    assert dropped not in remaining
+    assert len(remaining) == len(everything) - 1
+    assert count_papers(session, facets) == len(remaining)
+
+    # An empty list is not a filter: it must not exclude everything.
+    assert len(_ids(list_papers(session, facets=PaperFacets(exclude=[])))) == len(everything)
