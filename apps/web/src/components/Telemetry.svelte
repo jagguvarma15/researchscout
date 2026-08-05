@@ -5,9 +5,13 @@
   // negative and move their card to the end of its list. With a paperId prop (detail page) it
   // also measures dwell and reports it on leave when past the threshold.
   //
-  // Dismiss used to call card.remove(). It now demotes instead: the card goes to the bottom of
-  // its list and the account remembers it, so the next visit puts it there too. A paper you are
-  // not interested in today is not one you should be unable to find tomorrow.
+  // Dismiss takes the row out of the feed and the account remembers it, so a reload does not
+  // put it back. Out of the feed only: the API applies the exclusion to the recency listing and
+  // to nothing else, so the paper is still searchable and its own page still opens.
+  //
+  // Undo is why the removal is done carefully rather than with remove(): the card and the
+  // sibling it sat in front of are kept, so putting it back puts it back where it was rather
+  // than at the end. DismissNotice owns the dialog and calls undo() through the event detail.
 
   import { onMount } from 'svelte';
 
@@ -31,52 +35,79 @@
     return Number.isInteger(rank) ? rank : undefined;
   }
 
-  /** Move a card to the end of its own list, dimmed, keeping the day headings honest. */
-  function demote(card: HTMLElement) {
-    card.classList.add('dismissed');
-    card.parentElement?.append(card);
+  /**
+   * Take a card out of the feed, and hand back the function that puts it back where it was.
+   *
+   * A day heading with nothing under it is a lie about the timeline, so an emptied list takes
+   * its whole section with it - and undo restores that too.
+   */
+  function remove(card: HTMLElement): () => void {
+    const list = card.parentElement;
+    const before = card.nextElementSibling;
+    const section = list?.closest<HTMLElement>('.day');
+    const wasOnlyCard = list?.children.length === 1;
+
+    card.classList.add('going');
+    card.remove();
+    if (wasOnlyCard && section) section.hidden = true;
+
+    return () => {
+      if (list) list.insertBefore(card, before);
+      card.classList.remove('going');
+      if (section) section.hidden = false;
+    };
   }
 
   /**
-   * Tell the account, so the demotion survives a reload.
+   * Tell the account, so the dismissal survives a reload.
    *
-   * Best effort by design: this is a cache, the page has already moved the card, and a signed-out
-   * visitor gets a 401 that costs nothing. Never awaited - the reader is not waiting on it.
+   * Best effort by design: this is a cache, the page has already removed the card, and a
+   * signed-out visitor gets a 401 that costs nothing. Never awaited - the reader is not
+   * waiting on it.
    */
-  function rememberDismissal(paperId: string | undefined) {
-    if (!paperId || !enabled) return;
-    void fetch('/api/me/dismissals', {
-      method: 'POST',
+  function rememberDismissal(paperId: string, method: 'POST' | 'DELETE') {
+    if (!enabled) return;
+    const url =
+      method === 'POST'
+        ? '/api/me/dismissals'
+        : `/api/me/dismissals?paper_id=${encodeURIComponent(paperId)}`;
+    void fetch(url, {
+      method,
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ paper_id: paperId }),
+      body: method === 'POST' ? JSON.stringify({ paper_id: paperId }) : undefined,
       keepalive: true,
     }).catch(() => undefined);
   }
 
   function onDocumentClick(event: MouseEvent) {
     const card = cardOf(event.target);
-    if (!card || !card.dataset.paperId) return;
+    const paperId = card?.dataset.paperId;
+    if (!card || !paperId) return;
     const dismiss = (event.target as Element).closest('[data-dismiss]');
     if (dismiss) {
       event.preventDefault();
-      logEvent({
-        event: 'dismiss',
-        paper_id: card.dataset.paperId,
-        rank: rankOf(card),
-        surface,
-      });
+      logEvent({ event: 'dismiss', paper_id: paperId, rank: rankOf(card), surface });
       // An explicit negative is rare and valuable: send it now, before anything moves.
       flushEvents();
-      // Moving an element with append() takes it out of the document and puts it back, which
-      // blurs whatever was focused inside it. Keyboard users would land on the body and lose
-      // their place, so the button is focused again before anything reads activeElement.
-      const hadFocus = document.activeElement === dismiss;
-      demote(card);
-      if (hadFocus && dismiss instanceof HTMLElement) dismiss.focus();
-      rememberDismissal(card.dataset.paperId);
+
+      const title = card.querySelector('.title')?.textContent?.trim() ?? '';
+      const restore = remove(card);
+      rememberDismissal(paperId, 'POST');
+      // Removing the card takes the focused button out of the document with it, which would
+      // drop a keyboard user on the body having lost their place. The dialog takes focus next,
+      // and hands it back to the feed when it closes.
       document.dispatchEvent(
         new CustomEvent('rs:dismissed', {
-          detail: { title: card.querySelector('.title')?.textContent?.trim() ?? '' },
+          detail: {
+            title,
+            // The dismiss event stays in the log: it happened, and the log is a history of
+            // what people did rather than a statement of where things ended up. Where things
+            // ended up is the account's dismissal list, which the DELETE corrects.
+            undo: () => {
+              restore();
+              rememberDismissal(paperId, 'DELETE');
+            },
+          },
         }),
       );
       return;
@@ -96,6 +127,18 @@
     // Nothing to record for a signed-out visitor: reading signals belong to an account, the
     // events route requires one, and beacons that 401 are just noise in the log.
     if (!enabled) return;
+
+    // Opening a paper is what "recently opened" means, so it is recorded here rather than when
+    // the link was clicked: arriving from a search, a digest or a bookmark all count, and a
+    // click that never finished loading does not.
+    if (paperId) {
+      void fetch('/api/me/recent', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ paper_id: paperId }),
+        keepalive: true,
+      }).catch(() => undefined);
+    }
 
     const seen = new WeakSet<Element>();
     const observer = new IntersectionObserver(
