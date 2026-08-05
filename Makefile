@@ -31,6 +31,9 @@ AGENT_DIR := $(HOME)/Library/Application Support/researchscout
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
 
+# `uv sync --extra stream` rather than a plain sync: bytewax and the kafka client live in an
+# optional extra, and `make start` runs the streaming pipeline, so a local checkout wants them.
+# The deployed image builds without them and drives the same work from the scheduler instead.
 setup: ## install toolchains, dependencies, and the local Postgres cluster
 	@command -v brew >/dev/null || { echo "Homebrew is required: https://brew.sh"; exit 1; }
 	@command -v uv   >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/"; exit 1; }
@@ -40,7 +43,7 @@ setup: ## install toolchains, dependencies, and the local Postgres cluster
 	  { echo "pgvector is required: brew install pgvector"; exit 1; }
 	@command -v ollama >/dev/null || echo "note: no ollama — chat needs it (brew install ollama; ollama pull qwen2.5:3b-instruct) or a cloud key in .env"
 	@[ -x "$(KAFKA_BIN)/kafka-storage" ] || { echo "kafka is required: brew install kafka"; exit 1; }
-	uv sync
+	uv sync --extra stream
 	cd apps/web && pnpm install
 	@mkdir -p $(LOG) $(RUN)
 	@[ -d $(PGDATA) ] || { $(PG_BIN)/initdb -D $(PGDATA) -U $(DB_USER) --auth=trust --encoding=UTF8 >/dev/null && echo "initialized $(PGDATA)"; }
@@ -147,8 +150,12 @@ deploy-up: ## start the deployed backend (postgres, migrations, api, scheduler)
 	docker compose -f $(COMPOSE) up -d
 	@echo "api on http://127.0.0.1:8001 (the dev stack keeps :8000)"
 
+# The batch pipeline is on by default so a stream-less deployment still fetches papers, which
+# means turning the stream on has to turn it back off in the same breath: two processes pulling
+# from the same upstreams on one address is what arXiv's three-second floor cannot survive. A
+# shell variable beats deploy/.env in compose's interpolation, so this wins whatever that says.
 deploy-up-stream: ## the same, plus kafka and the streaming worker
-	docker compose -f $(COMPOSE) --profile stream up -d
+	RS_SCHEDULER_BATCH_PIPELINE=false docker compose -f $(COMPOSE) --profile stream up -d
 
 deploy-down: ## stop the deployed backend, keeping the data volume
 	docker compose -f $(COMPOSE) --profile stream --profile monitoring down
