@@ -31,7 +31,7 @@
     Trash2,
     X,
   } from 'lucide-svelte';
-  import { tick } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
 
   import {
     clampRect,
@@ -175,6 +175,14 @@
   function releaseAll() {
     for (const num of [...live.keys()]) release(num);
   }
+
+  // Navigation no longer reloads the document, so leaving this page destroys the island
+  // without anyone having pressed close. Everything hide() releases - the scroll lock, the
+  // live render tasks, the pdf.js document - would otherwise outlive it, and a scroll lock
+  // set on a body that survives the swap means the next page cannot be scrolled at all.
+  onDestroy(() => {
+    if (open) hide();
+  });
 
   function hide() {
     open = false;
