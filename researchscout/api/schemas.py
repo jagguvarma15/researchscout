@@ -206,7 +206,9 @@ class ViewRecord(BaseModel):
 
 
 class RecentPaperList(BaseModel):
-    items: list[str]
+    """Papers this account opened, newest first - hydrated, because a bare id shows nothing."""
+
+    items: list[PaperSummary]
 
 
 class DismissRequest(BaseModel):
@@ -235,6 +237,9 @@ class BenchmarkResultSummary(BaseModel):
     score: float
     measured_on: date | None = None
     origin: str | None = None
+    #: The benchmark's scale, carried alongside the score because it belongs to the benchmark:
+    #: without it a page has a number and no way to know whether it is a percentage.
+    scale: str = "fraction"
 
 
 class ModelSummary(BaseModel):
@@ -293,11 +298,18 @@ class BenchmarkSummary(BaseModel):
     name: str
     released_on: date | None
     result_count: int
+    #: "fraction" when the scores read as percentages, "raw" when they are a ratio, an Elo or
+    #: an amount of money. Eleven of the hub's benchmarks are the latter.
+    score_scale: str = "fraction"
 
     @classmethod
     def from_row(cls, row: Any) -> BenchmarkSummary:
         return cls(
-            id=row.id, name=row.name, released_on=row.released_on, result_count=row.result_count
+            id=row.id,
+            name=row.name,
+            released_on=row.released_on,
+            result_count=row.result_count,
+            score_scale=getattr(row, "score_scale", "fraction"),
         )
 
 
@@ -307,6 +319,43 @@ class BenchmarkList(BaseModel):
 
 class BenchmarkDetail(BenchmarkSummary):
     results: list[BenchmarkResultSummary] = Field(default_factory=list)
+
+
+class BenchmarkColumn(BaseModel):
+    """One column of the provider comparison: the benchmark id, how to head it, and its scale.
+
+    ``scale`` is "fraction" when the numbers read as percentages and "raw" when they do not -
+    a ratio, an Elo, an amount of money. Sent because only the server knows it, and a page that
+    guesses from the handful of values it can see would format the same benchmark two ways.
+    """
+
+    id: str
+    name: str
+    scale: str = "fraction"
+
+
+class ProviderSummary(BaseModel):
+    """One provider's current flagship model and what it scores.
+
+    ``scores`` is keyed by benchmark id rather than being a list, because the table draws a
+    fixed set of columns and a missing score is a blank cell rather than a shorter row.
+    """
+
+    provider: str
+    country: str | None = None
+    model_id: str
+    model_name: str
+    published_on: date | None = None
+    paper_id: str | None = None
+    open_weights: bool | None = None
+    scores: dict[str, float] = Field(default_factory=dict)
+
+
+class ProviderList(BaseModel):
+    """The provider comparison, and the benchmark columns that actually have data."""
+
+    columns: list[BenchmarkColumn] = Field(default_factory=list)
+    items: list[ProviderSummary] = Field(default_factory=list)
 
 
 class SourceInfo(BaseModel):
