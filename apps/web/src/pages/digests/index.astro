@@ -2,6 +2,7 @@
 import { Icon } from 'astro-icon/components';
 import Base from '../../layouts/Base.astro';
 import { fetchDigests, formatDate } from '../../lib/api';
+import { morphName } from '../../lib/morph';
 
 const digests = await fetchDigests();
 ---
@@ -33,7 +34,7 @@ const digests = await fetchDigests();
           <li>
             <a class="entry" href={`/digests/${digest.slug}`}>
               <span class="text">
-                <span class="title">{digest.title}</span>
+                <span class="title" transition:name={morphName('digest', digest.slug)}>{digest.title}</span>
                 <span class="meta">
                   {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
                 </span>
