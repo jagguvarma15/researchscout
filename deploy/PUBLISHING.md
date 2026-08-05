@@ -150,9 +150,10 @@ The dashboards in `config/grafana/dashboards/` are SQL against Postgres, so Graf
 a route to a database that is not exposed. Private Data Source Connect is that route: an agent
 in this compose stack opens an outbound tunnel, and no inbound rule is needed.
 
-Moving here also changes what the dashboards watch. The local Grafana points at the development
-database in `.local/pgdata`, which stopped being the live system the moment the deployment took
-over; the hosted one will point at the database actually serving the site.
+The dashboards are stored in the portable export shape: each one declares a `DS_POSTGRES`
+input rather than naming a data source, so importing prompts for one and rewires every panel.
+They used to name the uid the deleted local Grafana provisioned, which exists nowhere on Cloud -
+so every panel failed to resolve its data source and the dashboard rendered empty.
 
 1. Create a free Grafana Cloud stack.
 2. **Connections -> Private data source connections -> Configure**. Note the three values from
@@ -203,10 +204,27 @@ over; the hosted one will point at the database actually serving the site.
 
    `postgres` resolves inside the compose network, which is where the agent runs.
 
-6. Import the four dashboards from `config/grafana/dashboards/`, pointing each at that data
-   source.
+6. Import each file in `config/grafana/dashboards/` through **Dashboards -> New -> Import**.
+   Each one asks which PostgreSQL data source to use; pick the one from step 5.
 
-Check: the Pipeline dashboard renders with data.
+   | Dashboard | Answers |
+   | --- | --- |
+   | Ingest health | Is anything still arriving, and how enriched is it once it does |
+   | Corpus | How much is here |
+   | Answers | What people ask Scout, how long it takes, how often it has nothing |
+   | Engagement | What readers see, open, dismiss and dwell on |
+   | Signals and sources | Where the momentum numbers come from, and whether each upstream is still answering |
+   | Catalogue | Models, benchmarks, and the join between them |
 
-Once it does, the local Grafana is redundant - `make grafana-stop` reclaims about 170 MB, and
-`make grafana-start` brings it back for development.
+7. Import `config/grafana/alerting/corpus-stale.yaml` through **Alerting -> Alert rules ->
+   Import**, and point it at the same data source.
+
+   This is the alarm worth having. Nothing else notices that ingestion has stopped: the API
+   stays up, the pages render, and every panel keeps showing yesterday's number. That is not
+   hypothetical - this deployment ran for weeks without fetching a paper, because `deploy/.env`
+   predated the scheduling settings and the scheduler had no fetch tasks at all.
+
+Check: **Ingest health** renders, and "Hours since the newest paper" reads in single or low
+double digits. If it reads in the hundreds, the pipeline is not running - `make deploy-logs`
+now prints every scheduled task and its next run on start-up, and says so outright when nothing
+is scheduled to fetch.
