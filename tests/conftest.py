@@ -1,6 +1,42 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _fresh_settings() -> Iterator[None]:
+    """Give every test its own view of the configuration.
+
+    ``get_settings`` is cached per process, which is right in production and wrong in a test
+    suite where half the files set ``RS_*`` with ``monkeypatch.setenv``. Clearing on both sides
+    means a test neither inherits the previous one's environment nor leaves its own behind, and
+    no individual test has to remember to do it.
+    """
+    from researchscout.config import get_settings
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture
+def set_setting(monkeypatch: pytest.MonkeyPatch) -> Callable[[str, str], None]:
+    """Change an ``RS_*`` variable part-way through a test and have it be seen.
+
+    Configuration is read once per process, so setting the environment after something has
+    already read it changes nothing - which is the production contract, not an oversight. A
+    test that flips a flag between two calls is asking for the thing a restart would do, so it
+    says so through this rather than by setting the variable and hoping.
+
+    Tests that only set the environment before the first read can keep using ``monkeypatch``.
+    """
+    from researchscout.config import get_settings
+
+    def _set(name: str, value: str) -> None:
+        monkeypatch.setenv(name, value)
+        get_settings.cache_clear()
+
+    return _set
 
 
 @pytest.fixture(scope="session")
