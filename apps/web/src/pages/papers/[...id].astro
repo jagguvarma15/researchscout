@@ -15,6 +15,7 @@ import {
   type PaperSummary,
 } from '../../lib/api';
 import { renderMathHTML, stripMath } from '../../lib/math';
+import { morphName } from '../../lib/morph';
 import { categoryName } from '../../lib/taxonomy';
 
 // Rest param, not a plain [id]: canonical ids like doi:10.1145/nnn.mmm contain slashes.
@@ -86,7 +87,7 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
     ) : (
       <article>
         <div class="head">
-          <h1 set:html={renderMathHTML(paper.title)} />
+          <h1 transition:name={morphName('paper-title', paper.id)} set:html={renderMathHTML(paper.title)} />
           <SaveButton client:load paperId={paper.id} {saved} />
         </div>
         <p class="meta">
