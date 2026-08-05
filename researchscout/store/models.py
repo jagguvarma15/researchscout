@@ -401,6 +401,23 @@ class PipelineLineageRow(Base):
     detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
 
+class SchedulerRunRow(Base):
+    """One completed scheduler task run — the ledger behind /v1/system/status."""
+
+    __tablename__ = "scheduler_runs"
+    __table_args__ = (
+        Index("ix_scheduler_runs_finished", "finished_at"),
+        Index("ix_scheduler_runs_task_finished", "task", "finished_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    task: Mapped[str] = mapped_column(String(40))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ok: Mapped[bool] = mapped_column(Boolean)
+    note: Mapped[str] = mapped_column(String(400), server_default="")
+
+
 class AskMetricRow(Base):
     __tablename__ = "ask_metrics"
     __table_args__ = (Index("ix_ask_metrics_asked_at", "asked_at"),)
