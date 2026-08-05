@@ -16,7 +16,15 @@ from fastapi import HTTPException, Request
 from researchscout.api.auth import User
 from researchscout.api.service_auth import CLIENT_IP_HEADER
 
+#: key -> (epoch second the current window closes, hits so far in it). The expiry is stored
+#: rather than the window number because the number is only meaningful alongside the window
+#: length, and the two limiters here use different ones.
 _windows: dict[str, tuple[int, int]] = {}
+
+#: How often closed windows are swept out of the map. On a timer rather than on every call:
+#: sweeping walks the whole map, and a busy minute should not do that thousands of times.
+_SWEEP_INTERVAL_SECONDS = 60
+_last_sweep = 0
 
 
 def client_ip(request: Request) -> str:
@@ -46,17 +54,33 @@ def client_key(request: Request, user: User | None, *, prefix: str) -> str:
     return f"{prefix}:ip:{client_ip(request)}"
 
 
+def _sweep(now: int) -> None:
+    """Drop windows that have closed.
+
+    Without this the map gains an entry per key and loses none. Most keys are client addresses,
+    and once the API has a public hostname those arrive from anything that scans it - so the
+    map grows for the life of the process, holding counters for windows that ended weeks ago.
+    """
+    global _last_sweep
+    if now - _last_sweep < _SWEEP_INTERVAL_SECONDS:
+        return
+    _last_sweep = now
+    for key in [key for key, (expires_at, _) in _windows.items() if expires_at <= now]:
+        del _windows[key]
+
+
 def check_rate_limit(key: str, *, limit: int, window_seconds: int) -> None:
     """Raise 429 (with Retry-After) once ``key`` exceeds ``limit`` hits in the current window."""
     now = int(time.time())
-    window = now // window_seconds
-    stored_window, count = _windows.get(key, (window, 0))
-    if stored_window != window:
+    expires_at = (now // window_seconds + 1) * window_seconds
+    stored_expiry, count = _windows.get(key, (expires_at, 0))
+    if stored_expiry != expires_at:
         count = 0
     count += 1
-    _windows[key] = (window, count)
+    _windows[key] = (expires_at, count)
+    _sweep(now)
     if count > limit:
-        retry_after = window_seconds - (now % window_seconds)
+        retry_after = expires_at - now
         raise HTTPException(
             status_code=429,
             detail="rate limit exceeded",
