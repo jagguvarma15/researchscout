@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from datetime import date as date_type
 from typing import Any, Literal
 
-from sqlalchemy import ColumnElement, CursorResult, func, select, update
+from sqlalchemy import ColumnElement, CursorResult, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -456,6 +456,148 @@ def results_for_model(
     return [(name, score, scale) for name, score, scale in rows]
 
 
+def _organization_matches(aliases: Sequence[str]) -> ColumnElement[bool]:
+    """SQL-side prefilter for curated-provider organisations.
+
+    Exact whole-field match against the alias set does the everyday case; the LIKE lets
+    comma-joined collaborations through so ``ProviderConfig.for_organization`` can judge
+    them part by part in Python. Never a bare substring match: "Mistral community" must
+    stay out.
+    """
+    return or_(
+        func.lower(func.btrim(AiModelRow.organization)).in_(list(aliases)),
+        AiModelRow.organization.like("%,%"),
+    )
+
+
+@dataclass(frozen=True)
+class NotableModel:
+    """One row of the recent-models strip: a curated lab's model and its headline facts."""
+
+    id: str
+    name: str
+    provider: str
+    country: str | None
+    published_on: date_type | None
+    parameters: float | None
+    open_weights: bool | None
+
+
+def recent_provider_models(
+    session: Session,
+    config: ProviderConfig,
+    *,
+    since: date_type | None = None,
+    per_provider: int = 3,
+) -> list[NotableModel]:
+    """The curated labs' newest models, capped per lab, newest first overall.
+
+    The /models page shows this above the full catalogue: what the majors shipped lately,
+    without needing a query. ``since`` bounds how far back "lately" reaches (the router
+    passes about a year); the cap keeps one prolific lab from crowding out the rest.
+    """
+    aliases = sorted({alias for provider in config.providers for alias in provider.aliases})
+    if not aliases:
+        return []
+    stmt = (
+        select(
+            AiModelRow.id,
+            AiModelRow.name,
+            AiModelRow.organization,
+            AiModelRow.publication_date,
+            AiModelRow.parameters,
+            AiModelRow.open_weights,
+        )
+        .where(AiModelRow.publication_date.is_not(None))
+        .where(_organization_matches(aliases))
+        .order_by(AiModelRow.publication_date.desc(), AiModelRow.name)
+    )
+    if since is not None:
+        stmt = stmt.where(AiModelRow.publication_date >= since)
+    taken: dict[str, int] = {}
+    out: list[NotableModel] = []
+    for row in session.execute(stmt).all():
+        provider = config.for_organization(row.organization)
+        if provider is None or taken.get(provider.name, 0) >= per_provider:
+            continue
+        taken[provider.name] = taken.get(provider.name, 0) + 1
+        out.append(
+            NotableModel(
+                id=row.id,
+                name=row.name,
+                provider=provider.name,
+                country=provider.country,
+                published_on=row.publication_date,
+                parameters=row.parameters,
+                open_weights=row.open_weights,
+            )
+        )
+    return out
+
+
+@dataclass(frozen=True)
+class HeadlineBenchmark:
+    """One curated benchmark, the best curated-lab score on it, and who holds that score."""
+
+    id: str
+    name: str
+    scale: str
+    result_count: int
+    best_score: float
+    model_id: str
+    model_name: str
+    provider: str
+
+
+def headline_benchmarks(session: Session, config: ProviderConfig) -> list[HeadlineBenchmark]:
+    """The configured benchmarks, each with the best score among the curated labs.
+
+    The /benchmarks page shows this above everything else: the industry-standard tests and
+    where their frontier currently sits. Only models attributable to a curated provider
+    compete — the question is where the majors stand, not the global maximum — and a
+    benchmark none of them scored is skipped rather than drawn empty, matching
+    ``provider_leaders``' posture.
+    """
+    wanted = list(config.benchmarks)
+    aliases = sorted({alias for provider in config.providers for alias in provider.aliases})
+    if not wanted or not aliases:
+        return []
+    rows = session.execute(
+        select(
+            BenchmarkResultRow.benchmark_id,
+            BenchmarkResultRow.score,
+            AiModelRow.id,
+            AiModelRow.name,
+            AiModelRow.organization,
+            BenchmarkRow.name.label("benchmark_name"),
+            BenchmarkRow.score_scale,
+            BenchmarkRow.result_count,
+        )
+        .join(AiModelRow, AiModelRow.id == BenchmarkResultRow.model_id)
+        .join(BenchmarkRow, BenchmarkRow.id == BenchmarkResultRow.benchmark_id)
+        .where(BenchmarkResultRow.benchmark_id.in_(wanted))
+        .where(_organization_matches(aliases))
+    ).all()
+    best: dict[str, HeadlineBenchmark] = {}
+    for row in rows:
+        provider = config.for_organization(row.organization)
+        if provider is None:
+            continue
+        current = best.get(row.benchmark_id)
+        if current is None or row.score > current.best_score:
+            best[row.benchmark_id] = HeadlineBenchmark(
+                id=row.benchmark_id,
+                name=row.benchmark_name,
+                scale=row.score_scale,
+                result_count=row.result_count,
+                best_score=row.score,
+                model_id=row.id,
+                model_name=row.name,
+                provider=provider.name,
+            )
+    return [best[benchmark_id] for benchmark_id in wanted if benchmark_id in best]
+
+
 @dataclass(frozen=True)
 class ProviderEntry:
     """One provider's current flagship, and what it scores on the headline benchmarks."""
@@ -500,8 +642,6 @@ def provider_leaders(
     if not aliases or not wanted:
         return [], []
 
-    # Exact match on the whole trimmed field, never a substring: an organisation column holds
-    # "Mistral AI" and "Mistral community", and only one of those is the lab.
     candidates = session.execute(
         select(
             AiModelRow.id,
@@ -511,7 +651,7 @@ def provider_leaders(
             AiModelRow.paper_id,
             AiModelRow.open_weights,
         )
-        .where(func.lower(func.btrim(AiModelRow.organization)).in_(aliases))
+        .where(_organization_matches(aliases))
         .order_by(AiModelRow.publication_date.desc().nullslast(), AiModelRow.name)
     ).all()
     if not candidates:
