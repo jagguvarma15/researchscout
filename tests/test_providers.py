@@ -81,3 +81,16 @@ def test_the_shipped_configuration_parses_and_names_real_providers() -> None:
     assert config.for_organization("meta-llama") is not None
     assert config.for_organization("Qwen") is not None
     assert config.for_organization("Some Unlisted Lab") is None
+
+
+def test_comma_joined_credits_attribute_part_by_part() -> None:
+    """Epoch writes collaborations as one comma-joined field; each part gets a whole match."""
+    config = parse_providers({"providers": [{"name": "Microsoft"}, {"name": "NVIDIA"}]})
+
+    matched = config.for_organization("NVIDIA,University of Somewhere")
+    assert matched is not None
+    assert matched.name == "NVIDIA"
+    # No listed part, no provider - and matching within a part stays whole-field, so a
+    # community fork does not ride its upstream's name in.
+    assert config.for_organization("Stability AI,University of Somewhere") is None
+    assert config.for_organization("Microsoft community,Someone") is None
