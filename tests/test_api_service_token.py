@@ -28,6 +28,9 @@ def _client(monkeypatch: pytest.MonkeyPatch, *, token: str | None) -> TestClient
     monkeypatch.setenv("RS_SERVICE_TOKEN", token or "")
     monkeypatch.setattr(papers_router, "list_papers", lambda *a, **k: [])
     monkeypatch.setattr(papers_router, "count_papers", lambda *a, **k: 0)
+    # The feed reads the caller's dismissals, and the session here is a stub. What is under
+    # test is the door, not the feed.
+    monkeypatch.setattr(papers_router, "dismissed_papers", lambda *a, **k: [])
     app = create_app()
     app.dependency_overrides[get_session] = lambda: None
     return TestClient(app)
