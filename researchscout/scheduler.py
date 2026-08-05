@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from researchscout.config import Settings
-from researchscout.schedule import describe, parse_times, seconds_until
+from researchscout.schedule import describe, next_run, parse_times, seconds_until
 
 if TYPE_CHECKING:
     from researchscout.embed.base import Embedder
@@ -93,7 +93,23 @@ class Scheduler:
                 # read as "the 14:00 run has not happened", which on a restart loop would mean
                 # a fetch every time the process came up.
                 self._reschedule(task)
-                logger.info("task %s runs at %s", task.name, describe(task.at, task.zone))
+        # One line naming every task and when it next runs. A scheduler that says nothing on
+        # start-up looks identical whether it has eight tasks or four, and a deployment that
+        # had quietly stopped fetching papers is exactly the case worth being able to read off
+        # the first page of the log.
+        logger.info(
+            "scheduler: %d task(s) - %s",
+            len(tasks),
+            "; ".join(f"{task.name} {self._schedule_of(task)}" for task in tasks),
+        )
+
+    def _schedule_of(self, task: Task) -> str:
+        """How this task's next run is decided, for the start-up summary."""
+        if not task.at:
+            return f"every {int(task.interval_sec)}s, first run now"
+        upcoming = next_run(task.at, self._wall(), task.zone)
+        when = upcoming.strftime("%Y-%m-%d %H:%M") if upcoming else "never"
+        return f"at {describe(task.at, task.zone)}, next {when}"
 
     def _reschedule(self, task: Task) -> None:
         if task.at:
@@ -353,6 +369,15 @@ def build_tasks(settings: Settings) -> list[Task]:
                 pipeline_at,
             ),
         ]
+    else:
+        # The one configuration in which this process schedules nothing that fetches a paper.
+        # That is correct when the stream is running, and silently wrong when it is not - a
+        # deployment can sit for weeks looking healthy while its corpus stands still, which is
+        # what happened here. Saying so on every start-up costs one line.
+        logger.warning(
+            "no fetch tasks scheduled: RS_SCHEDULER_BATCH_PIPELINE is off, so new papers "
+            "arrive only while `scout stream serve` is running elsewhere"
+        )
     tasks += [
         task(
             "catalog",
