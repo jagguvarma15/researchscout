@@ -15,14 +15,20 @@ WORKDIR /app
 # part-way through and fails the whole build.
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_HTTP_TIMEOUT=180
 
+# One extra beyond the API, named at build time. Empty is the deployment: it drives ingestion
+# from the scheduler in batches, so it has no use for a broker client. Compose's stream service
+# passes "stream" and tags the result separately, because an image that can run
+# `scout stream serve` is a different image.
+ARG EXTRAS=
+
 # Dependencies first, so a code change does not re-resolve or re-download them.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-install-project --no-dev --extra api
+RUN uv sync --frozen --no-install-project --no-dev --extra api ${EXTRAS:+--extra "$EXTRAS"}
 
 # Then the project, installed rather than linked, so the runtime stage needs nothing but the
 # virtualenv.
 COPY researchscout ./researchscout
-RUN uv sync --frozen --no-dev --extra api --no-editable
+RUN uv sync --frozen --no-dev --extra api ${EXTRAS:+--extra "$EXTRAS"} --no-editable
 
 FROM python:3.12-slim-bookworm
 WORKDIR /app
