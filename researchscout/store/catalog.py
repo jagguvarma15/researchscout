@@ -13,15 +13,18 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from datetime import date as date_type
+from typing import Any, Literal
 
-from sqlalchemy import CursorResult, func, select, update
+from sqlalchemy import ColumnElement, CursorResult, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
+from researchscout.providers import ProviderConfig
 from researchscout.store.models import (
     AiModelRow,
     BenchmarkResultRow,
@@ -89,43 +92,105 @@ _MODEL_FIELDS = (
 )
 
 
-def upsert_models(session: Session, models: Sequence[ModelUpsert]) -> int:
-    """Insert or merge models by slug; returns how many were written.
+def upsert_models(
+    session: Session,
+    models: Sequence[ModelUpsert],
+    *,
+    authoritative: frozenset[str] = frozenset(),
+) -> int:
+    """Insert or merge models by slug; returns how many rows were written.
 
-    A None field never overwrites a stored value. That is what lets a model keep the facts one
-    upstream knows when the other refreshes without them -- Hugging Face has download counts and
-    no training compute, Epoch AI the reverse, and the row ends up with both whichever order
-    they arrive in.
+    ``authoritative`` names the fields this batch's source owns. Those replace what is stored;
+    every other field only fills a gap it finds empty.
+
+    That distinction is the whole point. "A None never overwrites" sounds like enough, and is
+    not: both upstreams supply an organisation, a task and a link, so the merge was decided by
+    whichever refresh ran second. Hugging Face runs second, so it was quietly replacing Epoch
+    AI's paper link with a repository URL, its "Alibaba" with "Qwen", and -- worst -- its
+    weight flag with "open" for any closed model whose name happened to slug the same as some
+    repository. Ordering no longer decides anything.
+
+    Written as one statement over many parameter sets rather than one statement per model: a
+    refresh carries about a thousand models and three thousand scores, and that was three
+    thousand round trips.
     """
     now = datetime.now(UTC)
-    written = 0
+    # Last wins within a batch, as before - and deduplicating here is also what keeps the
+    # executemany below from touching one row twice in a single statement.
+    by_key: dict[str, ModelUpsert] = {}
     for model in models:
-        key = slug(model.name)
-        if not key:
-            continue
-        values = {
+        if key := slug(model.name):
+            by_key[key] = model
+    if not by_key:
+        return 0
+
+    # One read for the whole batch. ``sources`` is a set, so merging it needs to know what is
+    # already there, and doing that here keeps the statement legible. Two refreshes racing
+    # could drop a name; the refresh is a single daily task, so that is not worth a lock.
+    stored: dict[str, str] = {
+        model_id: sources
+        for model_id, sources in session.execute(
+            select(AiModelRow.id, AiModelRow.sources).where(AiModelRow.id.in_(list(by_key)))
+        ).all()
+    }
+    rows = [
+        {
             "id": key,
             "name": model.name,
-            "sources": model.source,
+            "sources": _merged_sources(stored.get(key), model.source),
             "refreshed_at": now,
             **{field: getattr(model, field) for field in _MODEL_FIELDS},
         }
-        stmt = insert(AiModelRow).values(**values)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["id"],
-            set_={
-                "name": stmt.excluded.name,
-                "sources": stmt.excluded.sources,
-                "refreshed_at": stmt.excluded.refreshed_at,
-                **{
-                    field: func.coalesce(stmt.excluded[field], getattr(AiModelRow, field))
-                    for field in _MODEL_FIELDS
-                },
+        for key, model in by_key.items()
+    ]
+
+    stmt = insert(AiModelRow)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["id"],
+        set_={
+            "name": stmt.excluded.name,
+            "sources": stmt.excluded.sources,
+            "refreshed_at": stmt.excluded.refreshed_at,
+            **{
+                field: (
+                    func.coalesce(stmt.excluded[field], getattr(AiModelRow, field))
+                    if field in authoritative
+                    else func.coalesce(getattr(AiModelRow, field), stmt.excluded[field])
+                )
+                for field in _MODEL_FIELDS
             },
-        )
-        session.execute(stmt)
-        written += 1
-    return written
+        },
+    )
+    session.execute(stmt, rows)
+    return len(rows)
+
+
+def score_scale(scores: Sequence[float]) -> str:
+    """Whether a benchmark's scores read as percentages or as bare numbers.
+
+    Decided over the whole set at write time rather than per page: a leaderboard capped at
+    fifty rows and a provider comparison showing five would otherwise reach different answers
+    about the same benchmark and format it two ways on two pages.
+
+    A benchmark with no scores at all is called a fraction, which is the common case and what
+    the column defaults to.
+    """
+    if not scores:
+        return "fraction"
+    return "fraction" if all(0.0 <= score <= 1.0 for score in scores) else "raw"
+
+
+def _merged_sources(stored: str | None, source: str) -> str:
+    """Add ``source`` to the comma-joined set already recorded, sorted and without duplicates.
+
+    The column was being replaced rather than added to, so a model both upstreams describe
+    reported only whichever one wrote last -- which is exactly the case the field exists to
+    record.
+    """
+    names = {part for part in (stored or "").split(",") if part}
+    if source:
+        names.add(source)
+    return ",".join(sorted(names))
 
 
 def link_models_to_papers(session: Session, pairs: dict[str, str]) -> int:
@@ -177,11 +242,28 @@ def replace_benchmark_results(
     key = slug(benchmark)
     if not key:
         return 0
+    scale = score_scale([score for _, score, _, _ in results])
+    # Deduplicated on the primary key before anything is written: an upstream listing the same
+    # model twice on one benchmark would otherwise make a single statement touch one row twice,
+    # which Postgres refuses outright.
+    rows: dict[str, dict[str, object]] = {}
+    for model_name, score, measured_on, origin in results:
+        model_key = slug(model_name)
+        rows[model_name] = {
+            "benchmark_id": key,
+            "model_name": model_name,
+            "model_id": model_key if model_key in known_models else None,
+            "score": score,
+            "measured_on": measured_on,
+            "origin": origin,
+        }
+
     stmt = insert(BenchmarkRow).values(
         id=key,
         name=benchmark,
         released_on=released_on,
-        result_count=len(results),
+        result_count=len(rows),
+        score_scale=scale,
         refreshed_at=now,
     )
     session.execute(
@@ -191,82 +273,122 @@ def replace_benchmark_results(
                 "name": stmt.excluded.name,
                 "released_on": func.coalesce(stmt.excluded.released_on, BenchmarkRow.released_on),
                 "result_count": stmt.excluded.result_count,
+                "score_scale": stmt.excluded.score_scale,
                 "refreshed_at": stmt.excluded.refreshed_at,
             },
         )
     )
-    written = 0
-    for model_name, score, measured_on, origin in results:
-        model_key = slug(model_name)
-        row = insert(BenchmarkResultRow).values(
-            benchmark_id=key,
-            model_name=model_name,
-            model_id=model_key if model_key in known_models else None,
-            score=score,
-            measured_on=measured_on,
-            origin=origin,
-        )
-        session.execute(
-            row.on_conflict_do_update(
-                index_elements=["benchmark_id", "model_name"],
-                set_={
-                    "model_id": row.excluded.model_id,
-                    "score": row.excluded.score,
-                    "measured_on": row.excluded.measured_on,
-                    "origin": row.excluded.origin,
-                },
-            )
-        )
-        written += 1
-    return written
+    if not rows:
+        return 0
+    row_stmt = insert(BenchmarkResultRow)
+    row_stmt = row_stmt.on_conflict_do_update(
+        index_elements=["benchmark_id", "model_name"],
+        set_={
+            "model_id": row_stmt.excluded.model_id,
+            "score": row_stmt.excluded.score,
+            "measured_on": row_stmt.excluded.measured_on,
+            "origin": row_stmt.excluded.origin,
+        },
+    )
+    # One statement, every score: a refresh carries a few thousand of these.
+    session.execute(row_stmt, list(rows.values()))
+    return len(rows)
+
+
+@dataclass(frozen=True)
+class ModelFilters:
+    """What narrows the model list. One object so the list and the count cannot disagree."""
+
+    organization: str | None = None
+    domain: str | None = None
+    open_weights: bool | None = None
+    with_paper: bool = False
+    #: Free-text match on the model name, for the search box above the table.
+    query: str | None = None
+
+
+def _model_where(filters: ModelFilters) -> list[ColumnElement[bool]]:
+    """The filter chain both reads share.
+
+    They had a copy each, identical line for line, which is two places for the next filter to
+    land in only one of - and a count that disagrees with its own list is a pager that sends
+    people to empty pages.
+    """
+    clauses: list[ColumnElement[bool]] = []
+    if filters.organization:
+        clauses.append(AiModelRow.organization.ilike(f"%{filters.organization}%"))
+    if filters.domain:
+        clauses.append(AiModelRow.domains.ilike(f"%{filters.domain}%"))
+    if filters.open_weights is not None:
+        clauses.append(AiModelRow.open_weights.is_(filters.open_weights))
+    if filters.with_paper:
+        clauses.append(AiModelRow.paper_id.is_not(None))
+    if filters.query:
+        clauses.append(AiModelRow.name.ilike(f"%{filters.query}%"))
+    return clauses
+
+
+#: What each sort key orders by.
+_MODEL_COLUMNS: dict[str, Any] = {
+    "released": AiModelRow.publication_date,
+    "parameters": AiModelRow.parameters,
+    "compute": AiModelRow.training_compute_flop,
+    "downloads": AiModelRow.hf_downloads,
+    "organization": AiModelRow.organization,
+    "name": AiModelRow.name,
+}
+
+#: Which keys read high-to-low when you first click them. A date and a size are interesting
+#: from the top; a name is interesting from A.
+_DESCENDING_BY_DEFAULT = frozenset({"released", "parameters", "compute", "downloads"})
+
+ModelSort = Literal["released", "parameters", "compute", "downloads", "organization", "name"]
+MODEL_SORTS: tuple[str, ...] = tuple(_MODEL_COLUMNS)
+
+
+def _model_order(sort: str, descending: bool | None) -> tuple[Any, ...]:
+    """The ORDER BY for one sort key and direction.
+
+    Nulls last in both directions, which is not what SQL does by default and is what a reader
+    means: a missing parameter count is not a small one, and a column that opens with a screen
+    of blanks is useless whichever way it is pointing.
+
+    Everything falls back to the name, because without a tiebreak two models with no date can
+    swap places between page one and page two and one of them is never seen at all.
+    """
+    column = _MODEL_COLUMNS.get(sort) or _MODEL_COLUMNS["released"]
+    if descending is None:
+        descending = sort in _DESCENDING_BY_DEFAULT
+    ordered = column.desc().nullslast() if descending else column.asc().nullslast()
+    return (ordered,) if column is AiModelRow.name else (ordered, AiModelRow.name)
 
 
 def list_models(
     session: Session,
     *,
-    organization: str | None = None,
-    domain: str | None = None,
-    open_weights: bool | None = None,
-    with_paper: bool = False,
+    filters: ModelFilters | None = None,
+    sort: ModelSort = "released",
+    descending: bool | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> list[AiModelRow]:
-    """Models newest first, filtered the way the page filters them."""
-    stmt = select(AiModelRow)
-    if organization:
-        stmt = stmt.where(AiModelRow.organization.ilike(f"%{organization}%"))
-    if domain:
-        stmt = stmt.where(AiModelRow.domains.ilike(f"%{domain}%"))
-    if open_weights is not None:
-        stmt = stmt.where(AiModelRow.open_weights.is_(open_weights))
-    if with_paper:
-        stmt = stmt.where(AiModelRow.paper_id.is_not(None))
-    stmt = (
-        stmt.order_by(AiModelRow.publication_date.desc().nullslast(), AiModelRow.name)
-        .limit(limit)
-        .offset(offset)
-    )
-    return list(session.execute(stmt).scalars())
+    """Models in ``sort`` order, filtered the way the page filters them.
+
+    ``descending`` of None takes the direction the column is usually wanted in, so a caller
+    that only cares which column need not say. Passing it is what lets a table heading toggle:
+    without a direction a second click on a sorted column produces the URL it is already on,
+    which reads as the sort being broken rather than as already sorted.
+    """
+    stmt = select(AiModelRow).where(*_model_where(filters or ModelFilters()))
+    order = _model_order(sort, descending)
+    return list(session.execute(stmt.order_by(*order).limit(limit).offset(offset)).scalars())
 
 
-def count_models(
-    session: Session,
-    *,
-    organization: str | None = None,
-    domain: str | None = None,
-    open_weights: bool | None = None,
-    with_paper: bool = False,
-) -> int:
+def count_models(session: Session, *, filters: ModelFilters | None = None) -> int:
     """How many models match, ignoring pagination."""
-    stmt = select(func.count()).select_from(AiModelRow)
-    if organization:
-        stmt = stmt.where(AiModelRow.organization.ilike(f"%{organization}%"))
-    if domain:
-        stmt = stmt.where(AiModelRow.domains.ilike(f"%{domain}%"))
-    if open_weights is not None:
-        stmt = stmt.where(AiModelRow.open_weights.is_(open_weights))
-    if with_paper:
-        stmt = stmt.where(AiModelRow.paper_id.is_not(None))
+    stmt = (
+        select(func.count()).select_from(AiModelRow).where(*_model_where(filters or ModelFilters()))
+    )
     return session.execute(stmt).scalar_one()
 
 
@@ -318,16 +440,143 @@ def leaderboard(
 
 def results_for_model(
     session: Session, model_id: str, *, limit: int = 50
-) -> list[tuple[str, float]]:
-    """(benchmark name, score) for one model, so a model row can show what it scores."""
+) -> list[tuple[str, float, str]]:
+    """(benchmark name, score, scale) for one model, so its page can show what it scores.
+
+    The scale comes along because it belongs to the benchmark, not the score: without it the
+    page has one number and no way to know whether it is a percentage.
+    """
     rows = session.execute(
-        select(BenchmarkRow.name, BenchmarkResultRow.score)
+        select(BenchmarkRow.name, BenchmarkResultRow.score, BenchmarkRow.score_scale)
         .join(BenchmarkResultRow, BenchmarkResultRow.benchmark_id == BenchmarkRow.id)
         .where(BenchmarkResultRow.model_id == model_id)
         .order_by(BenchmarkRow.name)
         .limit(limit)
     ).all()
-    return [(name, score) for name, score in rows]
+    return [(name, score, scale) for name, score, scale in rows]
+
+
+@dataclass(frozen=True)
+class ProviderEntry:
+    """One provider's current flagship, and what it scores on the headline benchmarks."""
+
+    provider: str
+    country: str | None
+    model_id: str
+    model_name: str
+    published_on: date_type | None
+    paper_id: str | None
+    open_weights: bool | None
+    #: benchmark id -> score, holding only the benchmarks this model has been measured on.
+    scores: dict[str, float]
+
+
+@dataclass(frozen=True)
+class ScoreColumn:
+    """One column of the provider comparison: a benchmark, and how to read its numbers."""
+
+    id: str
+    name: str
+    scale: str
+
+
+def provider_leaders(
+    session: Session, config: ProviderConfig
+) -> tuple[list[ProviderEntry], list[ScoreColumn]]:
+    """Each listed provider's best-covered model, plus the benchmark columns worth drawing.
+
+    Best-covered rather than newest: a lab's most recent release has usually been run against
+    one or two of these so far, and a row with a single figure in eight columns cannot be
+    compared against anything, which is the entire point of the table. Ties go to the newer
+    model.
+
+    The second return value is the (id, display name) of the configured benchmarks that at
+    least one of these models has a score on, in configured order. Columns nothing scored are
+    dropped rather than drawn empty - which benchmarks the upstream publishes is not ours to
+    decide, and a table should show what exists.
+    """
+    aliases = sorted({alias for provider in config.providers for alias in provider.aliases})
+    wanted = list(config.benchmarks)
+    if not aliases or not wanted:
+        return [], []
+
+    # Exact match on the whole trimmed field, never a substring: an organisation column holds
+    # "Mistral AI" and "Mistral community", and only one of those is the lab.
+    candidates = session.execute(
+        select(
+            AiModelRow.id,
+            AiModelRow.name,
+            AiModelRow.organization,
+            AiModelRow.publication_date,
+            AiModelRow.paper_id,
+            AiModelRow.open_weights,
+        )
+        .where(func.lower(func.btrim(AiModelRow.organization)).in_(aliases))
+        .order_by(AiModelRow.publication_date.desc().nullslast(), AiModelRow.name)
+    ).all()
+    if not candidates:
+        return [], []
+
+    scores: dict[str, dict[str, float]] = defaultdict(dict)
+    for model_id, benchmark_id, score in session.execute(
+        select(
+            BenchmarkResultRow.model_id,
+            BenchmarkResultRow.benchmark_id,
+            BenchmarkResultRow.score,
+        ).where(
+            BenchmarkResultRow.model_id.in_([row.id for row in candidates]),
+            BenchmarkResultRow.benchmark_id.in_(wanted),
+        )
+    ).all():
+        scores[model_id][benchmark_id] = score
+
+    # Group first, then choose: the model with the most of these benchmarks measured, and among
+    # equals the newest. Taking simply the newest scored model gave rows with one figure in
+    # eight columns, because a brand-new release has usually been run against one thing so far -
+    # and a row that cannot be compared is not worth a row. Candidates arrive newest first and
+    # max() keeps the first of equals, so recency remains the tiebreak for free.
+    by_provider: dict[str, list[Any]] = defaultdict(list)
+    for row in candidates:
+        provider = config.for_organization(row.organization)
+        if provider is not None and row.id in scores:
+            by_provider[provider.name].append(row)
+
+    best: dict[str, ProviderEntry] = {}
+    for provider in config.providers:
+        rows = by_provider.get(provider.name)
+        if not rows:
+            continue
+        row = max(rows, key=lambda candidate: len(scores[candidate.id]))
+        best[provider.name] = ProviderEntry(
+            provider=provider.name,
+            country=provider.country,
+            model_id=row.id,
+            model_name=row.name,
+            published_on=row.publication_date,
+            paper_id=row.paper_id,
+            open_weights=row.open_weights,
+            scores=dict(scores[row.id]),
+        )
+
+    entries = [best[provider.name] for provider in config.providers if provider.name in best]
+    described: dict[str, tuple[str, str]] = {
+        benchmark_id: (name, scale)
+        for benchmark_id, name, scale in session.execute(
+            select(BenchmarkRow.id, BenchmarkRow.name, BenchmarkRow.score_scale).where(
+                BenchmarkRow.id.in_(wanted)
+            )
+        ).all()
+    }
+    columns = [
+        ScoreColumn(
+            id=benchmark_id,
+            name=described.get(benchmark_id, (benchmark_id, "fraction"))[0],
+            scale=described.get(benchmark_id, (benchmark_id, "fraction"))[1],
+        )
+        for benchmark_id in wanted
+        if any(benchmark_id in entry.scores for entry in entries)
+    ]
+    return entries, columns
 
 
 def catalog_counts(session: Session) -> dict[str, int]:
