@@ -45,6 +45,10 @@ x-backend-env: &backend-env
   # arXiv submits nothing over a weekend, so two days reaches back only to Saturday on a
   # Monday. Four covers that and a weekend outage.
   RS_SCHEDULER_INGEST_WINDOW_DAYS: ${RS_SCHEDULER_INGEST_WINDOW_DAYS:-4}
+  # Walk out of the window after two pages of nothing-new instead of re-fetching all of it.
+  # arXiv pages newest-first, so this is sound - and it is what keeps four runs a day inside
+  # the request budget arXiv tolerates from one address.
+  RS_SCHEDULER_INGEST_EARLY_STOP_PAGES: ${RS_SCHEDULER_INGEST_EARLY_STOP_PAGES:-2}
   # Wall-clock schedule: the fetch-and-enrich tasks run at each of these times and the
   # once-a-day products at the daily one. Set either to an empty string to go back to
   # intervals. The zone is named rather than an offset so the runs stay put across daylight
