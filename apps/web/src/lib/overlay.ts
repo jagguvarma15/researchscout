@@ -23,6 +23,20 @@ export function trapFocus(container: HTMLElement, event: KeyboardEvent): void {
   }
 }
 
+/**
+ * Whether a click landed outside `root`, judged by the event's composed path.
+ *
+ * The path is snapshotted at dispatch, so a row that a framework re-rendered away between
+ * the row's own handler and a document-level one still counts as inside. The tempting
+ * alternative — `root.contains(event.target)` at handler time — reads a detached node in
+ * that window and reports "outside" for the very element that was clicked, which is how the
+ * omnibox used to close itself in answer to its own Ask row.
+ */
+export function clickedOutside(event: Event, root: Element | undefined): boolean {
+  if (!root) return false;
+  return !event.composedPath().includes(root);
+}
+
 // Returns the unlock function; call it on close so nesting restores the previous value.
 export function lockBodyScroll(): () => void {
   const previous = document.body.style.overflow;
