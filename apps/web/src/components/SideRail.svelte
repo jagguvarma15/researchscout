@@ -19,7 +19,7 @@
     TrendingUp,
     X,
   } from 'lucide-svelte';
-  import type { Component } from 'svelte';
+  import { onDestroy, type Component } from 'svelte';
 
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
 
@@ -57,6 +57,10 @@
   let panel: HTMLElement | undefined = $state();
   let previousFocus: Element | null = null;
   let unlockScroll: (() => void) | null = null;
+
+  // A soft navigation can destroy this island while the menu is open; the scroll lock must
+  // not outlive it on the next page's body.
+  onDestroy(() => unlockScroll?.());
 
   // Prefix, not equality, so /digests/2026-08-03 still marks Digests as the current section.
   function isCurrent(href: string): boolean {
