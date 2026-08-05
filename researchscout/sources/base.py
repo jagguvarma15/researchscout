@@ -26,6 +26,22 @@ SourceKind = Literal["content", "signal", "catalog"]
 HealthStatus = Literal["ok", "rate_limited", "error"]
 
 
+def retry_wait(retry_after: str | None, attempt: int, *, cap: float) -> float:
+    """Seconds to wait before retrying a rate-limited request.
+
+    Honors an integer ``Retry-After`` up to ``cap`` — upstreams sometimes name an hour, and no
+    scheduled run is worth holding open that long — and falls back to a short doubling wait
+    when the header is absent or unparseable (it is optional, and may be an HTTP-date this
+    deliberately does not parse).
+    """
+    if retry_after:
+        try:
+            return min(float(int(retry_after.strip())), cap)
+        except ValueError:
+            pass
+    return min(15.0 * (attempt + 1), cap)
+
+
 class RawItem(BaseModel):
     """A single item as fetched from a source, before normalization."""
 
