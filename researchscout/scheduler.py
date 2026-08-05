@@ -170,17 +170,25 @@ def _ingest(settings: Settings) -> None:
     for source in enabled_sources("content"):
         try:
             with session_scope() as session:
-                summary = run_ingest(session, source, since, resume=True)
+                summary = run_ingest(
+                    session,
+                    source,
+                    since,
+                    resume=True,
+                    stop_after_known_pages=settings.scheduler_ingest_early_stop_pages or None,
+                )
         except httpx.HTTPError as exc:
             # One upstream being rate limited or down must not stop the others.
             logger.warning("ingest %s failed: %s", source.name, exc)
             continue
+        suffix = f", stopped early: {summary.stopped_early}" if summary.stopped_early else ""
         logger.info(
-            "ingest %s: fetched=%d new=%d signals=%d",
+            "ingest %s: fetched=%d new=%d signals=%d%s",
             summary.source,
             summary.fetched,
             summary.new_papers,
             summary.signals,
+            suffix,
         )
 
 
@@ -202,7 +210,8 @@ def _signals(settings: Settings) -> None:
         except httpx.HTTPError as exc:
             logger.warning("signals %s failed: %s", source.name, exc)
             continue
-        logger.info("signals %s: %d observation(s)", summary.source, summary.signals)
+        suffix = f", stopped early: {summary.stopped_early}" if summary.stopped_early else ""
+        logger.info("signals %s: %d observation(s)%s", summary.source, summary.signals, suffix)
 
 
 def _index(settings: Settings) -> None:
@@ -323,6 +332,40 @@ def _catalog(settings: Settings) -> None:
     )
 
 
+def _record_safely(name: str, started: datetime, *, ok: bool, note: str = "") -> None:
+    """Write one ledger row, and never let the write take the task's outcome down with it."""
+    from researchscout.store.db import session_scope
+    from researchscout.store.runs import record_run
+
+    try:
+        with session_scope() as session:
+            record_run(
+                session, name, started_at=started, finished_at=datetime.now(UTC), ok=ok, note=note
+            )
+    except Exception:  # noqa: BLE001 - a task that ran must not fail over its bookkeeping
+        logger.warning("could not record the %s run", name, exc_info=True)
+
+
+def _recorded(name: str, run: Callable[[], None]) -> Callable[[], None]:
+    """Wrap a task so every run lands in the ledger, success or failure.
+
+    Failures re-raise so the loop's own logging stays the one place a traceback appears; the
+    ledger keeps the fact, the timing, and the first line of the reason — which is what
+    /v1/system/status and ``make deploy-verify`` answer "did the 05:00 slot run" from.
+    """
+
+    def wrapped() -> None:
+        started = datetime.now(UTC)
+        try:
+            run()
+        except Exception as exc:
+            _record_safely(name, started, ok=False, note=str(exc) or exc.__class__.__name__)
+            raise
+        _record_safely(name, started, ok=True)
+
+    return wrapped
+
+
 def build_tasks(settings: Settings) -> list[Task]:
     """Construct the scheduler's tasks from ``settings``.
 
@@ -337,7 +380,7 @@ def build_tasks(settings: Settings) -> list[Task]:
     def task(
         name: str, interval: float, run: Callable[[], None], at: tuple[clock_time, ...]
     ) -> Task:
-        return Task(name, interval, run, at=at, zone=zone)
+        return Task(name, interval, _recorded(name, run), at=at, zone=zone)
 
     tasks: list[Task] = []
     if settings.scheduler_batch_pipeline:
