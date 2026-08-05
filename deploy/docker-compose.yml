@@ -23,45 +23,58 @@
 
 name: researchscout
 
+# The environment is anchored separately from the service so a service needing one extra
+# variable can merge this map instead of replacing it. A sibling `environment:` key overrides
+# the anchor's outright rather than deep-merging, which is how the stream worker silently ran
+# without every setting the rest of the stack has.
+x-backend-env: &backend-env
+  # Inside the network the database is a service name, not localhost - this must not be
+  # inherited from the host .env.
+  RS_DATABASE_URL: postgresql+psycopg://researchscout:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/researchscout
+  # Same reason: the host's Ollama, seen from inside a container.
+  RS_LLM_BASE_URL: ${RS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
+  RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
+  RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
+  RS_SERVICE_TOKEN: ${RS_SERVICE_TOKEN:-}
+  # These four default to what a deployment actually wants rather than to what a local
+  # checkout wants, because getting them from deploy/.env is exactly what failed: a file
+  # written before these settings existed kept the compose fallbacks, the batch pipeline
+  # stayed off, and the stack ran for weeks without fetching a paper. deploy/.env now only
+  # has to override, and an old one is right by default.
+  RS_SCHEDULER_BATCH_PIPELINE: ${RS_SCHEDULER_BATCH_PIPELINE:-true}
+  # arXiv submits nothing over a weekend, so two days reaches back only to Saturday on a
+  # Monday. Four covers that and a weekend outage.
+  RS_SCHEDULER_INGEST_WINDOW_DAYS: ${RS_SCHEDULER_INGEST_WINDOW_DAYS:-4}
+  # Wall-clock schedule: the fetch-and-enrich tasks run at each of these times and the
+  # once-a-day products at the daily one. Set either to an empty string to go back to
+  # intervals. The zone is named rather than an offset so the runs stay put across daylight
+  # saving; the image has tzdata, so nothing else is needed.
+  RS_SCHEDULER_PIPELINE_AT: "${RS_SCHEDULER_PIPELINE_AT-05:00,10:00,14:00,17:00}"
+  RS_SCHEDULER_DAILY_AT: "${RS_SCHEDULER_DAILY_AT-17:00}"
+  RS_SCHEDULER_TIMEZONE: ${RS_SCHEDULER_TIMEZONE:-America/New_York}
+  RS_OIDC_ISSUER: ${RS_OIDC_ISSUER:-}
+  RS_OIDC_AUDIENCE: ${RS_OIDC_AUDIENCE:-api}
+  RS_TERMS_VERSION: ${RS_TERMS_VERSION:-2026-08-01}
+  RS_AUTH0_DOMAIN: ${RS_AUTH0_DOMAIN:-}
+  RS_AUTH0_MGMT_CLIENT_ID: ${RS_AUTH0_MGMT_CLIENT_ID:-}
+  RS_AUTH0_MGMT_CLIENT_SECRET: ${RS_AUTH0_MGMT_CLIENT_SECRET:-}
+  RS_RERANK_ENABLED: ${RS_RERANK_ENABLED:-true}
+  RS_ASK_FAST_RERANK: ${RS_ASK_FAST_RERANK:-false}
+  RS_CHUNK_RETRIEVAL: ${RS_CHUNK_RETRIEVAL:-true}
+  RS_CLUSTER_ALGO: ${RS_CLUSTER_ALGO:-hdbscan}
+  RS_CHAT_RATE_LIMIT: ${RS_CHAT_RATE_LIMIT:-20}
+  RS_CHAT_RATE_LIMIT_ANONYMOUS: ${RS_CHAT_RATE_LIMIT_ANONYMOUS:-5}
+  RS_LLM_MAX_CONCURRENCY: ${RS_LLM_MAX_CONCURRENCY:-2}
+  S2_API_KEY: ${S2_API_KEY:-}
+  GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+
 x-backend: &backend
   build:
     context: ..
     dockerfile: docker/api.Dockerfile
   image: researchscout-backend:latest
   restart: unless-stopped
-  environment:
-    # Inside the network the database is a service name, not localhost - this must not be
-    # inherited from the host .env.
-    RS_DATABASE_URL: postgresql+psycopg://researchscout:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/researchscout
-    # Same reason: the host's Ollama, seen from inside a container.
-    RS_LLM_BASE_URL: ${RS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
-    RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
-    RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
-    RS_SERVICE_TOKEN: ${RS_SERVICE_TOKEN:-}
-    RS_SCHEDULER_BATCH_PIPELINE: ${RS_SCHEDULER_BATCH_PIPELINE:-false}
-    RS_SCHEDULER_INGEST_WINDOW_DAYS: ${RS_SCHEDULER_INGEST_WINDOW_DAYS:-2}
-    # Wall-clock schedule. Empty leaves every task on its interval; set, the fetch-and-enrich
-    # tasks run at these times and the once-a-day products at the last of them. The zone is
-    # named rather than an offset so the runs stay put across daylight saving; the image has
-    # tzdata, so nothing else is needed.
-    RS_SCHEDULER_PIPELINE_AT: ${RS_SCHEDULER_PIPELINE_AT:-}
-    RS_SCHEDULER_DAILY_AT: ${RS_SCHEDULER_DAILY_AT:-}
-    RS_SCHEDULER_TIMEZONE: ${RS_SCHEDULER_TIMEZONE:-America/New_York}
-    RS_OIDC_ISSUER: ${RS_OIDC_ISSUER:-}
-    RS_OIDC_AUDIENCE: ${RS_OIDC_AUDIENCE:-api}
-    RS_TERMS_VERSION: ${RS_TERMS_VERSION:-2026-08-01}
-    RS_AUTH0_DOMAIN: ${RS_AUTH0_DOMAIN:-}
-    RS_AUTH0_MGMT_CLIENT_ID: ${RS_AUTH0_MGMT_CLIENT_ID:-}
-    RS_AUTH0_MGMT_CLIENT_SECRET: ${RS_AUTH0_MGMT_CLIENT_SECRET:-}
-    RS_RERANK_ENABLED: ${RS_RERANK_ENABLED:-true}
-    RS_ASK_FAST_RERANK: ${RS_ASK_FAST_RERANK:-false}
-    RS_CHUNK_RETRIEVAL: ${RS_CHUNK_RETRIEVAL:-true}
-    RS_CLUSTER_ALGO: ${RS_CLUSTER_ALGO:-hdbscan}
-    RS_CHAT_RATE_LIMIT: ${RS_CHAT_RATE_LIMIT:-20}
-    RS_CHAT_RATE_LIMIT_ANONYMOUS: ${RS_CHAT_RATE_LIMIT_ANONYMOUS:-5}
-    RS_LLM_MAX_CONCURRENCY: ${RS_LLM_MAX_CONCURRENCY:-2}
-    S2_API_KEY: ${S2_API_KEY:-}
-    GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+  environment: *backend-env
   volumes:
     # Model weights are downloaded once and kept; without this every restart refetches them.
     - models:/home/scout/.cache/huggingface
@@ -146,7 +159,9 @@ services:
   # the whole file whatever profile you asked for, so demanding them here would break
   # `make deploy-up` for anyone not using Grafana Cloud.
   pdc-agent:
-    image: grafana/pdc-agent:latest
+    # Pinned: this one reaches the database, and a floating tag means the version doing that
+    # can change under a restart with nothing in the repository recording which one it is.
+    image: grafana/pdc-agent:0.0.63
     restart: unless-stopped
     profiles: ["monitoring"]
     command:
@@ -185,13 +200,19 @@ services:
     <<: *backend
     command: ["scout", "stream", "serve"]
     profiles: ["stream"]
+    # Its own build and tag: bytewax and the kafka client are an optional extra, so the image
+    # the API and scheduler run from does not carry them. This one asks for them by name.
+    build:
+      context: ..
+      dockerfile: docker/api.Dockerfile
+      args:
+        EXTRAS: stream
+    image: researchscout-backend-stream:latest
     environment:
-      RS_DATABASE_URL: postgresql+psycopg://researchscout:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}@postgres:5432/researchscout
+      # Merged, not replaced: everything the rest of the stack is configured with, plus the
+      # broker address. Listing only the extras here used to drop the other twenty-odd.
+      <<: *backend-env
       RS_KAFKA_BOOTSTRAP: kafka:9092
-      RS_LLM_BASE_URL: ${RS_LLM_BASE_URL:-http://host.docker.internal:11434/v1}
-      RS_LLM_MODEL: ${RS_LLM_MODEL:-qwen2.5:3b-instruct}
-      RS_LLM_API_KEY: ${RS_LLM_API_KEY:-ollama}
-      S2_API_KEY: ${S2_API_KEY:-}
     depends_on:
       postgres:
         condition: service_healthy
