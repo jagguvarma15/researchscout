@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -180,8 +181,25 @@ class Settings(BaseSettings):
     stream_keywords_llm_fallback: bool = True
     stream_labels_enabled: bool = False
     labels_config_path: Path = Path("config/labels.yaml")
+    # Which organisations get a row in the provider table on /benchmarks, and the benchmarks
+    # that table compares them on. A file rather than a query because "which labs matter" is a
+    # judgement call, and one that will need revisiting as the field moves.
+    providers_config_path: Path = Path("config/providers.yaml")
 
 
+@lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Load settings from the environment and ``.env``."""
+    """Load settings from the environment and ``.env``, once per process.
+
+    Cached because it is not free. pydantic-settings re-reads and re-parses the dotenv file on
+    every instantiation, and this is called from the service-token middleware, from
+    ``require_user``, from retrieval and from the feed's sort compiler - several times for a
+    single request. Caching also removes a subtler problem: uncached, one request could read
+    the file twice and see two different configurations if it changed in between.
+
+    Settings are process-wide and read at start-up everywhere else, so nothing expects an edit
+    to ``.env`` to take effect without a restart. Tests that manipulate the environment need
+    ``get_settings.cache_clear()``; an autouse fixture in ``tests/conftest.py`` does it for
+    them so no individual test has to remember.
+    """
     return Settings()
