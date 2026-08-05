@@ -217,3 +217,36 @@ def test_one_failing_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyP
 
     scheduler_mod._ingest(Settings())
     assert seen == ["broken", "fine"]
+
+
+def test_the_start_up_summary_names_every_task_and_its_next_run(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A scheduler that says nothing on start-up hides the case where it schedules no work."""
+    tasks = [
+        Task("ingest", 60.0, lambda: None, at=(time(5, 0), time(17, 0)), zone=NY),
+        Task("digest", 3600.0, lambda: None),
+    ]
+    with caplog.at_level("INFO", logger="researchscout.scheduler"):
+        Scheduler(tasks, clock=lambda: 0.0, wall=lambda: datetime(2026, 8, 4, 15, 2, tzinfo=NY))
+
+    summary = "\n".join(caplog.messages)
+    assert "2 task(s)" in summary
+    # The wall-clock task reports its times, its zone and the slot it will actually take.
+    assert "ingest at 05:00, 17:00 America/New_York, next 2026-08-04 17:00" in summary
+    # The interval task says so rather than reporting a time it does not have.
+    assert "digest every 3600s, first run now" in summary
+
+
+def test_a_scheduler_with_nothing_fetching_papers_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The deployment sat for weeks looking healthy with a corpus that never moved."""
+    with caplog.at_level("WARNING", logger="researchscout.scheduler"):
+        build_tasks(Settings(scheduler_batch_pipeline=False))
+    assert "no fetch tasks scheduled" in "\n".join(caplog.messages)
+
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="researchscout.scheduler"):
+        build_tasks(Settings(scheduler_batch_pipeline=True))
+    assert caplog.messages == []
