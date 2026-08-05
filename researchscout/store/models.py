@@ -227,6 +227,10 @@ class BenchmarkRow(Base):
     name: Mapped[str] = mapped_column(Text)
     released_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     result_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    #: "fraction" when every score sits in [0, 1] and reads as a percentage, "raw" otherwise -
+    #: a ratio, an Elo, an amount of money. Settled once over the whole score set at refresh
+    #: (migration 0023) so two pages showing the same benchmark cannot format it differently.
+    score_scale: Mapped[str] = mapped_column(String(16), nullable=False, server_default="fraction")
     refreshed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
