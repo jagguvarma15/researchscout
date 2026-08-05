@@ -24,7 +24,7 @@ AGENT_DIR := $(HOME)/Library/Application Support/researchscout
 
 .DEFAULT_GOAL := help
 .PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop \
-        deploy-build deploy-up deploy-up-stream deploy-down \
+        deploy-build deploy-up deploy-up-stream deploy-down deploy-verify \
         deploy-ps deploy-logs backup backup-schedule backup-unschedule grafana-db-role \
         check clean
 
@@ -122,6 +122,8 @@ digest: ## build and publish this week's digest (needs the LLM up)
 	uv run scout digest
 
 scheduler: ## run the refresh loop in the foreground (Ctrl-C to stop)
+	@docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^researchscout-scheduler' && \
+	  echo "warning: the deployed scheduler container is running too - two fetchers on one address is what trips arXiv rate limits" || true
 	uv run scout serve scheduler
 
 kafka-start: ## start the kafka broker (KRaft single node) in the background
@@ -144,11 +146,14 @@ kafka-stop: ## stop the kafka broker
 	@echo "kafka: stopped"
 
 deploy-build: ## build the backend image used by the deployment stack
-	docker compose -f $(COMPOSE) build
+	docker compose -f $(COMPOSE) build --build-arg GIT_SHA=$$(git rev-parse --short HEAD)
 
 deploy-up: ## start the deployed backend (postgres, migrations, api, scheduler)
 	docker compose -f $(COMPOSE) up -d
 	@echo "api on http://127.0.0.1:8001 (the dev stack keeps :8000)"
+
+deploy-verify: ## check the deployed backend is current, migrated, and fetching
+	./deploy/verify.sh
 
 # The batch pipeline is on by default so a stream-less deployment still fetches papers, which
 # means turning the stream on has to turn it back off in the same breath: two processes pulling
