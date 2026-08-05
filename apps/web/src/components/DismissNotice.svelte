@@ -1,14 +1,14 @@
 <script lang="ts">
-  // The dialog shown when a paper is dismissed, saying where it went.
+  // The dialog shown when a paper is dismissed, saying what happened to it.
   //
-  // Dismiss used to remove the card outright, which left nothing to explain. It now moves the
-  // paper to the end of its day and remembers that for next time, and a row that quietly slides
-  // somewhere else is exactly the kind of change a reader will assume was a bug. So it is said
-  // out loud, once per dismissal, with one button.
+  // Dismissing takes the row out of the feed and keeps it out on the next visit, which is a
+  // large enough thing to do quietly that it is said out loud - and, since it is not reversible
+  // by repeating it, said with a way back. Undo is the reason this dialog earns its interruption
+  // rather than being a toast that has already faded by the time the mistake is noticed.
   //
-  // Telemetry.svelte does the moving and dispatches `rs:dismissed` on the document; this only
-  // listens. Keeping them apart means the notice can be absent - on a page with no feed - without
-  // dismissal breaking.
+  // Telemetry.svelte does the removing and dispatches `rs:dismissed` with the function that puts
+  // the row back; this only listens. Keeping them apart means the notice can be absent - on a
+  // page with no feed - without dismissal breaking.
 
   import { Check } from 'lucide-svelte';
 
@@ -19,10 +19,12 @@
   let dialog: HTMLElement | undefined = $state();
   let previousFocus: Element | null = null;
   let unlockScroll: (() => void) | null = null;
+  let undo: (() => void) | null = null;
 
   function show(event: Event) {
-    const detail = (event as CustomEvent<{ title?: string }>).detail;
+    const detail = (event as CustomEvent<{ title?: string; undo?: () => void }>).detail;
     title = detail?.title ?? '';
+    undo = detail?.undo ?? null;
     previousFocus = document.activeElement;
     open = true;
     unlockScroll = lockBodyScroll();
@@ -31,14 +33,27 @@
   function hide() {
     if (!open) return;
     open = false;
+    undo = null;
     unlockScroll?.();
     unlockScroll = null;
-    // Back to the Dismiss button that opened this, which is where the reader was.
-    if (previousFocus instanceof HTMLElement) previousFocus.focus();
+    // The Dismiss button went with the row, so returning focus to it is not an option. The
+    // feed heading is where the reader was looking, and it is a stable target.
+    const fallback = document.querySelector<HTMLElement>('.feed, main, body');
+    const target = previousFocus instanceof HTMLElement && previousFocus.isConnected
+      ? previousFocus
+      : fallback;
+    target?.focus?.();
+  }
+
+  function undoAndHide() {
+    undo?.();
+    hide();
   }
 
   $effect(() => {
-    if (open) dialog?.querySelector<HTMLElement>('button')?.focus();
+    // Okay, not the first button in the markup: Undo comes first visually, and focusing it
+    // would make Enter - the reflex for closing a dialog - silently reverse the dismissal.
+    if (open) dialog?.querySelector<HTMLElement>('.btn-primary')?.focus();
   });
 
   function onKeydown(event: KeyboardEvent) {
@@ -68,12 +83,19 @@
       bind:this={dialog}
     >
       <span class="mark" aria-hidden="true"><Check size={18} /></span>
-      <h2 id="dismiss-notice-title">Moved to the end of the list</h2>
+      <h2 id="dismiss-notice-title">Taken out of your feed</h2>
       {#if title}
         <p class="what">{title}</p>
       {/if}
-      <p class="how">It stays in the feed and stays searchable. Dismiss it again to bring it back.</p>
-      <button class="btn btn-primary" type="button" onclick={hide}>Okay</button>
+      <p class="how">
+        It will not come back on a reload. Search still finds it, and its own page still opens.
+      </p>
+      <div class="actions">
+        {#if undo}
+          <button class="btn btn-ghost" type="button" onclick={undoAndHide}>Undo</button>
+        {/if}
+        <button class="btn btn-primary" type="button" onclick={hide}>Okay</button>
+      </div>
     </div>
   </div>
 {/if}
@@ -131,7 +153,13 @@
     font-size: var(--text-sm);
     line-height: 1.5;
   }
-  .notice button {
-    width: 100%;
+  .actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+  /* Both full width and equal: Okay is the expected answer, Undo the one that has to be
+     findable in a hurry, and neither should be the small target. */
+  .actions button {
+    flex: 1;
   }
 </style>
