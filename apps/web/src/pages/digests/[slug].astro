@@ -3,6 +3,7 @@ import { Icon } from 'astro-icon/components';
 import Base from '../../layouts/Base.astro';
 import { fetchDigest, formatDate, renderDigestBody } from '../../lib/api';
 import { renderMathHTML } from '../../lib/math';
+import { morphName } from '../../lib/morph';
 
 const slug = Astro.params.slug ?? '';
 const digest = await fetchDigest(slug);
@@ -27,7 +28,7 @@ if (digest === null) {
     ) : (
       <article>
         <header class="intro">
-          <h1>{digest.title}</h1>
+          <h1 transition:name={morphName('digest', digest.slug)}>{digest.title}</h1>
           <p class="meta">
             {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
           </p>
