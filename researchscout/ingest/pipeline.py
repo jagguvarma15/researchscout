@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+import httpx
 from sqlalchemy.orm import Session
 
 from researchscout.schema import Paper, Signal, SignalType
@@ -41,6 +42,9 @@ class IngestSummary:
     raw_stored: int = 0
     #: Fetched, normalized, and then rejected for being outside this radar's subject.
     out_of_scope: int = 0
+    #: Why the run ended before pagination was exhausted (rate limit, nothing-new stop), or
+    #: None for a full walk. Everything counted above is stored either way.
+    stopped_early: str | None = None
 
 
 def resolve_existing(session: Session, paper: Paper) -> str | None:
@@ -59,12 +63,24 @@ def run_ingest(
     *,
     max_items: int | None = None,
     resume: bool = False,
+    stop_after_known_pages: int | None = None,
 ) -> IngestSummary:
     """Fetch a source page by page, normalize, dedup, and store; return a run summary.
 
     With ``resume``, continue from the persisted cursor — but only when the saved window
     matches ``since``: a cursor is an offset into one specific query, so a different window
     starts fresh at the beginning.
+
+    Each page commits on its own. A rate limit twenty pages in must not cost the pages
+    already processed — with newest-first sources those are exactly the papers worth keeping —
+    so an upstream failure ends the run gracefully with ``stopped_early`` set instead of
+    raising away the work. Replaying a committed page is free: dedup collapses it to zero new
+    papers.
+
+    ``stop_after_known_pages`` ends the walk after that many consecutive pages on which every
+    entry was already stored. Sound only for sources that page newest-first (arXiv does):
+    everything past those pages is older still, so it is already here. Backfills leave it
+    ``None`` and walk the whole window.
     """
     summary = IngestSummary(source=source.name)
     cursor: str | None = None
@@ -72,8 +88,15 @@ def run_ingest(
         saved_cursor, last_since = get_state(session, source.name)
         if saved_cursor is not None and last_since == since:
             cursor = saved_cursor
+    known_pages = 0
     while True:
-        items, next_cursor = source.fetch(since, cursor)
+        try:
+            items, next_cursor = source.fetch(since, cursor)
+        except httpx.HTTPError as exc:
+            # The saved cursor still points at this page, so a same-window resume retries it.
+            summary.stopped_early = str(exc) or exc.__class__.__name__
+            break
+        new_before = summary.new_papers
         for raw in items:
             if max_items is not None and summary.fetched >= max_items:
                 break
@@ -105,8 +128,19 @@ def run_ingest(
                 summary.new_papers += 1
 
         save_state(session, source.name, next_cursor, since)
+        # One page, one transaction: what makes the stop paths above and below cheap.
+        session.commit()
         reached_max = max_items is not None and summary.fetched >= max_items
         if next_cursor is None or reached_max:
             break
+        if stop_after_known_pages:
+            known_pages = known_pages + 1 if items and summary.new_papers == new_before else 0
+            if known_pages >= stop_after_known_pages:
+                summary.stopped_early = f"nothing new on {known_pages} consecutive page(s)"
+                # The rest of the window is older than what is already stored, so the window
+                # is done: clear the cursor rather than inviting a resume into the tail.
+                save_state(session, source.name, None, since)
+                session.commit()
+                break
         cursor = next_cursor
     return summary
