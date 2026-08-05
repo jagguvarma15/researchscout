@@ -205,7 +205,7 @@ def test_one_failing_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyP
         seen.append(name)
         if name == "broken":
             raise httpx.HTTPError("429 from upstream")
-        return SimpleNamespace(source=name, fetched=1, new_papers=1, signals=0)
+        return SimpleNamespace(source=name, fetched=1, new_papers=1, signals=0, stopped_early=None)
 
     monkeypatch.setattr(
         "researchscout.sources.enabled_sources",
@@ -217,6 +217,28 @@ def test_one_failing_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyP
 
     scheduler_mod._ingest(Settings())
     assert seen == ["broken", "fine"]
+
+
+def test_recorded_wrapper_writes_the_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every scheduled run lands in the ledger — the success, and the failure with its reason."""
+    import researchscout.scheduler as scheduler_mod
+
+    entries: list[tuple[str, bool, str]] = []
+
+    def fake_record(name: str, started: object, *, ok: bool, note: str = "") -> None:
+        entries.append((name, ok, note))
+
+    monkeypatch.setattr(scheduler_mod, "_record_safely", fake_record)
+
+    scheduler_mod._recorded("fine", lambda: None)()
+
+    def boom() -> None:
+        raise RuntimeError("no")
+
+    with pytest.raises(RuntimeError):
+        scheduler_mod._recorded("broken", boom)()
+
+    assert entries == [("fine", True, ""), ("broken", False, "no")]
 
 
 def test_the_start_up_summary_names_every_task_and_its_next_run(
