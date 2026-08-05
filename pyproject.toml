@@ -3,7 +3,7 @@ name = "researchscout"
 version = "0.1.0"
 description = "A source-agnostic radar for AI/ML research."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
@@ -21,7 +21,6 @@ dependencies = [
     "torch>=2.12",
     "openai>=1.0",
     "selectolax>=0.4.11",
-    "bytewax[kafka]>=0.21,<0.22",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +28,14 @@ api = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.9",
+]
+# The streaming pipeline. Every import of these lives under researchscout/stream/ and the CLI
+# makes it lazily, so an install without them runs everything except `scout stream` - which is
+# what the deployment does, driving the same work from the scheduler in batches. Keeping them
+# out of the default install is the difference between an image that carries a broker client
+# it never opens and one that does not.
+stream = [
+    "bytewax[kafka]>=0.21,<0.22",
 ]
 static-embed = [
     "model2vec>=0.3",
@@ -49,6 +56,9 @@ dev = [
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.9",
     "model2vec>=0.8.2",
+    # Here as well as in the extra: the stream tests import the flow, and a plain `uv sync`
+    # is what CI runs.
+    "bytewax[kafka]>=0.21,<0.22",
 ]
 
 [build-system]
@@ -60,7 +70,9 @@ packages = ["researchscout"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+# In step with .python-version, the mypy setting below and the image: the project has been
+# 3.12 everywhere except here, where it was still telling ruff to write 3.11-compatible code.
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W"]
