@@ -5,18 +5,26 @@ import {
   catalogMessage,
   fetchBenchmark,
   fetchBenchmarks,
+  fetchHeadlineBenchmarks,
   fetchProviders,
   formatScore,
 } from '../lib/api';
 
 const selected = Astro.url.searchParams.get('b') ?? '';
 
-// The provider comparison does not depend on which benchmark is open, so it is fetched
-// alongside the list rather than after it.
-const [listed, providerResult] = await Promise.all([fetchBenchmarks(), fetchProviders()]);
+// Neither the headline strip nor the provider comparison depends on which benchmark is open,
+// so all three fetches run together.
+const [listed, providerResult, headlineResult] = await Promise.all([
+  fetchBenchmarks(),
+  fetchProviders(),
+  fetchHeadlineBenchmarks(),
+]);
 const benchmarks = listed.ok ? listed.data : null;
 const listFailure = listed.ok ? null : listed.failure;
 const providers = providerResult.ok ? providerResult.data : null;
+// Best-effort like the provider table: it renders when it has rows, and the list's own error
+// card already reports catalogue trouble.
+const headline = headlineResult.ok ? headlineResult.data : [];
 
 // The first one is the most measured, which is the most useful thing to open on.
 const current = benchmarks?.length ? selected || benchmarks[0].id : '';
@@ -64,13 +72,54 @@ function benchmarkLink(id: string): string {
   }
 
   {
+    headline.length > 0 && (
+      <section class="providers">
+        <h2>Headline benchmarks</h2>
+        <p class="lede-sm">
+          The industry-standard tests, each with the best score from the major labs and the
+          model holding it. Pick a row to open that benchmark's full leaderboard below.
+        </p>
+        <div class="table-scroll">
+          <table class="data-table strip-table">
+            <thead>
+              <tr>
+                <th scope="col" class="cell-name">Benchmark</th>
+                <th scope="col" class="cell-num">Best score</th>
+                <th scope="col">Model</th>
+                <th scope="col">Lab</th>
+                <th scope="col" class="cell-num">Scores held</th>
+              </tr>
+            </thead>
+            <tbody>
+              {headline.map((row) => (
+                <tr>
+                  <th scope="row" class="cell-name">
+                    <a href={benchmarkLink(row.id)}>{row.name}</a>
+                  </th>
+                  <td class="cell-num">{formatScore(row.best_score, row.scale)}</td>
+                  <td class="cell-clip" title={row.model_name}>
+                    <a href={`/models/${row.model_id}`}>{row.model_name}</a>
+                  </td>
+                  <td class="cell-muted">{row.provider}</td>
+                  <td class="cell-num cell-muted">{row.result_count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    )
+  }
+
+  {
     providers && providers.items.length > 0 && (
       <section class="providers">
         <h2>Where the major labs stand</h2>
         <p class="lede-sm">
-          Each lab's most recent model that anyone has measured, on the benchmarks the field
-          leans on. A blank is "not measured" rather than zero, and each column is shown on
-          whatever scale its benchmark uses.
+          Each lab's best-covered model on the benchmarks the field leans on - the one with the
+          most of these measured, so the rows can actually be compared. A blank is "not
+          measured" rather than zero, and each column is shown on whatever scale its benchmark
+          uses.
         </p>
         <div class="table-scroll">
           <table class="data-table">
@@ -152,7 +201,7 @@ function benchmarkLink(id: string): string {
                 </p>
               </header>
               <div class="table-scroll">
-                <table class="data-table">
+                <table class="data-table board-table">
                   <thead>
                     <tr>
                       <th scope="col" class="cell-num rank">
@@ -328,11 +377,18 @@ function benchmarkLink(id: string): string {
       border-color: transparent;
     }
   }
+  /* Scoped by table: the ordinals mean different columns in each. The leaderboard drops
+     "measured" and "from" on a phone; the headline strip drops the lab and the score count;
+     the provider comparison keeps everything and scrolls. */
   @media (max-width: 42rem) {
-    .data-table :global(td:nth-child(4)),
-    .data-table :global(th:nth-child(4)),
-    .data-table :global(td:nth-child(5)),
-    .data-table :global(th:nth-child(5)) {
+    .board-table :global(td:nth-child(4)),
+    .board-table :global(th:nth-child(4)),
+    .board-table :global(td:nth-child(5)),
+    .board-table :global(th:nth-child(5)),
+    .strip-table :global(td:nth-child(4)),
+    .strip-table :global(th:nth-child(4)),
+    .strip-table :global(td:nth-child(5)),
+    .strip-table :global(th:nth-child(5)) {
       display: none;
     }
   }
