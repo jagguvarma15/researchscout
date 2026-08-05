@@ -18,12 +18,14 @@ from researchscout.api.schemas import (
     DismissalList,
     DismissRequest,
     FilterState,
+    PaperSummary,
     RecentPaperList,
     SearchHistory,
     SearchRecord,
     ViewRecord,
 )
 from researchscout.store import account
+from researchscout.store.papers import get_papers
 
 router = APIRouter(tags=["account"])
 
@@ -58,13 +60,29 @@ def clear_history(
     return SearchHistory(items=[])
 
 
+def _recent(session: Session, sub: str) -> RecentPaperList:
+    """This account's recently opened papers, newest first, as something showable.
+
+    Hydrated rather than returned as bare ids: the only thing anyone does with this list is put
+    it in front of a reader, and "arxiv:2504.01234" is not a thing anyone recognises. The order
+    is the cache's, which the id-keyed hydration does not preserve, so it is reapplied here.
+    """
+    ids = account.recent_papers(session, sub)
+    if not ids:
+        return RecentPaperList(items=[])
+    papers = get_papers(session, ids)
+    return RecentPaperList(
+        items=[PaperSummary.from_paper(papers[pid]) for pid in ids if pid in papers]
+    )
+
+
 @router.get("/me/recent")
 def my_recent_papers(
     user: Annotated[User, Depends(require_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> RecentPaperList:
-    """Paper ids this account opened, most recent first."""
-    return RecentPaperList(items=account.recent_papers(session, user.sub))
+    """Papers this account opened, most recent first."""
+    return _recent(session, user.sub)
 
 
 @router.post("/me/recent", status_code=202)
@@ -75,7 +93,7 @@ def record_view(
 ) -> RecentPaperList:
     """Remember that a paper was opened; an unknown id is dropped rather than refused."""
     account.record_view(session, user.sub, body.paper_id)
-    return RecentPaperList(items=account.recent_papers(session, user.sub))
+    return _recent(session, user.sub)
 
 
 @router.get("/me/dismissals")
