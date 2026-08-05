@@ -20,6 +20,7 @@ from researchscout.api.routers import (
     saved,
     sources,
     stream,
+    system,
     topics,
     webimport,
 )
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(topics.router, prefix="/v1")
     app.include_router(keywords.router, prefix="/v1")
     app.include_router(sources.router, prefix="/v1")
+    app.include_router(system.router, prefix="/v1")
     app.include_router(profile.router, prefix="/v1")
     app.include_router(me.router, prefix="/v1")
     app.include_router(account.router, prefix="/v1")
