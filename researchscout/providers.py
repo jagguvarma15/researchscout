@@ -55,8 +55,20 @@ class ProviderConfig:
     benchmarks: tuple[str, ...]
 
     def for_organization(self, organization: str | None) -> Provider | None:
-        """The provider an organisation name belongs to, or None when it is not one we list."""
-        return next((p for p in self.providers if p.matches(organization)), None)
+        """The provider an organisation name belongs to, or None when it is not one we list.
+
+        Comma-joined credits — Epoch writes collaborations as one field, "Stability
+        AI,University of Illinois Urbana-Champaign (UIUC)" — are judged part by part, so a
+        joint model attributes to the first listed provider instead of vanishing. Within a
+        single part the match stays whole-field: "Mistral community" still belongs to nobody.
+        """
+        if not organization:
+            return None
+        for part in organization.split(","):
+            provider = next((p for p in self.providers if p.matches(part)), None)
+            if provider is not None:
+                return provider
+        return None
 
 
 _EMPTY = ProviderConfig(providers=(), benchmarks=())
