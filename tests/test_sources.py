@@ -9,7 +9,7 @@ import researchscout.sources.arxiv as arxiv
 from researchscout.schema import Paper
 from researchscout.sources import enabled_sources, get_source
 from researchscout.sources.arxiv import ArxivSource, _entry_payload, _normalize_payload
-from researchscout.sources.base import describe_sources, registered_sources
+from researchscout.sources.base import describe_sources, registered_sources, retry_wait
 from researchscout.useragent import USER_AGENT
 
 FIXTURE = Path(__file__).parent / "fixtures" / "arxiv_query.atom"
@@ -150,6 +150,56 @@ def test_fetch_paces_every_request(
     set_setting("RS_ARXIV_PAGE_DELAY_SEC", "0")
     src.fetch(datetime(2024, 1, 1, tzinfo=UTC), "2")
     assert sleeps == [2.5, 1.5]  # zero disables the pause
+
+
+class _RateLimited:
+    status_code = 429
+    is_success = False
+
+    def __init__(self, retry_after: str | None = None) -> None:
+        self.headers = {"Retry-After": retry_after} if retry_after else {}
+
+    def raise_for_status(self) -> None:
+        raise httpx.HTTPStatusError(
+            "429", request=httpx.Request("GET", "https://x"), response=httpx.Response(429)
+        )
+
+
+def test_fetch_retries_a_rate_limit_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    responses: list[object] = [_RateLimited("7"), _Resp()]
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: responses.pop(0))
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+    sleeps: list[float] = []
+
+    items, _cursor = ArxivSource(page_size=10, sleep=sleeps.append).fetch(
+        datetime(2024, 1, 1, tzinfo=UTC), None
+    )
+    assert len(items) == 1  # the page parsed fine once arXiv stopped shedding load
+    assert sleeps == [7.0]  # and the wait was the one arXiv asked for
+
+
+def test_fetch_gives_up_after_bounded_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+
+    def limited(*args: object, **kwargs: object) -> _RateLimited:
+        calls["n"] += 1
+        return _RateLimited()
+
+    monkeypatch.setattr(httpx, "get", limited)
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+    sleeps: list[float] = []
+
+    with pytest.raises(httpx.HTTPStatusError):
+        ArxivSource(page_size=1, sleep=sleeps.append).fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
+    assert calls["n"] == 3  # the first attempt plus two retries, then the error surfaces
+    assert sleeps == [15.0, 30.0]  # the doubling fallback when no Retry-After arrives
+
+
+def test_retry_wait_honors_and_caps_the_header() -> None:
+    assert retry_wait("7", 0, cap=120.0) == 7.0
+    assert retry_wait("600", 0, cap=120.0) == 120.0  # an hour-long ask is not worth holding
+    assert retry_wait("soon", 0, cap=120.0) == 15.0  # unparseable reads as absent
+    assert retry_wait(None, 1, cap=20.0) == 20.0  # the fallback respects the cap too
 
 
 def test_fetch_identifies_the_client(monkeypatch: pytest.MonkeyPatch) -> None:
