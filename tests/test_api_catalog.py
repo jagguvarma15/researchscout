@@ -15,7 +15,12 @@ from fastapi.testclient import TestClient
 import researchscout.api.routers.catalog as catalog_router
 from researchscout.api.deps import get_session
 from researchscout.api.main import create_app
-from researchscout.store.catalog import ModelFilters, ScoreColumn
+from researchscout.store.catalog import (
+    HeadlineBenchmark,
+    ModelFilters,
+    NotableModel,
+    ScoreColumn,
+)
 
 
 def _client() -> TestClient:
@@ -267,3 +272,51 @@ def test_an_unconfigured_comparison_is_empty_rather_than_an_error(
     monkeypatch.setattr(catalog_router.catalog, "provider_leaders", lambda *a, **k: ([], []))
     body = _client().get("/v1/providers").json()
     assert body == {"columns": [], "items": []}
+
+
+def test_notable_is_a_route_not_a_model_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """/models/notable must resolve before the dynamic model route swallows it."""
+    monkeypatch.setattr(
+        catalog_router.catalog,
+        "recent_provider_models",
+        lambda session, config, *, since: [
+            NotableModel(
+                id="gpt-6",
+                name="GPT-6",
+                provider="OpenAI",
+                country="United States",
+                published_on=date(2026, 7, 1),
+                parameters=2.0e12,
+                open_weights=False,
+            )
+        ],
+    )
+    body = _client().get("/v1/models/notable").json()
+    item = body["items"][0]
+    assert item["name"] == "GPT-6"
+    assert item["provider"] == "OpenAI"
+    assert item["published_on"] == "2026-07-01"
+
+
+def test_headline_is_a_route_not_a_benchmark_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        catalog_router.catalog,
+        "headline_benchmarks",
+        lambda session, config: [
+            HeadlineBenchmark(
+                id="gpqa-diamond",
+                name="GPQA Diamond",
+                scale="fraction",
+                result_count=133,
+                best_score=0.93,
+                model_id="qwen3-max",
+                model_name="Qwen3 Max",
+                provider="Alibaba",
+            )
+        ],
+    )
+    body = _client().get("/v1/benchmarks/headline").json()
+    item = body["items"][0]
+    assert item["id"] == "gpqa-diamond"
+    assert item["best_score"] == 0.93
+    assert item["provider"] == "Alibaba"
