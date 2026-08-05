@@ -40,6 +40,7 @@
     | { kind: 'paper'; label: string; href: string; score: number | null }
     | { kind: 'search'; label: string; href: string }
     | { kind: 'recent'; label: string; href: string }
+    | { kind: 'opened'; label: string; href: string }
     | { kind: 'nav'; label: string; href: string };
 
   // Home only. Every other destination is one glance away in the navigation rail, and a
@@ -51,7 +52,8 @@
     web: 'Scout',
     paper: 'Papers',
     search: 'Papers',
-    recent: 'Recent',
+    recent: 'Recent searches',
+  opened: 'Recently opened',
     nav: 'Jump to',
   };
 
@@ -63,9 +65,10 @@
   let asked = $state(false);
   let searching = $state(false);
   let dictionary = $state<KeywordCount[] | null>(null);
-  // Phrases this account searched for before. Signed-in only, and the request simply 401s
-  // otherwise, so nothing here needs to know whether anybody is signed in.
+  // Phrases this account searched for before, and papers it opened. Signed-in only, and both
+  // requests simply 401 otherwise, so nothing here needs to know whether anybody is signed in.
   let history = $state<string[]>([]);
+  let recent = $state<{ id: string; title: string }[]>([]);
 
   let root: HTMLElement | undefined = $state();
   let inputEl: HTMLInputElement | undefined = $state();
@@ -144,6 +147,19 @@
         })),
   );
 
+  // Papers, not phrases: the two answer different questions on an empty field - "what was I
+  // looking for" and "what was I reading" - and getting back to a paper you had open is the
+  // one people ask for by name.
+  const openedEntries = $derived<Entry[]>(
+    trimmed
+      ? []
+      : recent.slice(0, 5).map((paper) => ({
+          kind: 'opened' as const,
+          label: paper.title,
+          href: `/papers/${paper.id}`,
+        })),
+  );
+
   // A question puts Scout first, a lookup puts papers first, and both are always present.
   // The paper hits and the search-all row stay adjacent either way, so a group heading is
   // never drawn twice for the same group.
@@ -157,6 +173,7 @@
             ...searchEntry,
             ...(askEntry ? [askEntry] : []),
             ...recentEntries,
+            ...openedEntries,
             ...navEntries,
           ],
   );
@@ -210,6 +227,7 @@
     if (open) {
       void loadDictionary();
       void loadHistory();
+      void loadRecent();
     }
   });
 
@@ -234,6 +252,24 @@
       history = (await response.json()).items ?? [];
     } catch {
       history = [];
+    }
+  }
+
+  /** A 401 here means signed out, which is not an error - it means nothing was opened. */
+  async function loadRecent() {
+    try {
+      const response = await fetch('/api/me/recent');
+      if (!response.ok) {
+        recent = [];
+        return;
+      }
+      const body = (await response.json()) as { items: { id: string; title: string }[] };
+      recent = (body.items ?? []).map((paper) => ({
+        id: paper.id,
+        title: stripMath(paper.title),
+      }));
+    } catch {
+      recent = [];
     }
   }
 
@@ -343,7 +379,11 @@
 
 <div class="omnibox" bind:this={root}>
   <div class="field" class:open>
-    <Search size={16} aria-hidden="true" />
+    <!-- Scout's own mark, in the field rather than only inside the panel's welcome state -
+         which was the one place it appeared, so anyone who typed before opening the panel
+         never saw it at all. The magnifier moves to the far end: the placeholder carries the
+         search affordance, and the owl says whose field this is. -->
+    <ScoutMascot size={20} />
     <input
       bind:this={inputEl}
       bind:value={query}
@@ -363,6 +403,7 @@
         <Square size={13} aria-hidden="true" />
       </button>
     {:else}
+      <Search size={15} aria-hidden="true" class="mag" />
       <kbd aria-hidden="true">&#8984;K</kbd>
     {/if}
   </div>
@@ -387,36 +428,38 @@
               {#if label}
                 <li class="group" role="presentation">{label}</li>
               {/if}
+              <!-- The option is the row itself rather than a button inside it. ARIA forbids
+                   interactive descendants of an option, and none is needed: this is a combobox,
+                   so the keyboard lives on the input and reaches here through
+                   aria-activedescendant. Hence no key handler on the row. -->
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
               <li
                 id={`omnibox-option-${index}`}
                 role="option"
                 aria-selected={index === selected}
                 class:active={index === selected}
+                onclick={() => run(entry)}
+                onpointerenter={() => (selected = index)}
               >
-                <button
-                  type="button"
-                  tabindex="-1"
-                  onclick={() => run(entry)}
-                  onpointerenter={() => (selected = index)}
-                >
-                  {#if entry.kind === 'paper'}
-                    <FileText size={14} aria-hidden="true" />
-                  {:else if entry.kind === 'search'}
-                    <Search size={14} aria-hidden="true" />
-                  {:else if entry.kind === 'web'}
-                    <Globe size={14} aria-hidden="true" />
-                  {:else if entry.kind === 'ask'}
-                    <Sparkles size={14} aria-hidden="true" />
-                  {:else if entry.kind === 'recent'}
-                    <History size={14} aria-hidden="true" />
-                  {:else}
-                    <CornerDownLeft size={14} aria-hidden="true" />
-                  {/if}
-                  <span class="label">{entry.label}</span>
-                  {#if entry.kind === 'paper' && entry.score !== null}
-                    <span class="score">{entry.score.toFixed(3)}</span>
-                  {/if}
-                </button>
+                {#if entry.kind === 'paper'}
+                  <FileText size={14} aria-hidden="true" />
+                {:else if entry.kind === 'search'}
+                  <Search size={14} aria-hidden="true" />
+                {:else if entry.kind === 'web'}
+                  <Globe size={14} aria-hidden="true" />
+                {:else if entry.kind === 'ask'}
+                  <Sparkles size={14} aria-hidden="true" />
+                {:else if entry.kind === 'recent'}
+                  <History size={14} aria-hidden="true" />
+                {:else if entry.kind === 'opened'}
+                  <FileText size={14} aria-hidden="true" />
+                {:else}
+                  <CornerDownLeft size={14} aria-hidden="true" />
+                {/if}
+                <span class="label">{entry.label}</span>
+                {#if entry.kind === 'paper' && entry.score !== null}
+                  <span class="score">{entry.score.toFixed(3)}</span>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -495,6 +538,10 @@
   .field.open {
     border-color: var(--accent, #c2410c);
     box-shadow: 0 0 0 3px var(--accent-soft, #fef3c7);
+  }
+  /* The owl and the magnifier both hold their size when the field is squeezed. */
+  .field > :global(svg) {
+    flex-shrink: 0;
   }
   .field input {
     flex: 1;
@@ -584,25 +631,22 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
   }
-  .entries button {
+  .entries li[role='option'] {
     display: flex;
     align-items: center;
     gap: 0.55rem;
     width: 100%;
     padding: 0.5rem 0.65rem;
-    border: none;
     border-radius: 8px;
-    background: none;
     color: var(--ink, #17191c);
-    font: inherit;
     font-size: 0.9rem;
     text-align: left;
     cursor: pointer;
   }
-  .entries li.active button {
+  .entries li.active {
     background: var(--surface-2, #f4f0e8);
   }
-  .entries button :global(svg) {
+  .entries li[role='option'] :global(svg) {
     flex-shrink: 0;
     color: var(--muted, #5d6570);
   }
