@@ -1,4 +1,5 @@
 import math
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -179,7 +180,7 @@ def test_personalized_cold_start_is_empty(session: Session) -> None:
 
 @pytest.mark.integration
 def test_v2_names_reasons_and_fills_explore_slots(
-    session: Session, monkeypatch: pytest.MonkeyPatch
+    session: Session, set_setting: Callable[[str, str], None]
 ) -> None:
     from researchscout.schema import Author, Paper, Signal, SignalType
     from researchscout.store.papers import upsert_paper
@@ -219,8 +220,11 @@ def test_v2_names_reasons_and_fills_explore_slots(
     )
     session.flush()
 
-    monkeypatch.setenv("RS_FORYOU_CENTROIDS", "2")
-    monkeypatch.setenv("RS_FORYOU_EXPLORE_SLOTS", "1")
+    # set_setting rather than setenv: the session fixture builds the engine, which reads the
+    # configuration and so populates its cache before this line runs. Setting the environment
+    # afterwards changes nothing without dropping that cache, which is what a restart does.
+    set_setting("RS_FORYOU_CENTROIDS", "2")
+    set_setting("RS_FORYOU_EXPLORE_SLOTS", "1")
     results = personalized_papers(session, embedder, [], user_sub="local", k=3, days=30)
 
     by_id = {item.paper.id: item for item in results}
