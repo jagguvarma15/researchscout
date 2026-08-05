@@ -11,6 +11,7 @@
   // page with no feed - without dismissal breaking.
 
   import { Check } from 'lucide-svelte';
+  import { onDestroy } from 'svelte';
 
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
 
@@ -19,6 +20,10 @@
   let dialog: HTMLElement | undefined = $state();
   let previousFocus: Element | null = null;
   let unlockScroll: (() => void) | null = null;
+
+  // A soft navigation can destroy this island while the dialog is open; the scroll lock
+  // must not outlive it on the next page's body.
+  onDestroy(() => unlockScroll?.());
   let undo: (() => void) | null = null;
 
   function show(event: Event) {
@@ -113,6 +118,9 @@
     background: rgb(0 0 0 / 0.32);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
+    /* The dialog arrives right after a row animated away; a hard cut here would undo that
+       care. The global motion guard stills both under reduced motion. */
+    animation: notice-fade var(--dur-fast) var(--ease-out);
   }
   .notice {
     width: min(24rem, 100%);
@@ -121,6 +129,18 @@
     background: var(--surface);
     box-shadow: var(--shadow-lg);
     text-align: center;
+    animation: notice-in var(--dur-slow) var(--ease-out);
+  }
+  @keyframes notice-fade {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes notice-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.98);
+    }
   }
   .mark {
     display: inline-flex;
