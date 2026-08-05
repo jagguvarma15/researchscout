@@ -1,5 +1,0 @@
-model_id,benchmark_id,performance,benchmark,benchmark_release_date,optimized,model,Model,date,source
-m1,b1,0.605,Lech Mazur Writing,2025-01-31,False,Amazon Nova Pro,Amazon Nova Pro,2024-12-03,lechmazur/writing Github repository
-m1,b2,0.76,MMLU,2020-09-07,True,Amazon Nova Pro,Amazon Nova Pro,2024-12-03,Stanford CRFM Leaderboard
-m2,b2,,MMLU,2020-09-07,True,Broken,Broken,2024-12-03,Somewhere
-m3,b3,0.5,,,,No Benchmark,No Benchmark,,

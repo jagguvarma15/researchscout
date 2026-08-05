@@ -23,6 +23,7 @@ import csv
 import io
 import logging
 import re
+import zipfile
 from dataclasses import dataclass
 from datetime import date
 
@@ -33,8 +34,60 @@ from researchscout.useragent import default_headers
 logger = logging.getLogger(__name__)
 
 MODELS_URL = "https://epoch.ai/data/notable_ai_models.csv"
-BENCHMARKS_URL = "https://epoch.ai/data/eci_benchmarks.csv"
+BENCHMARKS_URL = "https://epoch.ai/data/benchmark_data.zip"
 _REQUEST_TIMEOUT = 60.0
+
+#: Columns in a benchmark file that hold a number without holding a score. The score is found
+#: positionally (see :func:`score_column`), and these sit inside the range it searches.
+_NOT_A_SCORE = frozenset({"release date", "training compute (flop)", "step budget"})
+
+#: Where the metadata block starts in every benchmark file: model identification and scores
+#: come before it, and nothing after it is a score.
+_METADATA_START = "release date"
+
+#: Benchmark files that are not a benchmark.
+_NOT_A_BENCHMARK = frozenset({"epoch_capabilities_index"})
+
+#: How a benchmark is written when the field writes it a particular way. Deriving the name from
+#: the file stem gets "Gpqa diamond" and "Swe bench verified", which nobody calls them. Only the
+#: ones with a settled spelling are listed; anything else falls back to the derived form, which
+#: is serviceable and self-maintaining as the hub adds files.
+#:
+#: These names also decide the ids, since a benchmark is keyed by a slug of its name. Renaming
+#: one here changes the URL of its leaderboard, so it is worth getting right once.
+_DISPLAY_NAMES = {
+    "adversarial_nli": "Adversarial NLI",
+    "arc_agi": "ARC-AGI",
+    "arc_agi_2": "ARC-AGI-2",
+    "bbh": "BIG-Bench Hard",
+    "bool_q": "BoolQ",
+    "frontiermath": "FrontierMath",
+    "frontiermath_tier_4": "FrontierMath Tier 4",
+    "gdpval": "GDPval",
+    "gpqa_diamond": "GPQA Diamond",
+    "gsm8k": "GSM8K",
+    "hella_swag": "HellaSwag",
+    "hle": "Humanity's Last Exam",
+    "lambada": "LAMBADA",
+    "live_bench": "LiveBench",
+    "math_level_5": "MATH Level 5",
+    "mmlu": "MMLU",
+    "open_book_qa": "OpenBookQA",
+    "os_world": "OSWorld",
+    "osworld_2": "OSWorld 2",
+    "otis_mock_aime_2024_2025": "OTIS Mock AIME",
+    "piqa": "PIQA",
+    "science_qa": "ScienceQA",
+    "scicode": "SciCode",
+    "simpleqa_verified": "SimpleQA Verified",
+    "superglue": "SuperGLUE",
+    "swe_bench_verified": "SWE-bench Verified",
+    "terminalbench": "Terminal-Bench",
+    "trivia_qa": "TriviaQA",
+    "video_mme": "Video-MME",
+    "webdev_arena": "WebDev Arena",
+    "wino_grande": "WinoGrande",
+}
 
 _ARXIV_LINK = re.compile(r"arxiv\.org/(?:abs|pdf)/([0-9]{4}\.[0-9]{4,5})(?:v\d+)?")
 
@@ -58,7 +111,12 @@ class ModelRecord:
 
 @dataclass(frozen=True)
 class BenchmarkScore:
-    """One model's score on one benchmark."""
+    """One model's score on one benchmark.
+
+    ``organization`` and ``training_compute_flop`` ride along because the benchmark files carry
+    them, and a model that has been measured but is not in the notable-models catalogue would
+    otherwise have no row to link to - which is most of the leaderboard.
+    """
 
     benchmark: str
     model: str
@@ -66,6 +124,8 @@ class BenchmarkScore:
     benchmark_release_date: date | None
     measured_on: date | None
     origin: str | None
+    organization: str | None = None
+    training_compute_flop: float | None = None
 
 
 def _clean(value: str | None) -> str | None:
@@ -149,41 +209,105 @@ def parse_models(text: str) -> list[ModelRecord]:
     return records
 
 
-def parse_benchmarks(text: str) -> list[BenchmarkScore]:
-    """Parse the benchmark CSV. Rows missing a benchmark, a model or a score are skipped."""
+def benchmark_name(filename: str) -> str:
+    """Turn ``gpqa_diamond.csv`` into ``Gpqa diamond``, which the slug then keys on.
+
+    The file name is the only place the benchmark is named - the rows inside carry models, not
+    the thing they were measured against - so the name comes from here. ``_external`` marks a
+    score Epoch collected from somebody else's leaderboard rather than ran itself; that is a
+    provenance fact, recorded per score, not part of what the benchmark is called.
+    """
+    stem = filename.rsplit("/", 1)[-1].removesuffix(".csv").removesuffix("_external")
+    return _DISPLAY_NAMES.get(stem) or stem.replace("_", " ").strip().capitalize()
+
+
+def score_column(fieldnames: list[str], rows: list[dict[str, str]]) -> str | None:
+    """Which column holds the score, or None when the file has no usable one.
+
+    Found by position rather than by name, because the name is per-benchmark: mean_score,
+    Accuracy mean, Percent correct, Pass@1, Win Rate (%), Pooled score, and so on for seventy
+    files. What every file does share is a shape - the model, then its scores, then a metadata
+    block beginning at "Release date" - so the score is the first column before that block
+    whose values are numbers. That skips a categorical qualifier like Agent or Scaffold without
+    having to know it exists, and it survives a benchmark being added with yet another name.
+    """
+    for name in fieldnames:
+        lowered = name.strip().casefold()
+        if lowered == _METADATA_START:
+            return None  # reached the metadata block without finding one
+        if lowered in _NOT_A_SCORE or lowered == "model version":
+            continue
+        if any(_number(row.get(name)) is not None for row in rows):
+            return name
+    return None
+
+
+def parse_benchmark_file(filename: str, text: str) -> list[BenchmarkScore]:
+    """Parse one benchmark's CSV out of the archive; an unreadable shape yields nothing."""
+    reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
+    if not rows or not reader.fieldnames:
+        return []
+    column = score_column(list(reader.fieldnames), rows)
+    if column is None:
+        logger.info("no score column in %s, skipping it", filename)
+        return []
+
+    name = benchmark_name(filename)
+    origin = "Epoch AI" if not filename.endswith("_external.csv") else "External leaderboard"
     scores: list[BenchmarkScore] = []
-    for row in csv.DictReader(io.StringIO(text)):
-        benchmark = _clean(row.get("benchmark"))
-        model = _clean(row.get("Model")) or _clean(row.get("model"))
-        value = _number(row.get("performance"))
-        if benchmark is None or model is None or value is None:
+    for row in rows:
+        model = _clean(row.get("Model version")) or _clean(row.get("Model"))
+        value = _number(row.get(column))
+        if model is None or value is None:
             continue
         scores.append(
             BenchmarkScore(
-                benchmark=benchmark,
+                benchmark=name,
                 model=model,
                 score=value,
-                benchmark_release_date=_date(row.get("benchmark_release_date")),
-                measured_on=_date(row.get("date")),
-                origin=_clean(row.get("source")),
+                benchmark_release_date=None,
+                measured_on=_date(row.get("Release date")),
+                origin=origin,
+                organization=_clean(row.get("Organization")),
+                training_compute_flop=_number(row.get("Training compute (FLOP)")),
             )
         )
     return scores
 
 
-def _get(url: str) -> str:
+def parse_benchmarks(payload: bytes) -> list[BenchmarkScore]:
+    """Parse every benchmark in the archive.
+
+    One CSV per benchmark, plus a README and the capabilities index. The index is a composite
+    of the others rather than a benchmark anyone was measured against, so it is left out: it
+    would appear on a leaderboard as a score with no test behind it.
+    """
+    scores: list[BenchmarkScore] = []
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        for name in sorted(archive.namelist()):
+            if not name.endswith(".csv") or "/" in name:
+                continue
+            if name.removesuffix(".csv") in _NOT_A_BENCHMARK:
+                continue
+            text = archive.read(name).decode("utf-8", "replace")
+            scores.extend(parse_benchmark_file(name, text))
+    return scores
+
+
+def _get(url: str) -> httpx.Response:
     response = httpx.get(
         url, headers=default_headers(), timeout=_REQUEST_TIMEOUT, follow_redirects=True
     )
     response.raise_for_status()
-    return response.text
+    return response
 
 
 def fetch_models() -> list[ModelRecord]:
     """Download and parse the notable-models catalogue."""
-    return parse_models(_get(MODELS_URL))
+    return parse_models(_get(MODELS_URL).text)
 
 
 def fetch_benchmarks() -> list[BenchmarkScore]:
-    """Download and parse the benchmark scores."""
-    return parse_benchmarks(_get(BENCHMARKS_URL))
+    """Download and parse every benchmark in the hub's archive."""
+    return parse_benchmarks(_get(BENCHMARKS_URL).content)
