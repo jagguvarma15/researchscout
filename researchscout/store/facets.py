@@ -42,6 +42,11 @@ class PaperFacets:
     author: str | None = None
     venue: str | None = None
     min_citations: int | None = None
+    #: Paper ids to leave out entirely. This is what dismissing a paper does, and it is applied
+    #: here rather than by dropping rows after the query so that ``total`` and the pager agree
+    #: with what is actually on the page. Deliberately not applied under ``q``: a paper you
+    #: dismissed from the feed should still be findable when you go looking for it.
+    exclude: list[str] | None = None
 
 
 def _escape_like(value: str) -> str:
@@ -134,6 +139,8 @@ def facets_where(facets: PaperFacets) -> ColumnElement[bool] | None:
         clauses.append(PaperRow.venue.ilike(pattern, escape="\\"))
     if facets.min_citations is not None:
         clauses.append(PaperRow.citation_count >= facets.min_citations)
+    if facets.exclude:
+        clauses.append(PaperRow.id.not_in(facets.exclude))
     if not clauses:
         return None
     return and_(*clauses)
