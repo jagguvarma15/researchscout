@@ -8,6 +8,8 @@
 // With AUTH0_DOMAIN unset the whole module stays dormant and the site runs as the built-in
 // local user, exactly as it did before sign-in existed - the same switch the API uses.
 
+import { createHash } from 'node:crypto';
+
 import { EncryptJWT, jwtDecrypt } from 'jose';
 import * as oidc from 'openid-client';
 
@@ -56,12 +58,15 @@ function configuration(): Promise<oidc.Configuration> {
 }
 
 function key(): Uint8Array {
-  // A 32-byte key for A256GCM. Any secret works; it is stretched by hashing to a fixed length
-  // so operators are not forced to generate exactly 32 bytes of base64.
-  const bytes = new TextEncoder().encode(sessionSecret);
-  const out = new Uint8Array(32);
-  for (let i = 0; i < bytes.length; i += 1) out[i % 32] ^= bytes[i];
-  return out;
+  // A 32-byte key for A256GCM, derived by hashing so an operator is not forced to generate
+  // exactly 32 bytes of base64.
+  //
+  // This used to fold the secret into 32 bytes by XOR, which the comment already described as
+  // hashing and which is not the same thing: a secret shorter than 32 bytes left the tail of
+  // the key as zeroes, and two different secrets could fold to the same key. SHA-256 is one
+  // line and has neither property. Changing the derivation invalidates existing cookies, which
+  // signs everyone out once - the same thing rotating SESSION_SECRET does.
+  return new Uint8Array(createHash('sha256').update(sessionSecret, 'utf8').digest());
 }
 
 export async function sealSession(session: Session): Promise<string> {
