@@ -20,12 +20,24 @@ import httpx
 
 from researchscout.config import get_settings
 from researchscout.schema import Author, Paper, canonical_id, normalize_arxiv_id
-from researchscout.sources.base import HealthStatus, RawItem, Source, register, source_config
+from researchscout.sources.base import (
+    HealthStatus,
+    RawItem,
+    Source,
+    register,
+    retry_wait,
+    source_config,
+)
 from researchscout.useragent import default_headers
 
 _API_URL = "https://export.arxiv.org/api/query"
 _DEFAULT_CATEGORIES = ("cs.LG", "cs.AI", "cs.CL")
 _REQUEST_TIMEOUT = 30.0
+# Load-shedding responses worth one more try. Everything else raises immediately: a 400 will
+# not get better, and retrying it just spends the pacing budget.
+_RETRY_STATUSES = frozenset({429, 503})
+_RETRY_MAX = 2
+_RETRY_WAIT_CAP = 120.0
 
 # arXiv asks for no more than one request every three seconds on a single connection. The
 # floor is per process, not per fetch: paging, a second category's first page and a health
@@ -76,24 +88,39 @@ class ArxivSource(Source):
         hi = datetime.now(UTC).strftime("%Y%m%d%H%M")
         return f"({cats}) AND submittedDate:[{lo} TO {hi}]"
 
+    def _get(self, params: dict[str, str]) -> httpx.Response:
+        """One paced GET, with brief bounded retries when arXiv sheds load.
+
+        429 and 503 usually carry a Retry-After; honor it up to a cap and fall back to a short
+        doubling wait without one. After the bounded attempts the error surfaces — the pipeline
+        treats it as stop-here-keep-progress, so holding the run open longer buys nothing.
+        """
+        for attempt in range(_RETRY_MAX + 1):
+            self._pace()
+            resp = httpx.get(
+                _API_URL,
+                params=params,
+                headers=default_headers(),
+                timeout=_REQUEST_TIMEOUT,
+                follow_redirects=True,
+            )
+            if resp.status_code not in _RETRY_STATUSES or attempt == _RETRY_MAX:
+                resp.raise_for_status()
+                return resp
+            self._sleep(retry_wait(resp.headers.get("Retry-After"), attempt, cap=_RETRY_WAIT_CAP))
+        raise AssertionError("unreachable")
+
     def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
         start = int(cursor) if cursor else 0
-        self._pace()
-        params = {
-            "search_query": self._search_query(since),
-            "start": str(start),
-            "max_results": str(self.page_size),
-            "sortBy": "submittedDate",
-            "sortOrder": "descending",
-        }
-        resp = httpx.get(
-            _API_URL,
-            params=params,
-            headers=default_headers(),
-            timeout=_REQUEST_TIMEOUT,
-            follow_redirects=True,
+        resp = self._get(
+            {
+                "search_query": self._search_query(since),
+                "start": str(start),
+                "max_results": str(self.page_size),
+                "sortBy": "submittedDate",
+                "sortOrder": "descending",
+            }
         )
-        resp.raise_for_status()
         feed = feedparser.parse(resp.text)
         fetched_at = datetime.now(UTC)
         items = [
