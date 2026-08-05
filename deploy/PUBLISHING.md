@@ -54,6 +54,27 @@ With no edge in front of the API any more, that in-process limiter is the only l
 per process and resets on restart - adequate for this scale, and worth remembering before
 posting the link somewhere busy.
 
+### Prove the deployment is current
+
+After every `make deploy-build && make deploy-up`, run:
+
+```bash
+make deploy-verify
+```
+
+It reads `GET /v1/system/status` on :8001 and answers the three questions that matter: is the
+running image built from the commit checked out here (the build SHA is stamped at
+`deploy-build`), did the migrations land, and are the scheduled runs actually happening (the
+`scheduler_runs` ledger, with the newest paper's age beside it). It exits nonzero when the
+deployment is unreachable, stale, or missing the catalogue routes - each with a message saying
+which. The web footer's "Newest paper" line reads the same endpoint, so staleness is also
+visible on the page itself.
+
+Worth internalising once: `docker restart` and a reboot keep the old image and the old
+container environment. Only `deploy-build` + `deploy-up` (which recreates the containers)
+delivers merged code and new compose defaults - that gap is how the stack once ran for two
+days on stale code while looking perfectly healthy.
+
 ## 2. Auth0
 
 Three things get created, and each hands back values that go somewhere specific. The gotchas
