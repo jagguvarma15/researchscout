@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 import researchscout.api.routers.catalog as catalog_router
 from researchscout.api.deps import get_session
 from researchscout.api.main import create_app
+from researchscout.store.catalog import ModelFilters, ScoreColumn
 
 
 def _client() -> TestClient:
@@ -52,6 +53,7 @@ def _benchmark(**overrides: object) -> SimpleNamespace:
         "name": "GPQA diamond",
         "released_on": date(2023, 11, 20),
         "result_count": 133,
+        "score_scale": "fraction",
     }
     fields.update(overrides)
     return SimpleNamespace(**fields)
@@ -92,20 +94,54 @@ def test_model_filters_reach_the_store(monkeypatch: pytest.MonkeyPatch) -> None:
     response = _client().get(
         "/v1/models",
         params={
+            "q": "opus",
             "organization": "OpenAI",
             "domain": "Language",
             "open_weights": "true",
             "with_paper": "true",
+            "sort": "parameters",
             "limit": 10,
             "offset": 20,
         },
     )
     assert response.status_code == 200
-    assert seen["organization"] == "OpenAI"
-    assert seen["domain"] == "Language"
-    assert seen["open_weights"] is True
-    assert seen["with_paper"] is True
+    # One object carrying every filter, so the list and the count cannot be given different ones.
+    filters = seen["filters"]
+    assert isinstance(filters, ModelFilters)
+    assert filters.organization == "OpenAI"
+    assert filters.domain == "Language"
+    assert filters.open_weights is True
+    assert filters.with_paper is True
+    assert filters.query == "opus"
+    assert seen["sort"] == "parameters"
     assert (seen["limit"], seen["offset"]) == (10, 20)
+
+
+def test_the_count_is_given_the_same_filters_as_the_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A count that filters differently from its list is a pager onto empty pages."""
+    given: list[object] = []
+
+    monkeypatch.setattr(
+        catalog_router.catalog,
+        "list_models",
+        lambda session, **kwargs: given.append(kwargs["filters"]) or [],
+    )
+    monkeypatch.setattr(
+        catalog_router.catalog,
+        "count_models",
+        lambda session, **kwargs: given.append(kwargs["filters"]) or 0,
+    )
+    _client().get("/v1/models", params={"organization": "OpenAI", "with_paper": "true"})
+
+    assert len(given) == 2
+    assert given[0] == given[1]
+
+
+def test_an_unknown_sort_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A typo in a sort key should say so rather than silently ordering by something else."""
+    monkeypatch.setattr(catalog_router.catalog, "list_models", lambda *a, **k: [])
+    monkeypatch.setattr(catalog_router.catalog, "count_models", lambda *a, **k: 0)
+    assert _client().get("/v1/models", params={"sort": "populariy"}).status_code == 422
 
 
 def test_asking_for_one_paper_lists_what_came_out_of_it(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -125,7 +161,7 @@ def test_asking_for_one_paper_lists_what_came_out_of_it(monkeypatch: pytest.Monk
 def test_a_model_detail_carries_its_scores(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(catalog_router.catalog, "get_model", lambda *a, **k: _model())
     monkeypatch.setattr(
-        catalog_router.catalog, "results_for_model", lambda *a, **k: [("MMLU", 0.76)]
+        catalog_router.catalog, "results_for_model", lambda *a, **k: [("MMLU", 0.76, "fraction")]
     )
     body = _client().get("/v1/models/whisper").json()
     assert body["scores"] == [
@@ -136,6 +172,7 @@ def test_a_model_detail_carries_its_scores(monkeypatch: pytest.MonkeyPatch) -> N
             "score": 0.76,
             "measured_on": None,
             "origin": None,
+            "scale": "fraction",
         }
     ]
 
@@ -154,6 +191,7 @@ def test_benchmarks_list(monkeypatch: pytest.MonkeyPatch) -> None:
             "name": "GPQA diamond",
             "released_on": "2023-11-20",
             "result_count": 133,
+            "score_scale": "fraction",
         }
     ]
 
@@ -191,3 +229,41 @@ def test_a_benchmark_detail_is_a_leaderboard(monkeypatch: pytest.MonkeyPatch) ->
 def test_an_unknown_benchmark_is_404(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(catalog_router.catalog, "get_benchmark", lambda *a, **k: None)
     assert _client().get("/v1/benchmarks/nope").status_code == 404
+
+
+def test_the_provider_comparison_carries_its_columns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The columns come back beside the rows: a score is keyed by benchmark, not positional."""
+    entry = SimpleNamespace(
+        provider="Anthropic",
+        country="United States",
+        model_id="claude-opus-5",
+        model_name="Claude Opus 5",
+        published_on=date(2026, 1, 1),
+        paper_id=None,
+        open_weights=False,
+        scores={"gpqa-diamond": 0.91},
+    )
+    monkeypatch.setattr(
+        catalog_router.catalog,
+        "provider_leaders",
+        lambda *a, **k: (
+            [entry],
+            [ScoreColumn(id="gpqa-diamond", name="GPQA Diamond", scale="fraction")],
+        ),
+    )
+    body = _client().get("/v1/providers").json()
+
+    assert body["columns"] == [{"id": "gpqa-diamond", "name": "GPQA Diamond", "scale": "fraction"}]
+    item = body["items"][0]
+    assert item["provider"] == "Anthropic"
+    assert item["country"] == "United States"
+    assert item["model_name"] == "Claude Opus 5"
+    assert item["scores"] == {"gpqa-diamond": 0.91}
+
+
+def test_an_unconfigured_comparison_is_empty_rather_than_an_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(catalog_router.catalog, "provider_leaders", lambda *a, **k: ([], []))
+    body = _client().get("/v1/providers").json()
+    assert body == {"columns": [], "items": []}
