@@ -38,8 +38,15 @@
   /**
    * Take a card out of the feed, and hand back the function that puts it back where it was.
    *
+   * The leaving is animated: the height is fixed first so it can transition to zero, the
+   * class lands on the next frame so the browser paints the start values once, and the node
+   * only detaches when the collapse has run (a timer guarantees it even if transitionend
+   * never fires). The old version added the class and removed the node in the same breath,
+   * which is an animation that never renders a frame. Under reduced motion the removal is
+   * synchronous, exactly as before.
+   *
    * A day heading with nothing under it is a lie about the timeline, so an emptied list takes
-   * its whole section with it - and undo restores that too.
+   * its whole section with it - and undo restores that too, mid-animation or after.
    */
   function remove(card: HTMLElement): () => void {
     const list = card.parentElement;
@@ -47,13 +54,39 @@
     const section = list?.closest<HTMLElement>('.day');
     const wasOnlyCard = list?.children.length === 1;
 
-    card.classList.add('going');
-    card.remove();
-    if (wasOnlyCard && section) section.hidden = true;
+    let settled = false;
+    const finish = () => {
+      card.remove();
+      card.classList.remove('going');
+      card.style.removeProperty('height');
+      if (wasOnlyCard && section) section.hidden = true;
+    };
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      settled = true;
+      finish();
+    } else {
+      card.style.height = `${card.offsetHeight}px`;
+      requestAnimationFrame(() => {
+        card.classList.add('going');
+        card.style.height = '0px';
+      });
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        finish();
+      };
+      card.addEventListener('transitionend', settle, { once: true });
+      setTimeout(settle, 400);
+    }
 
     return () => {
-      if (list) list.insertBefore(card, before);
+      // Undo can arrive mid-collapse; claiming `settled` first stops the pending finish
+      // from removing the card that was just put back.
+      settled = true;
+      if (!card.isConnected && list) list.insertBefore(card, before);
       card.classList.remove('going');
+      card.style.removeProperty('height');
       if (section) section.hidden = false;
     };
   }
