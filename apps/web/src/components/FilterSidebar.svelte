@@ -4,7 +4,9 @@
   // query params and navigates, so results are server-rendered, shareable, and the back
   // button works. Nothing applies live.
 
+  import { navigate } from 'astro:transitions/client';
   import { SlidersHorizontal, X } from 'lucide-svelte';
+  import { onDestroy } from 'svelte';
 
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
   import { SUBJECTS, subjectCategories, TOPICS } from '../lib/taxonomy';
@@ -29,6 +31,10 @@
   let panel: HTMLElement | undefined = $state();
   let previousFocus: Element | null = null;
   let unlockScroll: (() => void) | null = null;
+
+  // Applying filters now navigates through the client router, which destroys this island
+  // while it is open - the scroll lock must not outlive it on the next page's body.
+  onDestroy(() => unlockScroll?.());
 
   const knownCodes = new Set(
     SUBJECTS.flatMap((subject) => subjectCategories(subject.key).map((cat) => cat.code)),
@@ -144,14 +150,16 @@
     if (venue.trim()) params.set('venue', venue.trim());
     const query = params.toString();
     rememberFilters(query);
-    window.location.assign(query ? `/?${query}` : '/');
+    // Through the client router, so applying filters animates the feed change instead of
+    // reloading the document.
+    void navigate(query ? `/?${query}` : '/');
   }
 
   function reset() {
     // Clearing the filters clears what is remembered too, or the next visit would offer back
     // the very thing that was just thrown away.
     rememberFilters('');
-    window.location.assign('/');
+    void navigate('/');
   }
 </script>
 
@@ -373,6 +381,9 @@
     background: rgb(0 0 0 / 0.32);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
+    /* The rail slides; this used to pop. Same vocabulary now - fade the veil, slide the
+       sheet - and the global motion guard stills both under reduced motion. */
+    animation: sidebar-fade var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
   .panel {
     position: absolute;
@@ -385,6 +396,18 @@
     background: var(--surface, #fff);
     border-right: 1px solid var(--line, #e6e1d5);
     box-shadow: var(--shadow-md, 0 12px 32px rgb(23 25 28 / 0.12));
+    animation: sidebar-in var(--dur-slow, 0.25s) var(--ease-out, ease);
+  }
+  @keyframes sidebar-fade {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes sidebar-in {
+    from {
+      transform: translateX(-1.5rem);
+      opacity: 0;
+    }
   }
   header {
     display: flex;
