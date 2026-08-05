@@ -470,6 +470,80 @@
         }
       ],
       "id": 8
+    },
+    {
+      "type": "table",
+      "title": "Scheduler runs",
+      "description": "The run ledger: every scheduled task with its outcome and duration. This answers whether the 05:00 slot actually fired, which the freshness stat alone cannot.",
+      "datasource": {
+        "type": "postgres",
+        "uid": "${DS_POSTGRES}"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "ok"
+            },
+            "properties": [
+              {
+                "id": "custom.cellOptions",
+                "value": {
+                  "type": "color-background"
+                }
+              },
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "type": "value",
+                    "options": {
+                      "true": {
+                        "color": "green",
+                        "index": 0
+                      },
+                      "false": {
+                        "color": "red",
+                        "index": 1
+                      }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawQuery": true,
+          "editorMode": "code",
+          "datasource": {
+            "type": "postgres",
+            "uid": "${DS_POSTGRES}"
+          },
+          "rawSql": "\nSELECT finished_at AS \"finished\", task, ok::text AS ok, round(extract(epoch FROM (finished_at - started_at)))::int AS \"seconds\", note\nFROM scheduler_runs\nORDER BY finished_at DESC\nLIMIT 40\n"
+        }
+      ],
+      "id": 9
     }
   ],
   "refresh": "5m",
