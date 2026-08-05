@@ -44,6 +44,29 @@ logger = logging.getLogger(__name__)
 EPOCH_SOURCE = "epoch_ai"
 HF_SOURCE = "huggingface_models"
 
+#: The fields each upstream is the authority for: what it says replaces what is stored, and
+#: everything else it supplies only fills a gap. Epoch AI describes a model - who built it, how
+#: large, on how much compute, under what licence, and the work it came from. The Hub knows how
+#: much it is downloaded and nothing else that is not a guess: its "organisation" is a
+#: repository owner and its link is that repository. Splitting them this way is what stops the
+#: refresh order from deciding what a model both describe looks like.
+EPOCH_FIELDS = frozenset(
+    {
+        "organization",
+        "publication_date",
+        "domains",
+        "task",
+        "parameters",
+        "training_compute_flop",
+        "accessibility",
+        "open_weights",
+        "link",
+    }
+)
+HF_FIELDS = frozenset({"hf_repo", "hf_downloads", "hf_likes"})
+# paper_id is in neither: link_models_to_papers sets it once both have been written, so an
+# upsert must never do more than fill it in when it happens to be empty.
+
 
 @dataclass
 class CatalogSummary:
@@ -144,14 +167,19 @@ def _hub_models(session: Session) -> tuple[list[ModelUpsert], dict[str, str]]:
 def refresh_catalog(session: Session) -> CatalogSummary:
     """Refresh both upstreams, merge them, and join what can be joined to the corpus.
 
-    Order matters twice. Epoch AI is written before the Hub, so its richer description wins the
-    fields both know and the Hub fills the gaps it leaves -- though only weakly, since a None
-    never overwrites. And every model source is written before any benchmark source, because a
-    score can only link to a model that is already a row.
+    Order matters once, and used to matter twice. Every model source is written before any
+    benchmark source, because a score can only link to a model that is already a row.
+
+    What no longer matters is which of the two model sources runs first: each declares the
+    fields it is the authority for (``EPOCH_FIELDS``, ``HF_FIELDS``) and can only fill gaps in
+    the rest. Before that, running second was the same as being right, and the Hub ran second.
     """
     summary = CatalogSummary()
     failed: list[str] = []
     claims: dict[str, str] = {}
+    # Slugs rather than a running total: a model both upstreams describe is one row, and
+    # counting it twice made the log overstate the catalogue by however much they overlap.
+    written: set[str] = set()
 
     # Every model source before any benchmark source: a score links to a model only when that
     # model is already a row, so writing the catalogue first is what gives the leaderboard the
@@ -159,7 +187,8 @@ def refresh_catalog(session: Session) -> CatalogSummary:
     if _enabled(EPOCH_SOURCE):
         try:
             upserts, model_claims = _epoch_models(session)
-            summary.models += upsert_models(session, upserts)
+            upsert_models(session, upserts, authoritative=EPOCH_FIELDS)
+            written |= {key for model in upserts if (key := slug(model.name))}
             claims.update(model_claims)
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("epoch models refresh failed: %s", exc)
@@ -168,7 +197,8 @@ def refresh_catalog(session: Session) -> CatalogSummary:
     if _enabled(HF_SOURCE):
         try:
             upserts, model_claims = _hub_models(session)
-            summary.models += upsert_models(session, upserts)
+            upsert_models(session, upserts, authoritative=HF_FIELDS)
+            written |= {key for model in upserts if (key := slug(model.name))}
             # A model in both keeps the Epoch link, which points at the paper of record rather
             # than at whichever paper the model card happened to cite.
             for key, paper_id in model_claims.items():
@@ -176,6 +206,8 @@ def refresh_catalog(session: Session) -> CatalogSummary:
         except (httpx.HTTPError, ValueError) as exc:
             logger.warning("hugging face models refresh failed: %s", exc)
             failed.append(HF_SOURCE)
+
+    summary.models = len(written)
 
     summary.linked = link_models_to_papers(session, claims)
 
@@ -191,23 +223,55 @@ def refresh_catalog(session: Session) -> CatalogSummary:
 
 
 def _refresh_benchmarks(session: Session) -> tuple[int, int]:
-    """Group the flat score list by benchmark and write each one; returns (benchmarks, scores)."""
-    grouped: dict[str, list[epoch.BenchmarkScore]] = defaultdict(list)
-    for score in epoch.fetch_benchmarks():
-        grouped[score.benchmark].append(score)
+    """Group the flat score list by benchmark and write each one; returns (benchmarks, scores).
 
-    # Read once: the models are all written by now, and asking per score would be a query per
-    # row for a few thousand rows.
+    Grouped by slug rather than by the printed name, because the slug is the key the rows are
+    written under. Two spellings of one benchmark grouped separately and then collided on
+    write, and the second group's ``result_count`` replaced the first's rather than joining it.
+    """
+    grouped: dict[str, list[epoch.BenchmarkScore]] = defaultdict(list)
+    display: dict[str, str] = {}
+    for score in epoch.fetch_benchmarks():
+        key = slug(score.benchmark)
+        if not key:
+            continue
+        grouped[key].append(score)
+        display.setdefault(key, score.benchmark)
+
+    # The benchmark files carry the organisation and the training compute of every model they
+    # measure, and most of those models are not in the notable-models catalogue - a leaderboard
+    # covers what has been evaluated, the catalogue what somebody judged notable. Writing them
+    # as rows first is what gives each one a page to link to instead of an "unlisted" marker,
+    # and what lets the provider comparison find a lab's newest measured model at all. Fill-only
+    # by construction: this pass declares authority over nothing, so anything Epoch's own
+    # catalogue says about the same model still wins.
+    measured = {
+        key: ModelUpsert(
+            name=score.model,
+            organization=score.organization,
+            training_compute_flop=score.training_compute_flop,
+            publication_date=score.measured_on,
+            source=EPOCH_SOURCE,
+        )
+        for scores in grouped.values()
+        for score in scores
+        if (key := slug(score.model))
+    }
+    if measured:
+        upsert_models(session, list(measured.values()))
+
+    # Read once, after that: the models are all written by now, and asking per score would be a
+    # query per row for a few thousand rows.
     known = known_model_ids(session)
     benchmarks = 0
     results = 0
-    for name, scores in grouped.items():
+    for key, scores in grouped.items():
         released = next(
             (s.benchmark_release_date for s in scores if s.benchmark_release_date), None
         )
         written = replace_benchmark_results(
             session,
-            name,
+            display[key],
             released,
             [(s.model, s.score, s.measured_on, s.origin) for s in scores],
             known,
