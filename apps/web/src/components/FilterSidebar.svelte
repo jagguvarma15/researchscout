@@ -105,8 +105,28 @@
     if (panel) trapFocus(panel, event);
   }
 
+  /**
+   * Remember the filter state, so the next visit can offer it back.
+   *
+   * Not awaited and never blocking: the navigation below is already happening, and a cache
+   * write must not be in front of it. A signed-out visitor gets a 401 that costs nothing.
+   */
+  function rememberFilters(query: string) {
+    void fetch('/api/me/filters', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query_string: query }),
+      keepalive: true,
+    }).catch(() => undefined);
+  }
+
   function extract() {
     const params = new URLSearchParams();
+    // The search term rides along. Building the query from nothing dropped it, so opening the
+    // filters while searching for something and pressing Extract silently abandoned the search
+    // - and the toolbar's technique toggles, which preserve every parameter, disagreed.
+    const searching = new URLSearchParams(window.location.search).get('q');
+    if (searching) params.set('q', searching);
     for (const key of subjects) params.append('subject', key);
     for (const key of topics) params.append('topic', key);
     const textCodes = categoriesText.split(/[\s,]+/).filter(Boolean);
@@ -123,10 +143,14 @@
     if (author.trim()) params.set('author', author.trim());
     if (venue.trim()) params.set('venue', venue.trim());
     const query = params.toString();
+    rememberFilters(query);
     window.location.assign(query ? `/?${query}` : '/');
   }
 
   function reset() {
+    // Clearing the filters clears what is remembered too, or the next visit would offer back
+    // the very thing that was just thrown away.
+    rememberFilters('');
     window.location.assign('/');
   }
 </script>
