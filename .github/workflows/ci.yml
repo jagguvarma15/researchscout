@@ -11,10 +11,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - run: uv sync
       - run: uv run ruff check researchscout tests
       - run: uv run ruff format --check researchscout tests
       - run: uv run mypy researchscout
+      # A branch in the migration history only shows up when something tries to run it, which
+      # is on a deployment. `heads` prints one line per head, so anything but one is a merge
+      # waiting to happen.
+      - name: Check the migrations have a single head
+        run: |
+          heads=$(uv run alembic heads | grep -c . || true)
+          [ "$heads" = "1" ] || { uv run alembic heads; echo "expected one head, found $heads"; exit 1; }
       - run: uv run pytest -m "not integration"
 
   integration:
@@ -25,6 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
       - run: uv sync
       # testcontainers starts pgvector on the runner's Docker daemon.
       - run: uv run pytest -m integration
