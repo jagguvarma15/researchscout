@@ -38,9 +38,10 @@ properly. Star papers (`/saved`), run `make digest` and visit `/digests` for the
 `/topics` clusters recent papers into emerging themes ranked by momentum, `/for-you`
 personalizes the feed from your interests, and `/models` and `/benchmarks` carry the AI
 landscape beside the papers - which models exist, how large they are, what they score, and which
-of them came out of a paper in this corpus. Dismiss sends a paper to the end of its day rather
-than hiding it. `make stop` shuts everything down; `make clean` also wipes the data; plain
-`make` lists every target.
+of them came out of a paper in this corpus. Dismiss takes a paper out of the feed and keeps it
+out on the next visit, with an Undo in the confirmation; it stays searchable and its own page
+still opens, because a dismissal says "not among what is new" rather than "hide this". `make
+stop` shuts everything down; `make clean` also wipes the data; plain `make` lists every target.
 
 ## Streaming pipeline
 
@@ -63,7 +64,9 @@ whenever the broker is down.
 
 Every scheduled task runs on an interval by default, which is what a local checkout wants: a
 fresh process does its work at once and then every N seconds. A deployment tracking a
-publisher's day wants a clock instead, so two settings move the named tasks onto one:
+publisher's day wants a clock instead, so two settings move the named tasks onto one - and the
+deployment stack sets them, along with `RS_SCHEDULER_BATCH_PIPELINE`, as its compose defaults
+rather than relying on `deploy/.env` carrying them:
 
 ```bash
 RS_SCHEDULER_PIPELINE_AT=05:00,10:00,14:00,17:00   # ingest, index, full text, signals
@@ -81,24 +84,29 @@ ignores the clock entirely and runs everything, which is what a host cron entry 
 
 ## Monitoring
 
-The Corpus dashboard lives in `config/grafana/dashboards/` as JSON, and is hosted on Grafana
-Cloud rather than by a local Grafana - the free tier costs nothing, and the machine at home has
-better uses for the memory. It shows paper, keyword, full-text, chunk, signal and topic totals,
-papers and signals per day, enrichment coverage, and topics by size.
+Six dashboards live in `config/grafana/dashboards/` as JSON, hosted on Grafana Cloud rather
+than by a local Grafana - the free tier costs nothing, and the machine at home has better uses
+for the memory. **Ingest health** answers whether anything is still arriving and how enriched it
+is once it does; **Corpus** how much is here; **Answers** what people ask Scout and how long it
+takes; **Engagement** what readers open and dismiss; **Signals and sources** where the momentum
+numbers come from and whether each upstream is still replying; **Catalogue** the models and
+benchmarks beside the papers.
 
-It reads the corpus tables in Postgres directly - no exporters and no metrics agent, and the
-numbers accrue whether anything is watching or not. Grafana Cloud reaches that database through
-Private Data Source Connect: an agent in the deployment stack opens an outbound tunnel, so the
-database needs no inbound rule and no public address. Setting it up, including the read-only
-login the dashboard uses, is section 4 of `deploy/PUBLISHING.md`.
+They read the tables in Postgres directly - no exporters and no metrics agent, and the numbers
+accrue whether anything is watching or not. Grafana Cloud reaches that database through Private
+Data Source Connect: an agent in the deployment stack opens an outbound tunnel, so the database
+needs no inbound rule and no public address. Each dashboard declares a `DS_POSTGRES` input
+rather than naming a data source, so importing prompts for one and rewires every panel.
 
-Three further dashboards - pipeline throughput, per-event traces and a live architecture graph -
-were built against `pipeline_lineage`, which only the streaming worker writes. The deployment
-ingests in batches (`RS_SCHEDULER_BATCH_PIPELINE`), so they rendered empty and have been
-removed; `git log -- config/grafana/dashboards` has them if the stream comes back.
+`config/grafana/alerting/corpus-stale.yaml` is the one alert worth having: no new paper for
+thirty hours. Nothing else notices that ingestion has stopped, because the API stays up and
+every panel keeps showing yesterday's number.
 
-To read the dashboard against a development database instead, run a Grafana yourself and point
-it at `.local/pgdata`; the JSON file is portable.
+Setting all of it up, including the read-only login the dashboards use, is section 4 of
+`deploy/PUBLISHING.md`.
+
+To read them against a development database instead, run a Grafana yourself and point it at
+`.local/pgdata`; the files are portable.
 
 ## Deep backfill
 
@@ -141,6 +149,17 @@ Where a model card carries several arXiv tags, only the newest is treated as its
 others are what it stands on, and taking the first instead once filed half of Hugging Face under
 "Attention Is All You Need".
 
+Each upstream is the authority for the fields it actually knows: Epoch AI for what a model is
+(organisation, date, size, compute, licence, the work it came from) and the Hub for how much it
+is used. Neither can overwrite the other's half, so the order a refresh runs in decides nothing.
+
+`/models` sorts by release date, parameters, training compute, downloads, organisation or name,
+and searches by name; every model has its own page carrying its scores and its paper. Above the
+leaderboard on `/benchmarks` is a comparison of the major labs - each one's most recent measured
+model across the benchmarks the field leans on. Which labs appear and which benchmarks are the
+columns is editorial, so it lives in `config/providers.yaml`, aliases included: the same lab
+arrives as "Google DeepMind" from one upstream and "Google" from the other.
+
 ## Development
 
 Requires [uv](https://docs.astral.sh/uv/). The project pins Python 3.12 via `.python-version`
@@ -148,6 +167,7 @@ Requires [uv](https://docs.astral.sh/uv/). The project pins Python 3.12 via `.py
 
 ```bash
 uv sync                 # create the venv and install runtime + dev dependencies
+uv sync --extra stream  # plus bytewax and the kafka client, which `make setup` installs
 uv run scout --help     # see the CLI surface
 
 # checks
@@ -202,8 +222,9 @@ uv run scout serve api    # http://127.0.0.1:8000, OpenAPI docs at /docs
 Endpoints: `GET /healthz`, `GET /v1/papers` (recency feed; `?q=` switches to semantic ranking),
 `GET /v1/papers/{id}`, `GET /v1/topics` (emerging topics), `GET /v1/keywords` (corpus keyword
 dictionary with paper counts), `GET /v1/sources` (the registry with its attribution),
-`GET /v1/me/feed` (personalized), `GET /v1/models` and `GET /v1/benchmarks` (the AI landscape;
-`?paper_id=` lists what came out of one paper), and `POST /v1/ask` (grounded, cited answer).
+`GET /v1/me/feed` (personalized), `GET /v1/models` and `GET /v1/models/{id}`,
+`GET /v1/benchmarks` and `GET /v1/providers` (the AI landscape; `?paper_id=` lists what came out
+of one paper), and `POST /v1/ask` (grounded, cited answer).
 Signed-in callers also get `/v1/me/history`, `/v1/me/recent`, `/v1/me/dismissals` and
 `/v1/me/filters` - a per-account cache of site state, kept in unlogged tables. With `RS_OIDC_ISSUER` unset (the default) the API
 runs in local no-auth mode as a built-in user; set an issuer to require OIDC Bearer tokens.
