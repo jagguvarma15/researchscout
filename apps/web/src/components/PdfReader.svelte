@@ -166,7 +166,10 @@
     highlights = loadHighlights(paperId);
     const url = new URL(window.location.href);
     url.searchParams.set('read', '1');
-    history.replaceState(null, '', url);
+    // Spread, never null: the client router keeps its scroll position and entry index in
+    // history.state, and replacing it with null breaks scroll restoration and forward
+    // navigation for this entry.
+    history.replaceState({ ...history.state }, '', url);
     wake();
     if (doc === null) await load();
     else await tick();
@@ -197,7 +200,8 @@
     if (document.fullscreenElement) void document.exitFullscreen();
     const url = new URL(window.location.href);
     url.searchParams.delete('read');
-    history.replaceState(null, '', url);
+    // Spread for the same reason as in show(): the router's state must survive this.
+    history.replaceState({ ...history.state }, '', url);
     // Cancel every live render before destroying: destroying a document mid-render throws,
     // and a render still awaiting getPage would resolve against a dead document.
     releaseAll();
