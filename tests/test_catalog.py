@@ -555,3 +555,126 @@ def test_a_sort_runs_in_both_directions_with_nulls_last_either_way(session: Sess
     assert names(descending=False) == ["Small", "Huge", "Unknown"]
     # Unknown stays last ascending too: a missing parameter count is not a small one.
     assert names() == ["Huge", "Small", "Unknown"]  # the column's natural direction
+
+
+def test_recent_provider_models_cap_window_and_attribution(session: Session) -> None:
+    catalog.upsert_models(
+        session,
+        [
+            ModelUpsert(
+                name="GPT-6",
+                organization="OpenAI",
+                publication_date=date(2026, 7, 1),
+                source="epoch_ai",
+            ),
+            ModelUpsert(
+                name="GPT-5.5",
+                organization="OpenAI",
+                publication_date=date(2026, 5, 1),
+                source="epoch_ai",
+            ),
+            ModelUpsert(
+                name="GPT-5",
+                organization="OpenAI",
+                publication_date=date(2026, 3, 1),
+                source="epoch_ai",
+            ),
+            # A collaboration filed as one comma-joined credit attributes to the lab.
+            ModelUpsert(
+                name="Phi-5",
+                organization="Microsoft,University of Somewhere",
+                publication_date=date(2026, 6, 1),
+                source="epoch_ai",
+            ),
+            # Outside the window: recent is a claim, not a vibe.
+            ModelUpsert(
+                name="Old Thing",
+                organization="OpenAI",
+                publication_date=date(2024, 1, 1),
+                source="epoch_ai",
+            ),
+            # Whole-part matching: the community fork belongs to nobody.
+            ModelUpsert(
+                name="Community Remix",
+                organization="Mistral community",
+                publication_date=date(2026, 6, 15),
+                source="huggingface_models",
+            ),
+        ],
+    )
+    session.flush()
+
+    config = parse_providers(
+        {
+            "providers": [
+                {"name": "OpenAI"},
+                {"name": "Microsoft"},
+                {"name": "Mistral AI", "aliases": ["Mistral"]},
+            ]
+        }
+    )
+    items = catalog.recent_provider_models(session, config, since=date(2025, 8, 1), per_provider=2)
+
+    assert [item.name for item in items] == ["GPT-6", "Phi-5", "GPT-5.5"]
+    assert items[1].provider == "Microsoft"
+    assert items[0].published_on == date(2026, 7, 1)
+
+
+def test_headline_benchmarks_take_the_best_curated_score(session: Session) -> None:
+    catalog.upsert_models(
+        session,
+        [
+            ModelUpsert(
+                name="Claude Opus 5",
+                organization="Anthropic",
+                publication_date=date(2026, 1, 1),
+                source="epoch_ai",
+            ),
+            ModelUpsert(
+                name="Qwen3 Max",
+                organization="Qwen",
+                publication_date=date(2026, 2, 1),
+                source="epoch_ai",
+            ),
+            ModelUpsert(
+                name="Nobody Special",
+                organization="Unlisted Lab",
+                publication_date=date(2026, 5, 1),
+                source="epoch_ai",
+            ),
+        ],
+    )
+    session.flush()
+    known = catalog.known_model_ids(session)
+    catalog.replace_benchmark_results(
+        session,
+        "GPQA diamond",
+        None,
+        [
+            ("Claude Opus 5", 0.91, None, "Epoch"),
+            ("Qwen3 Max", 0.93, None, "Epoch"),
+            # The global maximum, but not a curated lab: it must not hold the headline.
+            ("Nobody Special", 0.99, None, "Epoch"),
+        ],
+        known,
+    )
+    catalog.replace_benchmark_results(
+        session, "MMLU", None, [("Nobody Special", 0.99, None, "Epoch")], known
+    )
+    session.flush()
+
+    config = parse_providers(
+        {
+            "benchmarks": ["mmlu", "gpqa-diamond"],
+            "providers": [{"name": "Anthropic"}, {"name": "Alibaba", "aliases": ["Qwen"]}],
+        }
+    )
+    items = catalog.headline_benchmarks(session, config)
+
+    # Configured order, minus the benchmark only an unlisted lab scored.
+    assert [(item.id, item.model_name, item.provider) for item in items] == [
+        ("gpqa-diamond", "Qwen3 Max", "Alibaba")
+    ]
+    assert items[0].best_score == 0.93
+    assert items[0].scale == "fraction"
+    assert items[0].result_count == 3
