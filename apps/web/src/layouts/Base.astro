@@ -3,6 +3,7 @@ import '@fontsource-variable/inter/index.css';
 import 'katex/dist/katex.min.css';
 import '../styles/global.css';
 
+import { ClientRouter } from 'astro:transitions';
 import { Icon } from 'astro-icon/components';
 import AvatarMenu from '../components/AvatarMenu.svelte';
 import Omnibox from '../components/Omnibox.svelte';
@@ -41,6 +42,10 @@ const renderedAt = new Date().toISOString();
     <link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 64x64" />
     <title>{pageTitle}</title>
     <script is:inline set:html={THEME_SCRIPT} />
+    {/* Navigation swaps the page rather than reloading the document, so the header, the rail
+        and the theme stay put instead of flashing white between every click. The reader is
+        the one page that opts out - see the transition:animate below. */}
+    <ClientRouter />
   </head>
   <body>
     <StaleBanner client:idle renderedAt={renderedAt} />
@@ -52,7 +57,12 @@ const renderedAt = new Date().toISOString();
           </span>
           <span class="brand-word">ResearchScout</span>
         </a>
-        <Omnibox client:load />
+        {/* Persisted across navigations. Without it the island is torn down and rebuilt on
+            every click, so a half-typed question or an answer still streaming would vanish
+            the moment a result was opened. The rail deliberately is not persisted: it takes
+            the current path as a prop, and a persisted one would keep marking the page you
+            came from. */}
+        <Omnibox client:load transition:persist />
         <nav class="site-nav" aria-label="Site">
           <ThemeToggle client:load />
           {
