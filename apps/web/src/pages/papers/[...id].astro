@@ -40,7 +40,9 @@ if (paper !== null) {
     fetchModels({ paperId: paper.id }),
   ]);
   related = (hits?.items ?? []).filter((hit) => hit.id !== paper.id).slice(0, 4);
-  models = catalogue?.items ?? [];
+  // A failed catalogue read costs this section, never the paper: the reason for the failure
+  // belongs on /models, where somebody went looking for models.
+  models = catalogue.ok ? catalogue.data.items : [];
 }
 
 const orderedCategories =
