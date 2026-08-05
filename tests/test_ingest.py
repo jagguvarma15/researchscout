@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -142,6 +143,67 @@ def test_reingest_refreshes_same_paper(session: Session) -> None:
     got = get_paper(session, "arxiv:2401.00001")
     assert got is not None
     assert got.venue == "NeurIPS 2024"
+
+
+class FailingSource(FakeSource):
+    """Serves its first page, then rate-limits like an upstream shedding load."""
+
+    def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
+        if cursor:
+            raise httpx.ConnectError("boom")
+        return super().fetch(since, cursor)
+
+
+def test_upstream_failure_keeps_earlier_pages(session: Session) -> None:
+    """A 429 twenty pages in must not roll back page 0 - that is where the newest papers are."""
+    papers = [_paper(f"2401.{i:05d}") for i in range(1, 5)]
+    summary = run_ingest(session, FailingSource(papers, page_size=2), SINCE)
+
+    assert summary.fetched == 2
+    assert summary.new_papers == 2
+    assert summary.stopped_early is not None
+    assert _count(session) == 2
+    cursor, _ = get_state(session, "fake")
+    assert cursor == "2"  # still pointing at the failed page for a same-window resume
+
+
+def test_each_page_commits_as_it_lands(session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    commits: list[int] = []
+    original = session.commit
+
+    def counting_commit() -> None:
+        commits.append(1)
+        original()
+
+    monkeypatch.setattr(session, "commit", counting_commit)
+    papers = [_paper(f"2401.{i:05d}") for i in range(1, 7)]
+    run_ingest(session, FakeSource(papers, page_size=2), SINCE)
+    assert len(commits) == 3  # one per page, so a late failure costs only its own page
+
+
+def test_early_stop_after_known_pages(session: Session) -> None:
+    papers = [_paper(f"2401.{i:05d}") for i in range(1, 11)]
+    run_ingest(session, FakeSource(papers, page_size=5), SINCE)
+
+    summary = run_ingest(session, FakeSource(papers, page_size=2), SINCE, stop_after_known_pages=2)
+    assert summary.fetched == 4  # two nothing-new pages, then the walk ends
+    assert summary.new_papers == 0
+    assert summary.stopped_early == "nothing new on 2 consecutive page(s)"
+    cursor, _ = get_state(session, "fake")
+    assert cursor is None  # the window is marked done, not resumable into the skipped tail
+
+
+def test_early_stop_resets_when_a_page_has_news(session: Session) -> None:
+    papers = [_paper(f"2401.{i:05d}") for i in range(1, 11)]
+    for known in papers[:2] + papers[4:]:
+        run_ingest(session, FakeSource([known]), SINCE)
+
+    summary = run_ingest(session, FakeSource(papers, page_size=2), SINCE, stop_after_known_pages=2)
+    # Pages land known, new, known, known - the new page resets the counter, so the stop
+    # comes after the fourth page and the fifth is never fetched.
+    assert summary.fetched == 8
+    assert summary.new_papers == 2
+    assert summary.stopped_early is not None
 
 
 def test_citation_signal_sets_count(session: Session) -> None:
