@@ -1,0 +1,220 @@
+---
+import { Icon } from 'astro-icon/components';
+import Base from '../../layouts/Base.astro';
+import { catalogMessage, fetchModel, fetchPaper, formatScore } from '../../lib/api';
+
+// One model, which is where its scores and the paper it came from can both be shown. The table
+// on /models used to link straight out to the upstream, and /benchmarks said in as many words
+// that there was nowhere to send a model row - this is that somewhere.
+
+const { id } = Astro.params;
+const result = await fetchModel(id ?? '');
+const model = result.ok ? result.data : null;
+const failure = result.ok ? null : result.failure;
+
+// The join this site exists to make, so it is worth a second request to name the paper rather
+// than showing an opaque id.
+const paper = model?.paper_id ? await fetchPaper(model.paper_id) : null;
+
+if (failure?.status === 404) {
+  return Astro.redirect('/models', 302);
+}
+
+/** 1.76e12 parameters reads as "1.76T"; a number that long reads as nothing. */
+function compact(value: number | null): string {
+  if (value === null) return 'unknown';
+  for (const [size, suffix] of [
+    [1e12, 'T'],
+    [1e9, 'B'],
+    [1e6, 'M'],
+    [1e3, 'K'],
+  ] as const) {
+    if (value >= size) return `${(value / size).toFixed(value / size < 10 ? 1 : 0)}${suffix}`;
+  }
+  return String(Math.round(value));
+}
+
+function compute(value: number | null): string {
+  if (value === null || value <= 0) return 'unknown';
+  return `1e${Math.round(Math.log10(value))} FLOP`;
+}
+
+function weights(value: boolean | null): string {
+  if (value === null) return 'unknown';
+  return value ? 'open' : 'closed';
+}
+
+const facts = model
+  ? [
+      { label: 'Organisation', value: model.organization ?? 'unknown' },
+      { label: 'Released', value: model.publication_date ?? 'unknown' },
+      { label: 'Field', value: model.domains.join(', ') || model.task || 'unknown' },
+      { label: 'Parameters', value: compact(model.parameters) },
+      { label: 'Training compute', value: compute(model.training_compute_flop) },
+      { label: 'Weights', value: weights(model.open_weights) },
+      { label: 'Accessibility', value: model.accessibility ?? 'unknown' },
+    ]
+  : [];
+---
+
+<Base title={model?.name ?? 'Model'}>
+  <p class="back"><a href="/models">Back to every model</a></p>
+
+  {
+    failure && (
+      <div class="card empty is-error">
+        <Icon name="lucide:cloud-off" aria-hidden="true" />
+        <p>{catalogMessage(failure, 'models')}</p>
+      </div>
+    )
+  }
+
+  {
+    model && (
+      <article>
+        <h1 class="page-title">{model.name}</h1>
+
+        <dl class="facts">
+          {facts.map((fact) => (
+            <div>
+              <dt>{fact.label}</dt>
+              <dd>{fact.value}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {model.paper_id && (
+          <section class="join">
+            <h2>The paper it came from</h2>
+            <p>
+              <a href={`/papers/${model.paper_id}`}>{paper?.title ?? model.paper_id}</a>
+            </p>
+            <p class="why">
+              In this corpus, so it opens in the reader rather than sending you elsewhere. That
+              join is the reason the catalogue lives here at all.
+            </p>
+          </section>
+        )}
+
+        {model.scores.length > 0 && (
+          <section>
+            <h2>Measured on</h2>
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Benchmark</th>
+                    <th scope="col" class="cell-num">
+                      Score
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {model.scores.map((score) => (
+                    <tr>
+                      <th scope="row" class="cell-name">
+                        {score.benchmark}
+                      </th>
+                      <td class="cell-num">{formatScore(score.score, score.scale)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        <section class="links">
+          {model.link && (
+            <a href={model.link} rel="noopener noreferrer nofollow" target="_blank">
+              <Icon name="lucide:external-link" aria-hidden="true" />
+              What its makers published
+            </a>
+          )}
+          {model.hf_repo && (
+            <a
+              href={`https://huggingface.co/${model.hf_repo}`}
+              rel="noopener noreferrer nofollow"
+              target="_blank"
+            >
+              <Icon name="lucide:download" aria-hidden="true" />
+              {model.hf_downloads === null
+                ? model.hf_repo
+                : `${model.hf_downloads.toLocaleString('en-US')} downloads on Hugging Face`}
+            </a>
+          )}
+        </section>
+
+        <p class="credit">
+          Described by {model.sources.length > 0 ? model.sources.join(' and ') : 'no source'}.
+          Model facts from <a href="https://epoch.ai" rel="noopener noreferrer">Epoch AI</a> (CC
+          BY); see <a href="/about">About</a>.
+        </p>
+      </article>
+    )
+  }
+</Base>
+
+<style>
+  .back {
+    margin: 0 0 var(--space-3);
+    font-size: var(--text-sm);
+  }
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+    gap: var(--space-3);
+    margin: 0 0 var(--space-5);
+    padding: var(--space-4);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface);
+  }
+  .facts dt {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .facts dd {
+    margin: 0.15rem 0 0;
+    font-size: var(--text-md);
+    font-variant-numeric: tabular-nums;
+  }
+  h2 {
+    margin: 0 0 0.4rem;
+    font-size: var(--text-md);
+  }
+  section {
+    margin-bottom: var(--space-5);
+  }
+  .join p {
+    margin: 0;
+  }
+  .why {
+    margin-top: 0.3rem;
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    font-size: var(--text-sm);
+  }
+  .links a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .links :global(svg) {
+    width: 0.95em;
+    height: 0.95em;
+  }
+  .credit {
+    margin-top: var(--space-5);
+    color: var(--muted);
+    font-size: var(--text-xs);
+    line-height: 1.6;
+  }
+</style>
