@@ -82,6 +82,21 @@ was down - the ingest window is several days wide, so the next run covers it, an
 start-up instead would mean a restart loop hammering arXiv. `scout serve scheduler --once`
 ignores the clock entirely and runs everything, which is what a host cron entry wants.
 
+Ingest runs are built to survive the upstream: each page commits on its own and a rate limit
+mid-walk keeps everything already stored (arXiv pages newest-first, so the papers that matter
+land first); 429s are retried briefly, honoring `Retry-After`. Set
+`RS_SCHEDULER_INGEST_EARLY_STOP_PAGES=2` (the deployment default) and a run also stops after
+two consecutive pages of nothing new instead of re-walking the whole window - the difference
+between three requests and thirty, four times a day. Citation signals go through Semantic
+Scholar's batch endpoint, 500 papers per call; without an `S2_API_KEY` the shared pool still
+throttles sometimes, and a key (free, from their site) is the real fix.
+
+Every completed task lands in the `scheduler_runs` ledger, and `GET /v1/system/status` serves
+it along with the app version, the build SHA, the migration stamp, and the newest paper's age -
+which is what `make deploy-verify` reads to say whether a deployment is current and fetching.
+One warning worth repeating: never run two fetchers against arXiv from one address.
+`make scheduler` says so out loud if the deployed scheduler container is already running.
+
 ## Monitoring
 
 Six dashboards live in `config/grafana/dashboards/` as JSON, hosted on Grafana Cloud rather
@@ -192,8 +207,14 @@ Cloud.
 ```bash
 cp deploy/.env.example deploy/.env   # fill in, then
 make deploy-build && make deploy-up  # postgres, migrations, api, scheduler on :8001
+make deploy-verify                   # current SHA, migrations, run ledger, catalogue answering
 make backup                          # nightly dump, keeps a week, verifies the file
 ```
+
+`deploy-build` stamps the image with the commit it was built from and `/v1/system/status`
+serves it back, so `deploy-verify` can tell a stale deployment from a broken one - the failure
+mode that once ran for two days looking healthy. Rebuild and re-up after every merge you want
+live; a restart alone keeps the old image and the old environment.
 
 The development stack is unchanged and independent: `make start` still runs everything as host
 processes against the repo-local Postgres, and with no identity provider configured the API and
