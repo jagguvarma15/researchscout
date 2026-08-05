@@ -5,6 +5,8 @@ the HTTP contract - the shapes, the status codes, and the fact that none of it i
 signed-out visitor, because "what did you search for" is not a public question.
 """
 
+from datetime import UTC, datetime
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -12,6 +14,19 @@ import researchscout.api.routers.account as account_router
 from researchscout.api.auth import User, require_user
 from researchscout.api.deps import get_session
 from researchscout.api.main import create_app
+from researchscout.schema import Author, Paper
+
+
+def _paper(pid: str) -> Paper:
+    return Paper(
+        id=pid,
+        title=f"Paper {pid}",
+        abstract="An abstract.",
+        authors=[Author(name="Jane Doe")],
+        categories=["cs.LG"],
+        published_at=datetime(2026, 1, 1, tzinfo=UTC),
+        source="arxiv",
+    )
 
 
 def _client() -> TestClient:
@@ -110,15 +125,42 @@ def test_restoring_all_dismissals_names_none(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_recent_papers_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hydrated, in the cache's order: a bare id is not something a reader recognises."""
     stored: list[str] = []
     _stub(
         monkeypatch,
-        record_view=lambda session, sub, paper_id: stored.append(paper_id),
+        record_view=lambda session, sub, pid: stored.insert(0, pid),
         recent_papers=lambda *a, **k: stored,
     )
+    monkeypatch.setattr(
+        account_router,
+        "get_papers",
+        lambda session, ids: {pid: _paper(pid) for pid in ids},
+    )
+
     response = _client().post("/v1/me/recent", json={"paper_id": "arxiv:2401.00002"})
     assert response.status_code == 202
-    assert response.json() == {"items": ["arxiv:2401.00002"]}
+    _client().post("/v1/me/recent", json={"paper_id": "arxiv:2401.00001"})
+
+    body = _client().get("/v1/me/recent").json()
+    # Newest first, and carrying enough to show: the store returns ids, the hydration is
+    # keyed by id and does not preserve order, so the route reapplies it.
+    assert [item["id"] for item in body["items"]] == ["arxiv:2401.00001", "arxiv:2401.00002"]
+    assert body["items"][0]["title"]
+
+
+def test_a_recently_opened_paper_that_has_since_gone_is_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cache cascades from papers, but a read racing a prune must not 500."""
+    _stub(monkeypatch, recent_papers=lambda *a, **k: ["arxiv:gone", "arxiv:2401.00001"])
+    monkeypatch.setattr(
+        account_router,
+        "get_papers",
+        lambda session, ids: {"arxiv:2401.00001": _paper("arxiv:2401.00001")},
+    )
+    body = _client().get("/v1/me/recent").json()
+    assert [item["id"] for item in body["items"]] == ["arxiv:2401.00001"]
 
 
 def test_filters_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
