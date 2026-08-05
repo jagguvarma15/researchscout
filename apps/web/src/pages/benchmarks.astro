@@ -1,23 +1,38 @@
 ---
 import { Icon } from 'astro-icon/components';
 import Base from '../layouts/Base.astro';
-import { fetchBenchmark, fetchBenchmarks } from '../lib/api';
+import {
+  catalogMessage,
+  fetchBenchmark,
+  fetchBenchmarks,
+  fetchProviders,
+  formatScore,
+} from '../lib/api';
 
 const selected = Astro.url.searchParams.get('b') ?? '';
 
-const benchmarks = await fetchBenchmarks();
+// The provider comparison does not depend on which benchmark is open, so it is fetched
+// alongside the list rather than after it.
+const [listed, providerResult] = await Promise.all([fetchBenchmarks(), fetchProviders()]);
+const benchmarks = listed.ok ? listed.data : null;
+const listFailure = listed.ok ? null : listed.failure;
+const providers = providerResult.ok ? providerResult.data : null;
+
 // The first one is the most measured, which is the most useful thing to open on.
 const current = benchmarks?.length ? selected || benchmarks[0].id : '';
-const detail = current ? await fetchBenchmark(current) : null;
+const detailResult = current ? await fetchBenchmark(current) : null;
+const detail = detailResult?.ok ? detailResult.data : null;
+// Distinguished from a benchmark that is simply not in the catalogue: a failed fetch and an
+// unknown id want different things said about them.
+const detailFailure = detailResult && !detailResult.ok ? detailResult.failure : null;
 
 function benchmarkLink(id: string): string {
   return `/benchmarks?b=${encodeURIComponent(id)}`;
 }
 
-/** Scores arrive as fractions; a leaderboard reads better in whole percentage points. */
-function percent(score: number): string {
-  return `${(score * 100).toFixed(1)}`;
-}
+// How a score reads depends on the benchmark, which is why the server sends the scale: most
+// are accuracies shown as percentage points, and eleven of the hub's are a ratio, an Elo or an
+// amount of money that would be nonsense multiplied by a hundred.
 ---
 
 <Base title="Benchmarks">
@@ -29,10 +44,10 @@ function percent(score: number): string {
   </p>
 
   {
-    benchmarks === null && (
+    listFailure && (
       <div class="card empty is-error">
         <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>The API is unreachable — try again in a moment.</p>
+        <p>{catalogMessage(listFailure, 'benchmarks')}</p>
       </div>
     )
   }
@@ -45,6 +60,52 @@ function percent(score: number): string {
           <code>scout catalog</code>.
         </p>
       </div>
+    )
+  }
+
+  {
+    providers && providers.items.length > 0 && (
+      <section class="providers">
+        <h2>Where the major labs stand</h2>
+        <p class="lede-sm">
+          Each lab's most recent model that anyone has measured, on the benchmarks the field
+          leans on. A blank is "not measured" rather than zero, and each column is shown on
+          whatever scale its benchmark uses.
+        </p>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Provider</th>
+                <th scope="col">Model</th>
+                {providers.columns.map((column) => (
+                  <th scope="col" class="cell-num">
+                    {column.name}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {providers.items.map((row) => (
+                <tr>
+                  <th scope="row" class="cell-name">
+                    {row.provider}
+                    {row.country && <span class="country">{row.country}</span>}
+                  </th>
+                  <td class="cell-clip" title={row.model_name}>
+                    <a href={`/models/${row.model_id}`}>{row.model_name}</a>
+                  </td>
+                  {providers.columns.map((column) => (
+                    <td class="cell-num">
+                      {column.id in row.scores ? formatScore(row.scores[column.id], column.scale) : ''}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     )
   }
 
@@ -69,9 +130,16 @@ function percent(score: number): string {
 
         <section class="board">
           {detail === null ? (
-            <div class="card empty">
-              <Icon name="lucide:search-x" aria-hidden="true" />
-              <p>That benchmark is not in the catalogue.</p>
+            <div class:list={['card', 'empty', { 'is-error': detailFailure }]}>
+              <Icon
+                name={detailFailure ? 'lucide:cloud-off' : 'lucide:search-x'}
+                aria-hidden="true"
+              />
+              <p>
+                {detailFailure
+                  ? catalogMessage(detailFailure, 'benchmarks')
+                  : 'That benchmark is not in the catalogue.'}
+              </p>
             </div>
           ) : (
             <Fragment>
@@ -79,6 +147,7 @@ function percent(score: number): string {
                 <h2>{detail.name}</h2>
                 <p class="board-meta">
                   {detail.result_count} score{detail.result_count === 1 ? '' : 's'}
+                  {detail.score_scale === 'fraction' ? ' · percentage points' : ' · not a percentage'}
                   {detail.released_on && ` · released ${detail.released_on}`}
                 </p>
               </header>
@@ -102,19 +171,22 @@ function percent(score: number): string {
                       <tr>
                         <td class="cell-num cell-muted rank">{index + 1}</td>
                         <th scope="row" class="cell-name">
-                          {result.model}
                           {/* Roughly half the models with scores are not in the catalogue at
                               all - a leaderboard covers what has been measured, the catalogue
-                              what somebody judged notable. Saying which is which is honest and
-                              cheap; linking the ones that match is not, because there is no
-                              per-model page to link to. */}
-                          {result.model_id === null && (
-                            <span class="unlisted" title="Not in the model catalogue">
-                              unlisted
-                            </span>
+                              what somebody judged notable. The ones that match now have a page
+                              to go to; the ones that do not say so rather than looking broken. */}
+                          {result.model_id === null ? (
+                            <>
+                              {result.model}
+                              <span class="unlisted" title="Not in the model catalogue">
+                                unlisted
+                              </span>
+                            </>
+                          ) : (
+                            <a href={`/models/${result.model_id}`}>{result.model}</a>
                           )}
                         </th>
-                        <td class="cell-num score">{percent(result.score)}</td>
+                        <td class="cell-num score">{formatScore(result.score, detail.score_scale)}</td>
                         <td class="cell-muted">{result.measured_on ?? ''}</td>
                         <td class="cell-muted cell-clip" title={result.origin ?? undefined}>
                           {result.origin ?? ''}
@@ -182,6 +254,30 @@ function percent(score: number): string {
   }
   .picker a[aria-current] .n {
     color: var(--accent-ink);
+  }
+  /* The comparison sits above the picker: it is the question most people arrive with, and the
+     per-benchmark leaderboard is the follow-up. */
+  .providers {
+    margin-bottom: var(--space-6);
+  }
+  .providers h2 {
+    margin: 0 0 0.2rem;
+    font-size: var(--text-lg);
+  }
+  .lede-sm {
+    margin: 0 0 var(--space-3);
+    max-width: 60ch;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    line-height: 1.6;
+  }
+  /* Under the lab rather than beside it: a second column for one word of context would push
+     the scores off a narrow screen. */
+  .country {
+    display: block;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-weight: 400;
   }
   .board-head {
     margin-bottom: var(--space-3);
