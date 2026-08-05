@@ -23,7 +23,12 @@ sources:
     # economics and finance work that cross-lists into them, which is the intersection material
     # this radar wants. Nothing outside the scope is fetched, so nothing has to be discarded.
     # Deep backfills should still run per archive (`scout ingest --category cs.* --resume`).
-    categories: [cs.*, stat.*, eess.*, math.*]
+    #
+    # `math-ph` is listed separately because it is a top-level archive rather than a `math.*`
+    # subcategory, so `cat:math.*` does not reach it. Most of its papers cross-list to
+    # `math.MP` and would arrive anyway; the ones that do not were in scope by the predicate
+    # and unreachable by the query, which is the sort of gap that never announces itself.
+    categories: [cs.*, stat.*, eess.*, math.*, math-ph]
   semantic_scholar:
     enabled: true
     kind: signal
@@ -99,7 +104,8 @@ sources:
       provides: Citation counts, as a keyless cross-check on Semantic Scholar
     # mailto: you@example.com
   epoch_ai:
-    # The model and benchmark catalogue behind /models and /benchmarks. Two CC-BY CSVs, no key,
+    # The model and benchmark catalogue behind /models and /benchmarks: the notable-models CSV
+    # plus the benchmarking hub's archive, which is one file per benchmark. CC BY, no key,
     # refreshed once a day. The licence requires the credit below, which is why it is served.
     enabled: true
     kind: catalog
@@ -109,7 +115,7 @@ sources:
       homepage: https://epoch.ai
       terms: https://epoch.ai/benchmarks/use-this-data
       data_license: CC BY 4.0 - Epoch AI, "Data on AI Models", published online at epoch.ai
-      provides: Notable AI models with organisation, parameters, training compute and licensing, plus benchmark scores
+      provides: Notable AI models with organisation, parameters, training compute and licensing, plus every benchmark in the AI Benchmarking Hub and the scores recorded against it
   huggingface_models:
     # Open-weight models by download count, and the arXiv tags on their model cards - which is
     # what links a model to the paper it came from in this corpus.
