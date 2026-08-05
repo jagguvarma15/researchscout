@@ -44,6 +44,16 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _no_dismissals(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The feed reads the caller's dismissals, and the session here is a stub.
+
+    These tests are about forwarding and response shapes, so the read is stubbed out rather
+    than given a database; the exclusion itself is pinned separately below.
+    """
+    monkeypatch.setattr(papers_router, "dismissed_papers", lambda *a, **k: [])
+
+
 def test_healthz() -> None:
     response = _client().get("/healthz")
     assert response.status_code == 200
@@ -226,3 +236,44 @@ def test_ask_maps_llm_failure_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ask_router, "answer", boom)
     response = _client().post("/v1/ask", json={"question": "q"})
     assert response.status_code == 502
+
+
+def test_the_feed_leaves_out_what_the_caller_dismissed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dismissing sends a paper out of the feed, and a reload has to keep it out.
+
+    Applied as a filter rather than by dropping rows from the response, so the total and the
+    pager describe the page that was actually built.
+    """
+    seen: dict[str, PaperFacets] = {}
+
+    def capture(session: object, **kwargs: object) -> list[Paper]:
+        seen["list"] = kwargs["facets"]  # type: ignore[assignment]
+        return []
+
+    monkeypatch.setattr(papers_router, "list_papers", capture)
+    monkeypatch.setattr(
+        papers_router,
+        "count_papers",
+        lambda session, facets: seen.setdefault("count", facets) and 0,
+    )
+    monkeypatch.setattr(papers_router, "dismissed_papers", lambda *a, **k: ["arxiv:2401.00002"])
+
+    assert _client().get("/v1/papers").status_code == 200
+    assert seen["list"].exclude == ["arxiv:2401.00002"]
+    # The count has to filter identically or the pager promises pages that are not there.
+    assert seen["count"].exclude == ["arxiv:2401.00002"]
+
+
+def test_a_search_still_finds_a_dismissed_paper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dismissing is "not in what is new", not "hide this from me"."""
+    seen: dict[str, PaperFacets] = {}
+
+    def capture(session: object, embedder: object, query: str, **kwargs: object) -> list:
+        seen["facets"] = kwargs["facets"]  # type: ignore[assignment]
+        return []
+
+    monkeypatch.setattr(papers_router, "retrieve", capture)
+    monkeypatch.setattr(papers_router, "dismissed_papers", lambda *a, **k: ["arxiv:2401.00002"])
+
+    assert _client().get("/v1/papers", params={"q": "transformers"}).status_code == 200
+    assert seen["facets"].exclude is None
