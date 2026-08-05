@@ -7,6 +7,7 @@ reached through its arXiv link, resolved against papers this corpus already hold
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,8 +20,12 @@ from researchscout.api.schemas import (
     BenchmarkList,
     BenchmarkResultSummary,
     BenchmarkSummary,
+    HeadlineBenchmarkInfo,
+    HeadlineBenchmarkList,
     ModelList,
     ModelSummary,
+    NotableModelInfo,
+    NotableModelList,
     ProviderList,
     ProviderSummary,
 )
@@ -78,6 +83,33 @@ def models_index(
         total=catalog.count_models(session, filters=filters),
         limit=limit,
         offset=offset,
+    )
+
+
+@router.get("/models/notable")
+def models_notable(
+    session: Annotated[Session, Depends(get_session)],
+) -> NotableModelList:
+    """The curated labs' models from roughly the last year — the strip above the catalogue.
+
+    Declared before the dynamic route below, or "notable" would be read as a model id.
+    """
+    items = catalog.recent_provider_models(
+        session, load_providers(), since=date.today() - timedelta(days=365)
+    )
+    return NotableModelList(
+        items=[
+            NotableModelInfo(
+                id=item.id,
+                name=item.name,
+                provider=item.provider,
+                country=item.country,
+                published_on=item.published_on,
+                parameters=item.parameters,
+                open_weights=item.open_weights,
+            )
+            for item in items
+        ]
     )
 
 
@@ -141,6 +173,32 @@ def benchmarks_index(
     return BenchmarkList(
         items=[
             BenchmarkSummary.from_row(row) for row in catalog.list_benchmarks(session, limit=limit)
+        ]
+    )
+
+
+@router.get("/benchmarks/headline")
+def benchmarks_headline(
+    session: Annotated[Session, Depends(get_session)],
+) -> HeadlineBenchmarkList:
+    """The curated benchmarks with the best curated-lab score on each.
+
+    Declared before the dynamic route below, or "headline" would be read as a benchmark id.
+    """
+    items = catalog.headline_benchmarks(session, load_providers())
+    return HeadlineBenchmarkList(
+        items=[
+            HeadlineBenchmarkInfo(
+                id=item.id,
+                name=item.name,
+                scale=item.scale,
+                result_count=item.result_count,
+                best_score=item.best_score,
+                model_id=item.model_id,
+                model_name=item.model_name,
+                provider=item.provider,
+            )
+            for item in items
         ]
     )
 
