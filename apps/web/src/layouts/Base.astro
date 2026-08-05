@@ -6,6 +6,7 @@ import '../styles/global.css';
 import { ClientRouter } from 'astro:transitions';
 import { Icon } from 'astro-icon/components';
 import AvatarMenu from '../components/AvatarMenu.svelte';
+import FooterStatus from '../components/FooterStatus.svelte';
 import Omnibox from '../components/Omnibox.svelte';
 import SideRail from '../components/SideRail.svelte';
 import StaleBanner from '../components/StaleBanner.svelte';
@@ -43,13 +44,16 @@ const renderedAt = new Date().toISOString();
     <title>{pageTitle}</title>
     <script is:inline set:html={THEME_SCRIPT} />
     {/* Navigation swaps the page rather than reloading the document, so the header, the rail
-        and the theme stay put instead of flashing white between every click. The reader is
-        the one page that opts out - see the transition:animate below. */}
+        and the theme stay put instead of flashing white between every click. The reader
+        needs no opt-out: it tears itself down in onDestroy when a swap removes it. */}
     <ClientRouter />
   </head>
   <body>
     <StaleBanner client:idle renderedAt={renderedAt} />
-    <header class="site-header">
+    {/* Named and unanimated: the frame is identical on both sides of a navigation, and
+        holding it still is what makes the content's cross-fade read as a page change
+        rather than the whole window blinking. The rail and footer get the same. */}
+    <header class="site-header" transition:name="site-header" transition:animate="none">
       <div class="site-header-inner container">
         <a class="brand" href="/">
           <span class="brand-mark">
@@ -80,11 +84,13 @@ const renderedAt = new Date().toISOString();
     </header>
     <!-- Before the content, not after the footer: it is fixed either way, but a screen
          reader and the tab key both follow the document, and navigation belongs up here. -->
-    <SideRail client:load current={Astro.url.pathname} />
+    <div transition:name="side-rail" transition:animate="none">
+      <SideRail client:load current={Astro.url.pathname} />
+    </div>
     <main class="container">
       <slot />
     </main>
-    <footer class="site-footer">
+    <footer class="site-footer" transition:name="site-footer" transition:animate="none">
       <div class="container footer-inner">
         <div class="footer-text">
           <p>Papers from arXiv and friends, scored by freshness and signals.</p>
@@ -92,6 +98,7 @@ const renderedAt = new Date().toISOString();
             Copyright (c) 2026 Jagadesh Varma. MIT licensed. Metadata from arXiv under CC0; data
             from Semantic Scholar.
           </p>
+          <FooterStatus client:idle />
         </div>
         <p class="footer-links">
           <a href="/about">About</a>
