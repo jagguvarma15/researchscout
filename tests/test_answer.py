@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 
 import pytest
@@ -190,7 +191,9 @@ def test_answer_fast_floor_follows_the_evidence_scale(monkeypatch: pytest.Monkey
     assert answer_mod.answer_fast(None, _StubEmbedder(), "q").found
 
 
-def test_answer_fast_rerank_flag_reaches_retrieve(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_answer_fast_rerank_flag_reaches_retrieve(
+    monkeypatch: pytest.MonkeyPatch, set_setting: Callable[[str, str], None]
+) -> None:
     seen: list[object] = []
 
     def capture(*a: object, **k: object) -> list[ScoredPaper]:
@@ -198,9 +201,11 @@ def test_answer_fast_rerank_flag_reaches_retrieve(monkeypatch: pytest.MonkeyPatc
         return []
 
     monkeypatch.setattr(answer_mod, "retrieve", capture)
-    monkeypatch.setenv("RS_ASK_FAST_RERANK", "1")
+    # set_setting rather than setenv: settings are read once per process, so flipping the flag
+    # between the two calls needs the cache dropped the way a restart would.
+    set_setting("RS_ASK_FAST_RERANK", "1")
     answer_mod.answer_fast(None, _StubEmbedder(), "q")
-    monkeypatch.setenv("RS_ASK_FAST_RERANK", "0")
+    set_setting("RS_ASK_FAST_RERANK", "0")
     answer_mod.answer_fast(None, _StubEmbedder(), "q")
     assert seen == [True, False]
 
