@@ -20,11 +20,15 @@
     Square,
   } from 'lucide-svelte';
 
+  import { navigate } from 'astro:transitions/client';
+
+  import { ask as askScout, chat, runWebSearch, stopStreaming } from '../lib/chat-state.svelte';
   import type { KeywordCount } from '../lib/chat-types';
   import { commandHint, parseInput } from '../lib/commands';
   import { matchKeywords } from '../lib/keyword-match';
   import { stripMath } from '../lib/math-text';
   import { classify, createSequencer, debounce, searchUrl } from '../lib/omnibox';
+  import { clickedOutside } from '../lib/overlay';
   import ScoutMascot from './ScoutMascot.svelte';
   import ScoutPanel from './ScoutPanel.svelte';
 
@@ -61,8 +65,6 @@
   let query = $state('');
   let papers = $state<PaperHit[]>([]);
   let selected = $state(0);
-  let busy = $state(false);
-  let asked = $state(false);
   let searching = $state(false);
   let dictionary = $state<KeywordCount[] | null>(null);
   // Phrases this account searched for before, and papers it opened. Signed-in only, and both
@@ -73,7 +75,6 @@
   let root: HTMLElement | undefined = $state();
   let inputEl: HTMLInputElement | undefined = $state();
   let body: HTMLElement | undefined = $state();
-  let panel: ReturnType<typeof ScoutPanel> | undefined = $state();
 
   const sequencer = createSequencer();
 
@@ -81,7 +82,7 @@
   const intent = $derived(classify(query));
   const hint = $derived(commandHint(query));
   const suggestions = $derived(
-    !busy && dictionary && intent !== 'command' && trimmed.length >= 2
+    !chat.busy && dictionary && intent !== 'command' && trimmed.length >= 2
       ? matchKeywords(query, dictionary)
       : [],
   );
@@ -221,6 +222,13 @@
   });
 
   $effect(() => {
+    // The list can shrink under a hovered index - results refining, a command typed - and
+    // an out-of-range selection would point aria-activedescendant at nothing and make
+    // Enter fall through to a full search.
+    if (selected >= entries.length) selected = entries.length > 0 ? entries.length - 1 : 0;
+  });
+
+  $effect(() => {
     // Both are refetched whenever the panel opens: imports and stream enrichment between opens
     // should show up, searches made in another tab likewise, and each read is a few
     // milliseconds server-side.
@@ -299,31 +307,54 @@
     inputEl?.focus();
   }
 
+  let closing = $state(false);
+  let closeTimer: ReturnType<typeof setTimeout> | null = null;
+
   function show() {
+    if (closeTimer) {
+      clearTimeout(closeTimer);
+      closeTimer = null;
+    }
+    closing = false;
     open = true;
   }
 
   function hide() {
-    open = false;
-    selected = 0;
+    if (!open || closeTimer) return;
+    // The panel animates in, so it leaves the same way - a beat of fade rather than a cut.
+    // Reduced motion skips straight to closed, and show() cancels a close in flight.
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      open = false;
+      selected = 0;
+      return;
+    }
+    closing = true;
+    closeTimer = setTimeout(() => {
+      closeTimer = null;
+      closing = false;
+      open = false;
+      selected = 0;
+    }, 130);
   }
 
   function run(entry: Entry) {
     if (entry.kind === 'ask') {
-      if (busy) return;
+      if (chat.busy) return;
       query = '';
-      asked = true;
-      void panel?.ask(entry.question, intent === 'command' ? 'llm' : 'fast');
+      rememberSearch(entry.question);
+      void askScout(entry.question, intent === 'command' ? 'llm' : 'fast', dictionary);
     } else if (entry.kind === 'web') {
-      if (busy) return;
+      if (chat.busy) return;
       query = '';
-      asked = true;
-      void panel?.runWebSearch(entry.query);
+      rememberSearch(entry.query);
+      void runWebSearch(entry.query);
     } else {
-      // A full search is the only thing worth remembering: opening one paper is a click, and
-      // a list of them is the reading history, which is somewhere else.
+      // Searches and questions are remembered (the two branches above record theirs);
+      // opening one paper is a click, and the reading history covers it. The navigation
+      // goes through the client router so the persisted field keeps its state.
       if (entry.kind === 'search' && trimmed) rememberSearch(trimmed);
-      window.location.href = entry.href;
+      hide();
+      void navigate(entry.href);
     }
   }
 
@@ -340,14 +371,11 @@
   }
 
   function onDocumentClick(event: MouseEvent) {
-    const target = event.target as Element;
-    if (target.closest('[data-open-omnibox]')) {
-      event.preventDefault();
-      inputEl?.focus();
-      show();
-      return;
-    }
-    if (open && root && !root.contains(target)) hide();
+    // Outside-ness is judged on the composed path, snapshotted at dispatch: by the time
+    // the click bubbles here, choosing an entry has already cleared the query and Svelte
+    // may have re-rendered the row away, so containment-at-handler-time would read a
+    // detached node and close the panel in answer to its own Ask row.
+    if (open && clickedOutside(event, root)) hide();
   }
 
   function onInputKeydown(event: KeyboardEvent) {
@@ -398,8 +426,8 @@
       aria-activedescendant={open && entries.length > 0 ? `omnibox-option-${selected}` : undefined}
       aria-autocomplete="list"
     />
-    {#if busy}
-      <button class="stop" type="button" onclick={() => panel?.stop()} aria-label="Stop">
+    {#if chat.busy}
+      <button class="stop" type="button" onclick={stopStreaming} aria-label="Stop">
         <Square size={13} aria-hidden="true" />
       </button>
     {:else}
@@ -409,7 +437,7 @@
   </div>
 
   {#if open}
-    <div class="panel" id="omnibox-panel">
+    <div class="panel" class:closing id="omnibox-panel">
       <div class="body" bind:this={body}>
         {#if suggestions.length > 0}
           <p class="chips" aria-label="Keyword suggestions">
@@ -479,16 +507,11 @@
           </div>
         {/if}
 
-        <div class:hidden={!asked}>
-          <ScoutPanel
-            bind:this={panel}
-            {dictionary}
-            onbusy={(value) => (busy = value)}
-            onactivity={scrollToLatest}
-          />
+        <div class:hidden={!chat.asked}>
+          <ScoutPanel onactivity={scrollToLatest} />
         </div>
 
-        {#if !asked && !trimmed}
+        {#if !chat.asked && !trimmed}
           <div class="welcome">
             <ScoutMascot size={48} />
             <p>Type to find papers, or ask a question and Scout answers from what it has read.</p>
@@ -499,7 +522,7 @@
       <p class="foot">
         {#if hint}
           {hint}
-        {:else if asked}
+        {:else if chat.asked}
           Scout can make mistakes, double check responses.
         {:else}
           Try /web for a quick web search, or /ai to ask the model directly.
@@ -604,6 +627,15 @@
   }
   @keyframes panel-in {
     from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+  .panel.closing {
+    animation: panel-out var(--dur-fast, 0.15s) var(--ease-out, ease) forwards;
+  }
+  @keyframes panel-out {
+    to {
       opacity: 0;
       transform: translateY(-4px);
     }
