@@ -464,3 +464,57 @@ class StreamStatBucket(BaseModel):
 class StreamStats(BaseModel):
     hours: int
     buckets: list[StreamStatBucket]
+
+
+class SchedulerRun(BaseModel):
+    """One completed scheduled task run from the ledger."""
+
+    task: str
+    started_at: datetime
+    finished_at: datetime
+    ok: bool
+    note: str
+
+
+class SystemStatus(BaseModel):
+    """What is deployed and whether it is fetching - the deploy-verify payload."""
+
+    version: str
+    build_sha: str | None
+    migration: str | None
+    papers: int
+    newest_paper_at: datetime | None
+    runs: list[SchedulerRun]
+
+
+class NotableModelInfo(BaseModel):
+    """One row of the recent-models strip on /models."""
+
+    id: str
+    name: str
+    provider: str
+    country: str | None
+    published_on: date | None
+    parameters: float | None
+    open_weights: bool | None
+
+
+class NotableModelList(BaseModel):
+    items: list[NotableModelInfo]
+
+
+class HeadlineBenchmarkInfo(BaseModel):
+    """One curated benchmark with the best curated-lab score and its holder."""
+
+    id: str
+    name: str
+    scale: str
+    result_count: int
+    best_score: float
+    model_id: str
+    model_name: str
+    provider: str
+
+
+class HeadlineBenchmarkList(BaseModel):
+    items: list[HeadlineBenchmarkInfo]
