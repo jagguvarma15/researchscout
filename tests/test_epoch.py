@@ -9,11 +9,17 @@ scientific notation, a Domain that is several domains, and blanks everywhere.
 from datetime import date
 from pathlib import Path
 
-from researchscout.sources.epoch import arxiv_id_in, parse_benchmarks, parse_models
+from researchscout.sources.epoch import (
+    arxiv_id_in,
+    benchmark_name,
+    parse_benchmarks,
+    parse_models,
+    score_column,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 MODELS_CSV = (FIXTURES / "epoch_models.csv").read_text()
-BENCHMARKS_CSV = (FIXTURES / "epoch_benchmarks.csv").read_text()
+BENCHMARKS_ZIP = (FIXTURES / "epoch_benchmarks.zip").read_bytes()
 
 
 def test_models_parse_the_ordinary_row() -> None:
@@ -69,24 +75,79 @@ def test_arxiv_id_is_found_among_several_links() -> None:
     assert arxiv_id_in("https://openai.com/index/gpt-4") is None
 
 
-def test_benchmarks_parse_scores() -> None:
-    scores = parse_benchmarks(BENCHMARKS_CSV)
-    assert [(s.benchmark, s.model, s.score) for s in scores] == [
-        ("Lech Mazur Writing", "Amazon Nova Pro", 0.605),
-        ("MMLU", "Amazon Nova Pro", 0.76),
+def test_every_benchmark_in_the_archive_is_parsed() -> None:
+    """One CSV per benchmark, so the archive is the unit rather than a row."""
+    scores = parse_benchmarks(BENCHMARKS_ZIP)
+    by_benchmark = {s.benchmark for s in scores}
+
+    assert by_benchmark == {"GPQA Diamond", "Terminal-Bench", "Vending bench 2"}
+    # The capabilities index is a composite of the others rather than a test anyone sat, so it
+    # would appear on a leaderboard as a score with nothing behind it.
+    assert "Epoch capabilities index" not in by_benchmark
+
+
+def test_the_score_column_is_found_by_position_not_by_name() -> None:
+    """Seventy files, seventy names for the score. What they share is a shape."""
+    rows = [{"Model version": "m", "Agent": "Terminus", "Accuracy mean": "0.8"}]
+    assert score_column(["Model version", "Agent", "Accuracy mean"], rows) == "Accuracy mean"
+
+    # Nothing numeric before the metadata block: better to skip the file than to invent a score.
+    assert score_column(["Model version", "Harness", "Release date"], [{"Harness": "a"}]) is None
+    # And nothing after that block counts, however numeric it looks.
+    numeric = [
+        {"Model version": "m", "Release date": "2026-01-01", "Training compute (FLOP)": "1e25"}
     ]
-    assert scores[1].benchmark_release_date == date(2020, 9, 7)
-    assert scores[1].measured_on == date(2024, 12, 3)
-    assert scores[1].origin == "Stanford CRFM Leaderboard"
+    assert (
+        score_column(["Model version", "Release date", "Training compute (FLOP)"], numeric) is None
+    )
 
 
-def test_a_score_without_a_number_or_a_benchmark_is_skipped() -> None:
-    # Both would produce a leaderboard row that says nothing.
-    names = {s.model for s in parse_benchmarks(BENCHMARKS_CSV)}
-    assert "Broken" not in names
-    assert "No Benchmark" not in names
+def test_a_categorical_column_does_not_become_the_score() -> None:
+    scores = {
+        s.model: s for s in parse_benchmarks(BENCHMARKS_ZIP) if s.benchmark == "Terminal-Bench"
+    }
+    assert scores["Claude Opus 5"].score == 0.847
+    assert scores["Qwen3 Max"].score == 0.612
 
 
-def test_an_empty_file_parses_to_nothing() -> None:
+def test_scores_that_are_not_fractions_survive_unscaled() -> None:
+    """Eleven of the hub's benchmarks are a ratio, an Elo or an amount of money."""
+    vending = {
+        s.model: s.score
+        for s in parse_benchmarks(BENCHMARKS_ZIP)
+        if s.benchmark == "Vending bench 2"
+    }
+    assert vending["Claude Opus 5"] == 11181.87
+    assert vending["Qwen3 Max"] == -31.18
+
+
+def test_the_benchmark_carries_the_organisation_that_built_the_model() -> None:
+    """Most measured models are not in the notable catalogue; this is what gives them a row."""
+    gpqa = {s.model: s for s in parse_benchmarks(BENCHMARKS_ZIP) if s.benchmark == "GPQA Diamond"}
+    assert gpqa["Claude Opus 5"].organization == "Anthropic"
+    assert gpqa["Claude Opus 5"].training_compute_flop == 2.1e26
+    assert gpqa["Gemini 3.6 Flash"].training_compute_flop is None
+
+
+def test_a_row_without_a_score_is_skipped() -> None:
+    assert "Broken" not in {s.model for s in parse_benchmarks(BENCHMARKS_ZIP)}
+
+
+def test_where_a_score_came_from_is_recorded() -> None:
+    scores = {s.benchmark: s.origin for s in parse_benchmarks(BENCHMARKS_ZIP)}
+    assert scores["GPQA Diamond"] == "Epoch AI"
+    assert scores["Terminal-Bench"] == "External leaderboard"
+
+
+def test_the_file_name_is_the_benchmark_name() -> None:
+    # The rows inside carry models, not the thing they were measured against.
+    assert benchmark_name("gpqa_diamond.csv") == "GPQA Diamond"
+    assert benchmark_name("swe_bench_verified.csv") == "SWE-bench Verified"
+    # The external marker is provenance, recorded per score, not part of the name.
+    assert benchmark_name("terminalbench_external.csv") == "Terminal-Bench"
+    # Anything unlisted still gets a serviceable name rather than nothing.
+    assert benchmark_name("some_new_bench_external.csv") == "Some new bench"
+
+
+def test_an_empty_input_parses_to_nothing() -> None:
     assert parse_models("") == []
-    assert parse_benchmarks("") == []
