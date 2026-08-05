@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -117,7 +118,9 @@ def test_fetch_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
     assert exhausted is None  # partial page → done
 
 
-def test_fetch_paces_every_request(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fetch_paces_every_request(
+    monkeypatch: pytest.MonkeyPatch, set_setting: Callable[[str, str], None]
+) -> None:
     """arXiv asks for one request every three seconds, so the floor spans fetches.
 
     Paging alone is not enough: a second category's first page, or a health probe, would
@@ -125,7 +128,9 @@ def test_fetch_paces_every_request(monkeypatch: pytest.MonkeyPatch) -> None:
     why the test resets it and drives a fake one.
     """
     monkeypatch.setattr(httpx, "get", lambda *a, **k: _Resp())
-    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "2.5")
+    # set_setting rather than setenv: the delay is read from cached settings, so changing it
+    # part-way through the test has to drop the cache the way a restart would.
+    set_setting("RS_ARXIV_PAGE_DELAY_SEC", "2.5")
     monkeypatch.setattr(arxiv, "_last_request_at", None)
     sleeps: list[float] = []
     now = [100.0]
@@ -142,7 +147,7 @@ def test_fetch_paces_every_request(monkeypatch: pytest.MonkeyPatch) -> None:
     other.fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
     assert sleeps == [2.5, 1.5]  # a fresh source's first page waits out the remainder
 
-    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+    set_setting("RS_ARXIV_PAGE_DELAY_SEC", "0")
     src.fetch(datetime(2024, 1, 1, tzinfo=UTC), "2")
     assert sleeps == [2.5, 1.5]  # zero disables the pause
 
