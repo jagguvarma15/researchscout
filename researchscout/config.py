@@ -91,6 +91,11 @@ class Settings(BaseSettings):
     scheduler_timezone: str = "America/New_York"
     scheduler_ingest_window_days: int = 2
     scheduler_ingest_interval_sec: int = 3600
+    # Stop an ingest run after this many consecutive pages on which every entry was already
+    # stored (0 = walk the whole window). Sound because arXiv pages newest-first, so nothing
+    # new on N pages means the rest of the window is older still; this is what keeps several
+    # runs a day inside the request budget the upstream tolerates.
+    scheduler_ingest_early_stop_pages: int = 0
     scheduler_index_interval_sec: int = 900
     scheduler_signals_interval_sec: int = 21600
     scheduler_fulltext_interval_sec: int = 3600
@@ -185,6 +190,10 @@ class Settings(BaseSettings):
     # that table compares them on. A file rather than a query because "which labs matter" is a
     # judgement call, and one that will need revisiting as the field moves.
     providers_config_path: Path = Path("config/providers.yaml")
+    # The commit an image was built from, stamped by `make deploy-build` through the GIT_SHA
+    # build arg and served by /v1/system/status - which is how a stale deployment becomes a
+    # readable fact instead of a guess. Empty for a source checkout.
+    build_sha: str = ""
 
 
 @lru_cache(maxsize=1)
