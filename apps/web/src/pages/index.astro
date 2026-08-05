@@ -14,6 +14,7 @@ import {
   type PaperSummary,
 } from '../lib/api';
 import { renderMathHTML } from '../lib/math';
+import { morphName } from '../lib/morph';
 import { categoryName, subjectLabel, TOPICS, topicLabel } from '../lib/taxonomy';
 
 const params = Astro.url.searchParams;
@@ -325,9 +326,14 @@ function pageLink(target: number): string {
               return (
                 <li class="row" data-paper-id={paper.id} data-rank={rankOf.get(paper.id)}>
                   <div class="row-head">
+                    {/* The name is what lets this title morph into the paper page's heading
+                        during navigation. The reading-list preview above deliberately has
+                        none: a saved paper can also be in today's feed, and duplicate names
+                        on one page cancel the morph. */}
                     <a
                       class="title"
                       href={`/papers/${paper.id}`}
+                      transition:name={morphName('paper-title', paper.id)}
                       set:html={renderMathHTML(paper.title)}
                     />
                     <SaveButton client:visible paperId={paper.id} saved={savedIds.has(paper.id)} />
@@ -651,13 +657,21 @@ function pageLink(target: number): string {
   .row:last-child::after {
     display: none;
   }
-  /* Leaving is animated, so a row does not just blink out from under the cursor. */
+  /* Leaving slides and collapses, so the list closes over the gap instead of jumping.
+     Telemetry fixes the row's height inline before this class lands - which is what lets
+     height transition to zero - and detaches the node only once the collapse has run.
+     Under reduced motion the removal is synchronous and none of this plays. */
   .row.going {
     opacity: 0;
     transform: translateX(1.5rem);
+    padding-top: 0;
+    padding-bottom: 0;
+    overflow: hidden;
     transition:
       opacity var(--dur-slow) var(--ease-out),
-      transform var(--dur-slow) var(--ease-out);
+      transform var(--dur-slow) var(--ease-out),
+      height var(--dur-slow) var(--ease-out),
+      padding var(--dur-slow) var(--ease-out);
   }
   @media (prefers-reduced-motion: reduce) {
     .row.going {
@@ -808,5 +822,30 @@ function pageLink(target: number): string {
     .quick {
       margin-left: 0;
     }
+  }
+  /* Pointer polish: the pills and links above declare hover colors that used to snap, and
+     nothing on the page acknowledged a press. One block, so the feed's controls share the
+     buttons' timing. */
+  .chip,
+  .kt,
+  .page-num,
+  .quick {
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out);
+  }
+  .chip:active,
+  .kt:active,
+  .page-num:active,
+  .quick:active {
+    transform: scale(0.96);
+  }
+  .title,
+  .reading-title,
+  .reading-all,
+  .dismiss {
+    transition: color var(--dur-fast) var(--ease-out);
   }
 </style>
