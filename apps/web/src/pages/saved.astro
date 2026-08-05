@@ -4,6 +4,7 @@ import SaveButton from '../components/SaveButton.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchSaved, formatDate, type PaperSummary } from '../lib/api';
 import { renderMathHTML } from '../lib/math';
+import { morphName } from '../lib/morph';
 
 const items = await fetchSaved(Astro.locals.accessToken);
 
@@ -57,6 +58,7 @@ function formatDayHeading(iso: string): string {
                   <a
                     class="title"
                     href={`/papers/${paper.id}`}
+                    transition:name={morphName('paper-title', paper.id)}
                     set:html={renderMathHTML(paper.title)}
                   />
                   <SaveButton client:visible paperId={paper.id} saved={true} />
