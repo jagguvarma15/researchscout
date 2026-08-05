@@ -1,0 +1,64 @@
+# The one alert worth having, and the one that would have caught this deployment.
+#
+# Nothing else says that ingestion has stopped. The API stays up, the pages render, every panel
+# on the corpus dashboard keeps showing the number it showed yesterday, and the only symptom is
+# a feed that quietly stops moving - which is exactly what happened here for weeks, because
+# deploy/.env was missing the scheduling settings and the scheduler had no fetch tasks at all.
+#
+# Thirty hours rather than twenty-four: the pipeline runs four times a day, so a single missed
+# cycle is not news, and arXiv publishes nothing over a weekend, which the four-day ingest
+# window covers but which does move `max(published_at)` around. Thirty hours fires on a real
+# stoppage without crying about a Sunday.
+#
+# Import through Alerting -> Alert rules -> Import, or provision it with the Grafana API. The
+# datasource uid is the one your PostgreSQL data source was given on import; Grafana fills it
+# in when you pick the data source in the UI.
+
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: researchscout
+    folder: ResearchScout
+    interval: 10m
+    rules:
+      - title: Corpus has stopped growing
+        condition: stale
+        for: 30m
+        annotations:
+          summary: No new paper has been published into the corpus for over 30 hours.
+          description: >
+            Ingestion has stopped. Check that the scheduler container is running and that it has
+            fetch tasks at all: `make deploy-logs` prints every task and its next run on
+            start-up, and warns when RS_SCHEDULER_BATCH_PIPELINE is off with no stream running.
+        labels:
+          severity: warning
+        data:
+          - refId: hours
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: $DS_POSTGRES
+            model:
+              refId: hours
+              format: table
+              rawQuery: true
+              rawSql: |
+                SELECT
+                  EXTRACT(EPOCH FROM (now() - max(published_at))) / 3600.0 AS hours
+                FROM papers
+          - refId: stale
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: __expr__
+            model:
+              refId: stale
+              type: threshold
+              expression: hours
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [30]
+        noDataState: NoData
+        execErrState: Alerting
