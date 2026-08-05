@@ -355,6 +355,39 @@ export async function fetchProviders(): Promise<CatalogResult<ProviderTable>> {
   return readCatalog('/v1/providers');
 }
 
+/** One row of the recent-models strip: a curated lab's model and its headline facts. */
+export interface NotableModel {
+  id: string;
+  name: string;
+  provider: string;
+  country: string | null;
+  published_on: string | null;
+  parameters: number | null;
+  open_weights: boolean | null;
+}
+
+export async function fetchNotableModels(): Promise<CatalogResult<NotableModel[]>> {
+  const result = await readCatalog<{ items: NotableModel[] }>('/v1/models/notable');
+  return result.ok ? { ok: true, data: result.data.items } : result;
+}
+
+/** One curated benchmark with the best curated-lab score and who holds it. */
+export interface HeadlineBenchmark {
+  id: string;
+  name: string;
+  scale: string;
+  result_count: number;
+  best_score: number;
+  model_id: string;
+  model_name: string;
+  provider: string;
+}
+
+export async function fetchHeadlineBenchmarks(): Promise<CatalogResult<HeadlineBenchmark[]>> {
+  const result = await readCatalog<{ items: HeadlineBenchmark[] }>('/v1/benchmarks/headline');
+  return result.ok ? { ok: true, data: result.data.items } : result;
+}
+
 // --- Per-account site state (signed in only; a cache, so failures cost a suggestion) ---
 
 export async function fetchSearchHistory(token?: string | null): Promise<string[] | null> {
