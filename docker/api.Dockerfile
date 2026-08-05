@@ -49,6 +49,11 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/home/scout/.cache/huggingface
 
+# Which commit this image is. make deploy-build stamps it and /v1/system/status serves it, so
+# a stale deployment is a readable fact rather than a guess. Empty when built by hand.
+ARG GIT_SHA=
+ENV RS_BUILD_SHA=$GIT_SHA
+
 # The model cache is a named volume in compose. Docker seeds a fresh volume from whatever the
 # image has at that path, ownership included - without this directory it creates one owned by
 # root and the unprivileged process cannot write the weights it just downloaded.
