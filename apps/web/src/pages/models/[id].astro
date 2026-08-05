@@ -2,6 +2,7 @@
 import { Icon } from 'astro-icon/components';
 import Base from '../../layouts/Base.astro';
 import { catalogMessage, fetchModel, fetchPaper, formatScore } from '../../lib/api';
+import { morphName } from '../../lib/morph';
 
 // One model, which is where its scores and the paper it came from can both be shown. The table
 // on /models used to link straight out to the upstream, and /benchmarks said in as many words
@@ -72,7 +73,7 @@ const facts = model
   {
     model && (
       <article>
-        <h1 class="page-title">{model.name}</h1>
+        <h1 class="page-title" transition:name={morphName('model', model.id)}>{model.name}</h1>
 
         <dl class="facts">
           {facts.map((fact) => (
