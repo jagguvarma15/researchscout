@@ -140,13 +140,14 @@ a {
   color: var(--accent);
 }
 
+/* No border-radius here: outlines follow the element's own corners, and forcing 4px onto a
+   pill reshaped it for exactly as long as it was focused. */
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 summary:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  border-radius: 4px;
 }
 
 ::selection {
@@ -192,13 +193,14 @@ svg[data-icon] {
   transition:
     background-color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
 }
 
-.btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: var(--radius-full);
+/* Hover says "you could"; this says "you did". A dip for the duration of the press, so a
+   click is acknowledged even while the page it asked for is still on its way. */
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn:disabled {
@@ -309,7 +311,6 @@ svg[data-icon] {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
   border-color: var(--accent);
-  border-radius: var(--radius-sm);
 }
 
 /* Shared page furniture ----------------------------------------------------- */
@@ -413,6 +414,10 @@ svg[data-icon] {
   border-bottom: none;
 }
 
+.data-table tbody tr {
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+
 .data-table tbody tr:hover {
   background: var(--surface-2);
 }
@@ -461,9 +466,10 @@ svg[data-icon] {
   color: var(--muted);
 }
 
-/* Placeholders for content the server is still fetching. Pages render these instead of a
-   blank region, so the layout does not jump when the real rows arrive. The shimmer is
-   decorative and stills under reduced motion; the block itself stays. */
+/* Placeholders for content an island is still fetching - the omnibox search is the one
+   consumer. Pages are fully server-rendered, so they never need one; the progress bar
+   below is what covers the gap between pages. The shimmer is decorative and stills under
+   reduced motion; the block itself stays. */
 
 .skeleton {
   position: relative;
@@ -530,11 +536,40 @@ svg[data-icon] {
   line-height: 1.6;
   text-decoration: none;
   vertical-align: 0.1em;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
 
 .digest-body a:hover {
   background: var(--chip-hover);
+}
+
+/* Navigation progress -------------------------------------------------------- */
+
+/* The client router suppresses the browser's own loading indicator, so without this a slow
+   navigation is a silent stall. The boot script arms html[data-navigating] only after a
+   short delay - instant pages never flash it - and the swap strips the attribute along
+   with the rest, which is exactly when the bar should go. */
+
+html[data-navigating]::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 30vw;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  z-index: 200;
+  animation: nav-progress 1s var(--ease-out) infinite;
+}
+
+@keyframes nav-progress {
+  from {
+    transform: translateX(-30vw);
+  }
+  to {
+    transform: translateX(100vw);
+  }
 }
 
 /* Motion guard --------------------------------------------------------------- */
@@ -546,5 +581,21 @@ svg[data-icon] {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+
+  /* The guard above reduces the sweep to a single instant frame; a still, full-width
+     hairline keeps the "something is loading" fact without the motion. */
+  html[data-navigating]::before {
+    width: 100vw;
+    animation: none;
+    opacity: 0.5;
+  }
+
+  /* And it cannot reach the view-transition pseudo-elements at all, so the page morphs
+     and cross-fades are turned off here by name. */
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
   }
 }
