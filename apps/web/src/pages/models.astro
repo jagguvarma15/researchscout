@@ -1,18 +1,80 @@
 ---
 import { Icon } from 'astro-icon/components';
 import Base from '../layouts/Base.astro';
-import { fetchModels, MODEL_PAGE_SIZE, type AiModel } from '../lib/api';
+import {
+  catalogMessage,
+  fetchModels,
+  MODEL_PAGE_SIZE,
+  MODEL_SORTS,
+  type AiModel,
+} from '../lib/api';
 
 const params = Astro.url.searchParams;
+const q = params.get('q') ?? '';
 const organization = params.get('organization') ?? '';
 const domain = params.get('domain') ?? '';
 const openWeights = params.get('open_weights') ?? '';
 const withPaper = params.get('with_paper') === 'true';
+const rawSort = params.get('sort') ?? 'released';
+const sort = (MODEL_SORTS as readonly string[]).includes(rawSort) ? rawSort : 'released';
+// Dates and sizes read high-to-low when you first click them; names read from A.
+const DESCENDING_BY_DEFAULT = new Set(['released', 'parameters', 'compute', 'downloads']);
+const rawDirection = params.get('dir');
+const descending =
+  rawDirection === 'asc' ? false : rawDirection === 'desc' ? true : DESCENDING_BY_DEFAULT.has(sort);
 const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
 
-const result = await fetchModels({ organization, domain, openWeights, withPaper, page });
-const models = result?.items ?? null;
-const total = result?.total ?? 0;
+const result = await fetchModels({
+  q,
+  organization,
+  domain,
+  openWeights,
+  withPaper,
+  sort,
+  direction: descending ? 'desc' : 'asc',
+  page,
+});
+const models = result.ok ? result.data.items : null;
+const total = result.ok ? result.data.total : 0;
+// Kept apart from "no rows": a backend that has never been refreshed and one that is older
+// than this page are different problems with different fixes, and saying "unreachable" for
+// both is what made this take an evening to work out.
+const failure = result.ok ? null : result.failure;
+
+function sortAria(key: string): 'ascending' | 'descending' | 'none' {
+  if (sort !== key) return 'none';
+  return descending ? 'descending' : 'ascending';
+}
+
+/**
+ * Where a column heading goes: to this column, or to the other direction if already on it.
+ *
+ * The toggle is the point. Without it a second click on the sorted column rebuilt the URL it
+ * was already on, so the page did not move and the sort read as broken - which is exactly how
+ * it was reported.
+ */
+function sortLink(key: string): string {
+  const next = new URLSearchParams(Astro.url.searchParams);
+  next.set('sort', key);
+  const flipped = sort === key ? !descending : DESCENDING_BY_DEFAULT.has(key);
+  next.set('dir', flipped ? 'desc' : 'asc');
+  next.delete('page');
+  return `/models?${next}`;
+}
+
+// The table's columns in order. A `key` makes the heading a sort link; the three without one
+// are not usefully sortable (a field list, a three-value flag, and a link).
+const COLUMNS: { key?: string; label: string; num?: boolean }[] = [
+  { key: 'name', label: 'Model' },
+  { key: 'organization', label: 'Organisation' },
+  { key: 'released', label: 'Released' },
+  { label: 'Field' },
+  { key: 'parameters', label: 'Parameters', num: true },
+  { key: 'compute', label: 'Compute', num: true },
+  { label: 'Weights' },
+  { key: 'downloads', label: 'Downloads', num: true },
+  { label: 'Paper' },
+];
 
 // The domains Epoch AI files models under. Listed rather than derived so the filter row is
 // stable whatever this page happens to be showing.
@@ -74,6 +136,20 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
     paper is in this corpus link straight to it.
   </p>
 
+  <form class="find" method="get" role="search">
+    {/* Every other filter rides along as a hidden field, so searching narrows what is on
+        screen rather than resetting it. */}
+    {domain && <input type="hidden" name="domain" value={domain} />}
+    {organization && <input type="hidden" name="organization" value={organization} />}
+    {openWeights && <input type="hidden" name="open_weights" value={openWeights} />}
+    {withPaper && <input type="hidden" name="with_paper" value="true" />}
+    {sort !== 'released' && <input type="hidden" name="sort" value={sort} />}
+    {rawDirection && <input type="hidden" name="dir" value={rawDirection} />}
+    <Icon name="lucide:search" aria-hidden="true" />
+    <input type="search" name="q" value={q} placeholder="Find a model by name" aria-label="Find a model by name" />
+    {q && <a class="clear" href={withParam('q', '')}>Clear</a>}
+  </form>
+
   <div class="filters" role="group" aria-label="Filter models">
     <a class:list={['chip-toggle', { on: !domain }]} href={withParam('domain', '')}>All fields</a>
     {
@@ -102,10 +178,10 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
   </div>
 
   {
-    models === null && (
+    failure && (
       <div class="card empty is-error">
         <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>The API is unreachable — try again in a moment.</p>
+        <p>{catalogMessage(failure, 'models')}</p>
       </div>
     )
   }
@@ -114,8 +190,9 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
       <div class="card empty">
         <Icon name="lucide:box" aria-hidden="true" />
         <p>
-          No models match those filters — widen them, or run <code>scout catalog</code> if the
-          catalogue has never been refreshed.
+          {q || domain || organization || openWeights || withPaper
+            ? 'No models match those filters - widen them.'
+            : 'The catalogue is empty. It fills on the daily refresh, or run scout catalog now.'}
         </p>
       </div>
     )
@@ -131,34 +208,37 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
           <table class="data-table">
             <thead>
               <tr>
-                <th scope="col">Model</th>
-                <th scope="col">Organisation</th>
-                <th scope="col">Released</th>
-                <th scope="col">Field</th>
-                <th scope="col" class="cell-num">
-                  Parameters
-                </th>
-                <th scope="col" class="cell-num">
-                  Compute
-                </th>
-                <th scope="col">Weights</th>
-                <th scope="col" class="cell-num">
-                  Downloads
-                </th>
-                <th scope="col">Paper</th>
+                {COLUMNS.map((column) => (
+                  <th
+                    scope="col"
+                    class:list={[{ 'cell-num': column.num }]}
+                    aria-sort={column.key ? sortAria(column.key) : undefined}
+                  >
+                    {column.key ? (
+                      <a class="sortable" href={sortLink(column.key)}>
+                        {column.label}
+                        {sort === column.key && (
+                          <Icon
+                            name={descending ? 'lucide:chevron-down' : 'lucide:chevron-up'}
+                            aria-hidden="true"
+                          />
+                        )}
+                      </a>
+                    ) : (
+                      column.label
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {models.map((model) => (
                 <tr>
                   <th scope="row" class="cell-name">
-                    {model.link ? (
-                      <a href={model.link} rel="noopener noreferrer nofollow" target="_blank">
-                        {model.name}
-                      </a>
-                    ) : (
-                      model.name
-                    )}
+                    {/* Its own page rather than straight out to the upstream: that page is
+                        where the scores and the paper join live, and the outbound link is on
+                        it. A table of external links leaves nothing to come back to. */}
+                    <a href={`/models/${model.id}`}>{model.name}</a>
                   </th>
                   <td class="cell-muted cell-clip" title={model.organization ?? undefined}>
                     {model.organization ?? ''}
@@ -258,6 +338,58 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
     margin: 0 0 0.5rem;
     color: var(--muted);
     font-size: var(--text-sm);
+  }
+  .find {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 22rem;
+    margin-bottom: var(--space-3);
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-full);
+    background: var(--surface);
+    color: var(--muted);
+  }
+  .find:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+  .find input {
+    flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: none;
+    color: var(--ink);
+    font: inherit;
+    font-size: var(--text-sm);
+  }
+  .find .clear {
+    flex-shrink: 0;
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
+  /* The whole heading is the target, so the hit area is the cell rather than the word. */
+  .sortable {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    color: inherit;
+    text-decoration: none;
+  }
+  .sortable:hover {
+    color: var(--accent);
+  }
+  .sortable :global(svg) {
+    width: 0.85em;
+    height: 0.85em;
+  }
+  /* The sorted column, marked off the same attribute a screen reader reads, so the two can
+     never disagree about which one it is. */
+  th[aria-sort='descending'],
+  th[aria-sort='ascending'] {
+    color: var(--ink);
   }
   .w-open {
     background: var(--accent-soft);
