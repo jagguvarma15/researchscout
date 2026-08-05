@@ -1,0 +1,72 @@
+# The provider comparison on /benchmarks: which labs get a row, and which benchmarks are the
+# columns. Both are judgement calls, which is why they are here rather than in a query - edit
+# this file to change the table, and expect to, because the field moves.
+#
+# `aliases` are the names the upstreams file an organisation under. Epoch AI writes the
+# organisation, and writes it inconsistently ("Google DeepMind" and "Google" are the same lab);
+# Hugging Face writes the repository owner, which is a handle, so Meta arrives as "meta-llama".
+# Matching is case-insensitive and against the whole field rather than a substring, so "Mistral"
+# never swallows "Mistral community". The `name` is always an alias for itself.
+#
+# `country` is where the parent organisation is headquartered, which is the reading that stays
+# stable - several of these have research offices on three continents.
+#
+# `benchmarks` are preferences, in the order the columns should appear. One the catalogue does
+# not hold is skipped rather than drawn empty, because the upstream decides what it publishes:
+# name generously and let the page show what exists. The ids are slugs of the benchmark name as
+# Epoch AI publishes it, which is what `scout catalog` stores.
+
+benchmarks:
+  - gpqa-diamond
+  - swe-bench-verified
+  - frontiermath
+  - otis-mock-aime
+  - terminal-bench
+  - arc-agi-2
+  - simpleqa-verified
+  - math-level-5
+  - mmlu
+
+providers:
+  - name: OpenAI
+    country: United States
+    aliases: [OpenAI, openai, OpenAI o1, openai-community]
+  - name: Anthropic
+    country: United States
+    aliases: [Anthropic, anthropic]
+  - name: Google DeepMind
+    country: United States
+    aliases: [Google DeepMind, Google, DeepMind, Google Research, Google Brain, google]
+  - name: Meta
+    country: United States
+    aliases: [Meta AI, Meta, Facebook AI Research, FAIR, meta-llama, facebook]
+  - name: xAI
+    country: United States
+    aliases: [xAI, xai-org]
+  - name: Microsoft
+    country: United States
+    aliases: [Microsoft, Microsoft Research, microsoft]
+  - name: Amazon
+    country: United States
+    aliases: [Amazon, Amazon AGI, Amazon Web Services, amazon]
+  - name: NVIDIA
+    country: United States
+    aliases: [NVIDIA, Nvidia, nvidia]
+  - name: Mistral AI
+    country: France
+    aliases: [Mistral AI, Mistral, mistralai]
+  - name: Cohere
+    country: Canada
+    aliases: [Cohere, Cohere For AI, CohereForAI, CohereLabs]
+  - name: AI21 Labs
+    country: Israel
+    aliases: [AI21 Labs, AI21, ai21labs]
+  - name: DeepSeek
+    country: China
+    aliases: [DeepSeek, DeepSeek AI, deepseek-ai]
+  - name: Alibaba
+    country: China
+    aliases: [Alibaba, Alibaba Cloud, Alibaba Group, Qwen]
+  - name: Moonshot AI
+    country: China
+    aliases: [Moonshot AI, moonshotai]
