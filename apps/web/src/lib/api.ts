@@ -42,6 +42,8 @@ export interface FeedParams {
   venue?: string;
   minCitations?: string;
   sort?: string;
+  /** 'asc' or 'desc'; omitted takes the column's natural direction. */
+  direction?: string;
   page?: number;
 }
 
@@ -214,6 +216,8 @@ export interface BenchmarkResult {
   score: number;
   measured_on: string | null;
   origin: string | null;
+  /** The benchmark's scale; see formatScore. */
+  scale: string;
 }
 
 export interface Benchmark {
@@ -221,6 +225,21 @@ export interface Benchmark {
   name: string;
   released_on: string | null;
   result_count: number;
+  /** "fraction" when the scores read as percentages, "raw" when they do not. */
+  score_scale: string;
+}
+
+/**
+ * A benchmark score as it should be shown, given the scale the server recorded for it.
+ *
+ * Most benchmarks are accuracies between zero and one, and multiplying those by a hundred was
+ * done unconditionally - which is right for them and nonsense for the eleven that are a ratio,
+ * an Elo or an amount of money. Vending Bench rendered as 1118187.3.
+ */
+export function formatScore(score: number, scale: string): string {
+  if (scale === 'fraction') return (score * 100).toFixed(1);
+  if (Math.abs(score) >= 1000) return score.toLocaleString('en-US', { maximumFractionDigits: 0 });
+  return score.toFixed(2);
 }
 
 export interface BenchmarkDetail extends Benchmark {
@@ -228,58 +247,112 @@ export interface BenchmarkDetail extends Benchmark {
 }
 
 export interface ModelParams {
+  q?: string;
   organization?: string;
   domain?: string;
   openWeights?: string;
   withPaper?: boolean;
   paperId?: string;
+  sort?: string;
+  /** "asc" or "desc"; omitted takes the column's natural direction. */
+  direction?: string;
   page?: number;
 }
 
 export const MODEL_PAGE_SIZE = 50;
+export const MODEL_SORTS = [
+  'released',
+  'parameters',
+  'compute',
+  'downloads',
+  'organization',
+  'name',
+] as const;
+export type ModelSort = (typeof MODEL_SORTS)[number];
+
+/**
+ * Why a catalogue read came back with nothing.
+ *
+ * These helpers used to return null for every failure alike, so "the API is unreachable" was
+ * what a page said whether the backend was down, older than the page, or simply had an empty
+ * catalogue. Those want four different things done about them, and the status is what tells
+ * them apart. `status` is null when the request never reached the API at all.
+ */
+export interface CatalogFailure {
+  status: number | null;
+}
+
+export type CatalogResult<T> = { ok: true; data: T } | { ok: false; failure: CatalogFailure };
+
+/** What to tell a reader about a failed catalogue read, and what it means for whoever runs it. */
+export function catalogMessage(failure: CatalogFailure, what: string): string {
+  if (failure.status === null) return 'The API is unreachable - try again in a moment.';
+  if (failure.status === 404) {
+    return `This backend serves no ${what} endpoint, so it is older than this page. Rebuild and redeploy it.`;
+  }
+  return `The ${what} endpoint answered ${failure.status}. The API log will say why.`;
+}
+
+async function readCatalog<T>(path: string): Promise<CatalogResult<T>> {
+  try {
+    const response = await fetch(`${API_URL}${path}`, { headers: apiHeaders() });
+    if (!response.ok) return { ok: false, failure: { status: response.status } };
+    return { ok: true, data: (await response.json()) as T };
+  } catch {
+    return { ok: false, failure: { status: null } };
+  }
+}
 
 export async function fetchModels(
   params: ModelParams = {},
-): Promise<{ items: AiModel[]; total: number } | null> {
+): Promise<CatalogResult<{ items: AiModel[]; total: number }>> {
   const search = new URLSearchParams({ limit: String(MODEL_PAGE_SIZE) });
+  if (params.q) search.set('q', params.q);
   if (params.organization) search.set('organization', params.organization);
   if (params.domain) search.set('domain', params.domain);
   if (params.openWeights) search.set('open_weights', params.openWeights);
   if (params.withPaper) search.set('with_paper', 'true');
   if (params.paperId) search.set('paper_id', params.paperId);
+  if (params.sort && params.sort !== 'released') search.set('sort', params.sort);
+  if (params.direction) search.set('direction', params.direction);
   if (params.page && params.page > 1) {
     search.set('offset', String((params.page - 1) * MODEL_PAGE_SIZE));
   }
-  try {
-    const response = await fetch(`${API_URL}/v1/models?${search}`, { headers: apiHeaders() });
-    if (!response.ok) return null;
-    return (await response.json()) as { items: AiModel[]; total: number };
-  } catch {
-    return null;
-  }
+  return readCatalog(`/v1/models?${search}`);
 }
 
-export async function fetchBenchmarks(): Promise<Benchmark[] | null> {
-  try {
-    const response = await fetch(`${API_URL}/v1/benchmarks`, { headers: apiHeaders() });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { items: Benchmark[] };
-    return body.items;
-  } catch {
-    return null;
-  }
+export async function fetchModel(id: string): Promise<CatalogResult<AiModel>> {
+  return readCatalog(`/v1/models/${encodeURIComponent(id)}`);
 }
 
-export async function fetchBenchmark(id: string): Promise<BenchmarkDetail | null> {
-  try {
-    const response = await fetch(`${API_URL}/v1/benchmarks/${id}?limit=25`, {
-      headers: apiHeaders(),
-    });
-    if (!response.ok) return null;
-    return (await response.json()) as BenchmarkDetail;
-  } catch {
-    return null;
-  }
+export async function fetchBenchmarks(): Promise<CatalogResult<Benchmark[]>> {
+  const result = await readCatalog<{ items: Benchmark[] }>('/v1/benchmarks');
+  return result.ok ? { ok: true, data: result.data.items } : result;
+}
+
+export async function fetchBenchmark(id: string): Promise<CatalogResult<BenchmarkDetail>> {
+  return readCatalog(`/v1/benchmarks/${encodeURIComponent(id)}?limit=50`);
+}
+
+/** One row per provider: its current flagship and how that scores on the headline benchmarks. */
+export interface ProviderRow {
+  provider: string;
+  country: string | null;
+  model_id: string;
+  model_name: string;
+  published_on: string | null;
+  paper_id: string | null;
+  open_weights: boolean | null;
+  scores: Record<string, number>;
+}
+
+export interface ProviderTable {
+  columns: { id: string; name: string; scale: string }[];
+  items: ProviderRow[];
+}
+
+export async function fetchProviders(): Promise<CatalogResult<ProviderTable>> {
+  return readCatalog('/v1/providers');
 }
 
 // --- Per-account site state (signed in only; a cache, so failures cost a suggestion) ---
@@ -295,12 +368,19 @@ export async function fetchSearchHistory(token?: string | null): Promise<string[
   }
 }
 
-export async function fetchDismissals(token?: string | null): Promise<string[] | null> {
+/**
+ * The feed query string this account last applied, or null.
+ *
+ * Offered back rather than redirected to. A bare "/" that bounced to the saved filters would
+ * be a trap: pressing back returns to "/", which bounces again, so the unfiltered feed becomes
+ * unreachable. A link is one click and no surprises.
+ */
+export async function fetchSavedFilters(token?: string | null): Promise<string | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/me/dismissals`, { headers: apiHeaders(token) });
+    const response = await fetch(`${API_URL}/v1/me/filters`, { headers: apiHeaders(token) });
     if (!response.ok) return null;
-    const body = (await response.json()) as { items: string[] };
-    return body.items;
+    const body = (await response.json()) as { query_string: string | null };
+    return body.query_string || null;
   } catch {
     return null;
   }
