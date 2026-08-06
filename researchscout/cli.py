@@ -271,17 +271,19 @@ def serve_scheduler(
     from contextlib import suppress
 
     from researchscout.config import get_settings
-    from researchscout.scheduler import Scheduler, build_tasks
+    from researchscout.scheduler import Scheduler, build_tasks, record_started
     from researchscout.trace import configure_logging
 
     configure_logging()
     settings = get_settings()
-    scheduler = Scheduler(build_tasks(settings), tick_sec=settings.scheduler_tick_sec)
+    tasks = build_tasks(settings)
+    scheduler = Scheduler(tasks, tick_sec=settings.scheduler_tick_sec)
 
     if once:
         scheduler.run_pass()
         return
 
+    record_started(len(tasks))
     stop = threading.Event()
     for sig in (signalmod.SIGINT, signalmod.SIGTERM):
         with suppress(ValueError):  # not the main thread — fall back to KeyboardInterrupt
