@@ -14,10 +14,11 @@ NY = ZoneInfo("America/New_York")
 
 
 def test_task_due_compares_against_deadline() -> None:
+    wall = datetime(2026, 8, 4, 12, 0, tzinfo=NY)
     task = Task("t", 10.0, lambda: None, next_at=100.0)
-    assert not task.due(99.0)
-    assert task.due(100.0)
-    assert task.due(101.0)
+    assert not task.due(99.0, wall)
+    assert task.due(100.0, wall)
+    assert task.due(101.0, wall)
 
 
 def test_run_pass_runs_every_task_in_order() -> None:
@@ -121,26 +122,45 @@ def test_a_wall_clock_task_waits_for_its_next_slot() -> None:
         at=(time(14, 0), time(17, 0)),
         zone=NY,
     )
-    started = datetime(2026, 8, 4, 15, 2, tzinfo=NY)
-    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: started)
+    now = {"wall": datetime(2026, 8, 4, 15, 2, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
 
+    assert task.next_wall == datetime(2026, 8, 4, 17, 0, tzinfo=NY)
     assert sched.run_due(0.0) == []  # not due: the next slot is 17:00
-    assert task.next_at == 118 * 60  # 1h58m away
     assert calls == []
-    assert sched.run_due(task.next_at) == ["x"]
+    now["wall"] = datetime(2026, 8, 4, 17, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
     assert calls == ["x"]
 
 
 def test_a_wall_clock_task_reschedules_onto_the_following_slot() -> None:
-    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY), "mono": 0.0}
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
     task = Task("x", 60.0, lambda: None, at=(time(14, 0), time(17, 0)), zone=NY)
-    sched = Scheduler([task], clock=lambda: now["mono"], wall=lambda: now["wall"])
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
 
-    assert task.next_at == 60.0  # one minute to 14:00
-    now["mono"], now["wall"] = 60.0, datetime(2026, 8, 4, 14, 0, tzinfo=NY)
-    assert sched.run_due(now["mono"]) == ["x"]
+    assert task.next_wall == datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
     # Having just run at 14:00, the next deadline is 17:00 rather than 14:00 again.
-    assert task.next_at == 60.0 + 3 * 3600
+    assert task.next_wall == datetime(2026, 8, 4, 17, 0, tzinfo=NY)
+
+
+def test_a_slot_slept_over_fires_once_on_wake() -> None:
+    # The host slept from before 05:00 until 10:38, freezing the monotonic clock; on wake the
+    # 05:00 deadline is in the past. Exactly one catch-up run, then onto the 14:00 slot -
+    # judged by monotonic time instead, the deadline would still be hours away.
+    calls: list[str] = []
+    slots = (time(5, 0), time(10, 0), time(14, 0), time(17, 0))
+    task = Task("x", 60.0, lambda: calls.append("x"), at=slots, zone=NY)
+    now = {"wall": datetime(2026, 8, 6, 4, 0, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    assert task.next_wall == datetime(2026, 8, 6, 5, 0, tzinfo=NY)
+    now["wall"] = datetime(2026, 8, 6, 10, 38, tzinfo=NY)  # asleep through 05:00 and 10:00
+    assert sched.run_due(0.0) == ["x"]  # the monotonic clock never moved
+    assert calls == ["x"]
+    assert task.next_wall == datetime(2026, 8, 6, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == []  # one catch-up covers the backlog, not one per slot
 
 
 def test_an_interval_task_still_starts_due() -> None:
@@ -239,6 +259,20 @@ def test_recorded_wrapper_writes_the_ledger(monkeypatch: pytest.MonkeyPatch) -> 
         scheduler_mod._recorded("broken", boom)()
 
     assert entries == [("fine", True, ""), ("broken", False, "no")]
+
+
+def test_record_started_writes_the_scheduler_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The start-up row is what lets deploy-verify tell a young ledger from a stalled loop."""
+    import researchscout.scheduler as scheduler_mod
+
+    entries: list[tuple[str, bool, str]] = []
+
+    def fake_record(name: str, started: object, *, ok: bool, note: str = "") -> None:
+        entries.append((name, ok, note))
+
+    monkeypatch.setattr(scheduler_mod, "_record_safely", fake_record)
+    scheduler_mod.record_started(8)
+    assert entries == [("scheduler", True, "started: 8 task(s)")]
 
 
 def test_the_start_up_summary_names_every_task_and_its_next_run(
