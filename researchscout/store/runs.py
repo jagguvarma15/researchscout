@@ -46,3 +46,19 @@ def recent_runs(session: Session, *, limit: int = 20) -> list[SchedulerRunRow]:
         .limit(limit)
     )
     return list(session.execute(stmt).scalars())
+
+
+def last_started(session: Session) -> datetime | None:
+    """When the scheduler loop most recently came up, or None if it never has.
+
+    Its own row rather than the recent-runs window because a day of runs scrolls the start-up
+    past any fixed limit, and "was the loop already up when that slot arrived" is exactly the
+    question a missed-slot check must still be able to answer.
+    """
+    stmt = (
+        select(SchedulerRunRow.started_at)
+        .where(SchedulerRunRow.task == "scheduler")
+        .order_by(SchedulerRunRow.started_at.desc(), SchedulerRunRow.id.desc())
+        .limit(1)
+    )
+    return session.execute(stmt).scalar_one_or_none()
