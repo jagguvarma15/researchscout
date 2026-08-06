@@ -82,6 +82,14 @@ was down - the ingest window is several days wide, so the next run covers it, an
 start-up instead would mean a restart loop hammering arXiv. `scout serve scheduler --once`
 ignores the clock entirely and runs everything, which is what a host cron entry wants.
 
+Wall-clock deadlines are compared against the wall clock, not stored as monotonic offsets.
+The distinction earns its sentence on a Mac: while the host sleeps, the container's monotonic
+clock stops with it, so an offset deadline slips by however long the machine was closed - this
+deployment once held its 05:00 run until late evening that way. Judged by the wall clock, a
+slot slept over fires once on wake and covers the backlog. Runs only happen at their exact
+times if the machine is awake to see them, though: a Mac hosting the deployment should not
+sleep on AC power (`sudo pmset -c sleep 0`) - while it sleeps the API is unreachable anyway.
+
 Ingest runs are built to survive the upstream: each page commits on its own and a rate limit
 mid-walk keeps everything already stored (arXiv pages newest-first, so the papers that matter
 land first); 429s are retried briefly, honoring `Retry-After`. Set
@@ -91,9 +99,11 @@ between three requests and thirty, four times a day. Citation signals go through
 Scholar's batch endpoint, 500 papers per call; without an `S2_API_KEY` the shared pool still
 throttles sometimes, and a key (free, from their site) is the real fix.
 
-Every completed task lands in the `scheduler_runs` ledger, and `GET /v1/system/status` serves
-it along with the app version, the build SHA, the migration stamp, and the newest paper's age -
-which is what `make deploy-verify` reads to say whether a deployment is current and fetching.
+Every completed task lands in the `scheduler_runs` ledger - including a `scheduler` row each
+time the loop comes up - and `GET /v1/system/status` serves it along with the app version, the
+build SHA, the migration stamp, the newest paper's age, and the pipeline slot most recently
+due. That last pair is what lets `make deploy-verify` flag a stalled loop by name: a slot that
+passed after the newest scheduler start with no run recorded is a problem, not a young ledger.
 One warning worth repeating: never run two fetchers against arXiv from one address.
 `make scheduler` says so out loud if the deployed scheduler container is already running.
 
