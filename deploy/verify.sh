@@ -33,7 +33,7 @@ printf '%s' "$status" | LOCAL_SHA="$local_sha" python3 -c '
 import json
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 s = json.load(sys.stdin)
 problems = []
@@ -58,6 +58,12 @@ if newest:
 else:
     print("papers:    %s, none stored yet" % s["papers"])
 
+started = s.get("scheduler_started_at")
+if started:
+    print("scheduler: started " + started)
+else:
+    print("scheduler: no start-up recorded (image predates the ledger row, or it never ran)")
+
 runs = s.get("runs") or []
 if runs:
     print("recent runs:")
@@ -67,6 +73,25 @@ if runs:
         print("  %s %-9s finished %s%s" % (mark, r["task"], r["finished_at"], note))
 else:
     print("recent runs: none recorded yet (the ledger fills as scheduled tasks run)")
+
+# A slot that passed after the newest scheduler start-up must have left a run behind. This
+# is the check that tells a stalled loop (the host slept through its deadlines) apart from a
+# young ledger; a start-up after the slot is a plain restart and raises nothing.
+due = s.get("pipeline_due_at")
+if due and started:
+    due_at = datetime.fromisoformat(due)
+    if datetime.fromisoformat(started) <= due_at:
+        slack = due_at - timedelta(seconds=120)
+        ran_since = any(
+            r["task"] != "scheduler" and datetime.fromisoformat(r["started_at"]) >= slack
+            for r in runs
+        )
+        if not ran_since:
+            problems.append(
+                "the pipeline slot due %s passed with the scheduler up but no run is "
+                "recorded - the loop is stalled or dead; check the host slept and "
+                "make deploy-logs" % due_at.strftime("%Y-%m-%d %H:%M")
+            )
 
 if problems:
     print()
