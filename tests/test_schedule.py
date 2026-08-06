@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from researchscout.schedule import describe, next_run, parse_times, seconds_until
+from researchscout.schedule import describe, next_run, parse_times, previous_run
 
 NY = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
@@ -57,27 +57,38 @@ def test_the_current_slot_is_not_reused() -> None:
 
 def test_no_times_means_no_next_run() -> None:
     assert next_run((), datetime(2026, 8, 4, 11, 30, tzinfo=NY), NY) is None
-    assert seconds_until((), datetime(2026, 8, 4, 11, 30, tzinfo=NY), NY) is None
+    assert previous_run((), datetime(2026, 8, 4, 11, 30, tzinfo=NY), NY) is None
 
 
 def test_the_caller_may_be_in_any_zone() -> None:
     # The scheduler works in UTC; the schedule is expressed in New York time.
     now = datetime(2026, 8, 4, 15, 30, tzinfo=UTC)  # 11:30 EDT
     assert next_run(PIPELINE, now, NY) == datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert previous_run(PIPELINE, now, NY) == datetime(2026, 8, 4, 10, 0, tzinfo=NY)
 
 
-def test_seconds_until_is_the_gap_to_that_moment() -> None:
-    now = datetime(2026, 8, 4, 13, 30, tzinfo=NY)
-    assert seconds_until(PIPELINE, now, NY) == 1800.0
+def test_previous_run_finds_the_latest_slot_already_due() -> None:
+    now = datetime(2026, 8, 6, 10, 38, tzinfo=NY)
+    assert previous_run(PIPELINE, now, NY) == datetime(2026, 8, 6, 10, 0, tzinfo=NY)
+
+
+def test_previous_run_reaches_back_to_yesterday_before_the_first_slot() -> None:
+    now = datetime(2026, 8, 6, 4, 59, tzinfo=NY)
+    assert previous_run(PIPELINE, now, NY) == datetime(2026, 8, 5, 17, 0, tzinfo=NY)
+
+
+def test_previous_run_counts_a_slot_landing_exactly_now() -> None:
+    # At or before, unlike next_run: a health check asking at 14:00 sharp should hold the
+    # 14:00 slot answerable rather than pointing at this morning.
+    now = datetime(2026, 8, 6, 14, 0, tzinfo=NY)
+    assert previous_run(PIPELINE, now, NY) == datetime(2026, 8, 6, 14, 0, tzinfo=NY)
 
 
 def test_spring_forward_keeps_the_local_time() -> None:
-    # 8 March 2026, 02:00 EST becomes 03:00 EDT. A 05:00 run stays at 05:00 local, so the real
-    # gap from 06:00 the previous day is 22 hours rather than the 23 the wall clock shows -
-    # the whole reason for a named zone instead of a fixed offset.
+    # 8 March 2026, 02:00 EST becomes 03:00 EDT. A 05:00 run stays at 05:00 local - the whole
+    # reason for a named zone instead of a fixed offset.
     before = datetime(2026, 3, 7, 6, 0, tzinfo=NY)
     assert next_run((time(5, 0),), before, NY) == datetime(2026, 3, 8, 5, 0, tzinfo=NY)
-    assert seconds_until((time(5, 0),), before, NY) == 22 * 3600
 
 
 def test_a_time_the_clock_skips_over_still_runs() -> None:
@@ -93,20 +104,9 @@ def test_a_time_the_clock_skips_over_still_runs() -> None:
 
 def test_autumn_fall_back_keeps_the_local_time() -> None:
     # 1 November 2026: 01:00 EDT happens, then 01:00 EST happens again. A 05:00 run is still
-    # 05:00 local, so the real gap is an hour longer than the wall clock says.
+    # 05:00 local, whatever the offset underneath it did overnight.
     before = datetime(2026, 10, 31, 6, 0, tzinfo=NY)
     assert next_run((time(5, 0),), before, NY) == datetime(2026, 11, 1, 5, 0, tzinfo=NY)
-    assert seconds_until((time(5, 0),), before, NY) == 24 * 3600
-
-
-def test_seconds_until_measures_elapsed_time_not_wall_clock() -> None:
-    # Subtracting two datetimes that share a tzinfo gives the wall-clock difference, which is
-    # wrong across a transition. Pinned here because the mistake is silent and twice-yearly.
-    before = datetime(2026, 3, 7, 6, 0, tzinfo=NY)
-    upcoming = next_run((time(5, 0),), before, NY)
-    assert upcoming is not None
-    assert (upcoming - before).total_seconds() == 23 * 3600  # what naive subtraction says
-    assert seconds_until((time(5, 0),), before, NY) == 22 * 3600  # what actually elapses
 
 
 def test_describe_reads_back_the_schedule() -> None:
