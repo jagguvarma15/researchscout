@@ -75,6 +75,18 @@ container environment. Only `deploy-build` + `deploy-up` (which recreates the co
 delivers merged code and new compose defaults - that gap is how the stack once ran for two
 days on stale code while looking perfectly healthy.
 
+And its sibling: a Mac hosting the deployment must not sleep. While it sleeps the API is
+unreachable and no scheduled slot can fire (a slept-over slot now runs once on wake, but on
+wake, not on time). Keep the machine awake on AC power:
+
+```bash
+sudo pmset -c sleep 0
+```
+
+The display can still sleep; `-c` scopes the setting to being plugged in. `deploy-verify`
+names the failure if it happens anyway: a pipeline slot that passed after the scheduler's
+newest start-up with no run recorded exits nonzero.
+
 ## 2. Auth0
 
 Three things get created, and each hands back values that go somewhere specific. The gotchas
