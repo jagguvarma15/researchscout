@@ -15,9 +15,16 @@ what a local checkout wants; wall-clock times are for a deployment that should f
 publisher's day rather than an arbitrary phase set by whenever the process last restarted. Set
 ``RS_SCHEDULER_PIPELINE_AT`` and the fetch-and-enrich tasks move onto the clock;
 ``RS_SCHEDULER_DAILY_AT`` does the same for the once-a-day products. There is deliberately no
-catch-up for a missed slot: the ingest window is several days wide, so the next run covers
-whatever a restart stepped over, and firing immediately on start-up would instead mean a
-restart loop hammering arXiv.
+catch-up for a slot missed while the process was down: the ingest window is several days wide,
+so the next run covers whatever a restart stepped over, and firing immediately on start-up
+would instead mean a restart loop hammering arXiv.
+
+A slot missed while the process was *suspended* is different, and wall-clock deadlines are held
+as datetimes rather than monotonic offsets because of it. On a Mac that sleeps, the container's
+monotonic clock stops with the host, so "so many awake-seconds from now" drifts by however long
+the lid was down - a 05:00 run scheduled the evening before would quietly move to the
+afternoon. Judged against the wall clock instead, a slept-over deadline is simply due on wake:
+the task runs once, covering the backlog, and reschedules onto the next future slot.
 
 The same task set backs both ``scout serve scheduler`` (a long-lived loop) and ``--once`` (a
 single pass), so a host cron can drive it too. A task that raises is logged and skipped, so one
@@ -37,7 +44,7 @@ from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from researchscout.config import Settings
-from researchscout.schedule import describe, next_run, parse_times, seconds_until
+from researchscout.schedule import describe, next_run, parse_times
 
 if TYPE_CHECKING:
     from researchscout.embed.base import Embedder
@@ -51,10 +58,12 @@ Wall = Callable[[], datetime]
 
 @dataclass
 class Task:
-    """One unit of scheduled work plus the monotonic deadline for its next run.
+    """One unit of scheduled work plus the deadline for its next run.
 
     ``at`` turns an interval task into a wall-clock one: when it is set, ``interval_sec`` is
-    ignored and each deadline is computed from the next of those times in ``zone``.
+    ignored and each deadline is the next of those times in ``zone``, held in ``next_wall``.
+    Interval tasks keep a monotonic deadline in ``next_at`` - elapsed awake time is the right
+    measure for "every ten minutes", and exactly the wrong one for "at five in the morning".
     """
 
     name: str
@@ -63,9 +72,17 @@ class Task:
     next_at: float = 0.0
     at: tuple[clock_time, ...] = ()
     zone: ZoneInfo = field(default_factory=lambda: ZoneInfo("UTC"))
+    next_wall: datetime | None = None
 
-    def due(self, now: float) -> bool:
-        """True once ``now`` (monotonic seconds) has reached the next-run deadline."""
+    def due(self, now: float, wall: datetime) -> bool:
+        """True once the relevant clock has reached the next-run deadline.
+
+        ``wall`` decides for wall-clock tasks and ``now`` (monotonic seconds) for interval
+        ones. Both deadlines are aware datetimes or floats set by the scheduler; a wall-clock
+        task with no deadline yet is never due rather than always due.
+        """
+        if self.at:
+            return self.next_wall is not None and wall >= self.next_wall
         return now >= self.next_at
 
 
@@ -113,8 +130,10 @@ class Scheduler:
 
     def _reschedule(self, task: Task) -> None:
         if task.at:
-            delay = seconds_until(task.at, self._wall(), task.zone)
-            task.next_at = self._clock() + (delay if delay is not None else task.interval_sec)
+            # Stored as a datetime, not converted to monotonic seconds: the monotonic clock
+            # pauses while the host sleeps, and a converted deadline would slip by exactly
+            # that long. The wall clock is resynced on wake, so a slept-over slot fires then.
+            task.next_wall = next_run(task.at, self._wall(), task.zone)
         else:
             task.next_at = self._clock() + task.interval_sec
 
@@ -132,10 +151,11 @@ class Scheduler:
         return [task.name for task in self._tasks]
 
     def run_due(self, now: float) -> list[str]:
-        """Run the tasks whose interval has elapsed by ``now``; return their names."""
+        """Run the tasks whose deadline has passed by ``now``; return their names."""
+        wall = self._wall()
         ran: list[str] = []
         for task in self._tasks:
-            if task.due(now):
+            if task.due(now, wall):
                 self._run(task)
                 ran.append(task.name)
         return ran
@@ -344,6 +364,17 @@ def _record_safely(name: str, started: datetime, *, ok: bool, note: str = "") ->
             )
     except Exception:  # noqa: BLE001 - a task that ran must not fail over its bookkeeping
         logger.warning("could not record the %s run", name, exc_info=True)
+
+
+def record_started(count: int) -> None:
+    """Write the scheduler's own start-up into the ledger.
+
+    ``deploy/verify.sh`` keys on this row: a slot that passed after the newest start with no
+    task run after it means the loop is stalled or dead, not merely young - the distinction
+    between "the ledger fills as tasks run" and "the 05:00 slot went missing".
+    """
+    now = datetime.now(UTC)
+    _record_safely("scheduler", now, ok=True, note=f"started: {count} task(s)")
 
 
 def _recorded(name: str, run: Callable[[], None]) -> Callable[[], None]:
