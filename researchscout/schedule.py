@@ -2,8 +2,10 @@
 
 An interval says "every hour"; a wall clock says "at five in the morning, New York time", which
 is what a pipeline tracking a publisher's day actually wants. The difference is entirely in
-computing the next deadline, so that is all this module does -- it hands back a number of
-seconds, and ``researchscout.scheduler`` keeps its existing monotonic loop.
+computing the deadline, so that is all this module does -- it hands back datetimes, and
+``researchscout.scheduler`` compares them against the wall clock. Not against monotonic time:
+on a host that sleeps, the monotonic clock stops with it, and a deadline stored as "so many
+awake-seconds from now" slips by however long the lid was down.
 
 Pure and dependency-free, because the interesting cases are the ones that are awkward to
 reproduce on purpose: daylight saving moving the clock under a fixed local time, a list of
@@ -71,18 +73,23 @@ def next_run(times: Sequence[time], now: datetime, zone: ZoneInfo) -> datetime |
     raise AssertionError("no next run found")  # pragma: no cover
 
 
-def seconds_until(times: Sequence[time], now: datetime, zone: ZoneInfo) -> float | None:
-    """How long until the next configured time, in seconds; None when there are no times.
+def previous_run(times: Sequence[time], now: datetime, zone: ZoneInfo) -> datetime | None:
+    """The most recent configured time at or before ``now``, or None when there are no times.
 
-    Both sides are converted to UTC before subtracting, which is not a formality: Python skips
-    interzone arithmetic when two datetimes share a ``tzinfo``, so subtracting them directly
-    measures wall clock rather than elapsed time and would be an hour wrong on each of the two
-    days a year the offset moves.
+    At or before, so exactly-on-the-slot reads as "this slot is due now". This is the question
+    a health check asks: which slot should have run by now, so its absence can be named.
     """
-    upcoming = next_run(times, now, zone)
-    if upcoming is None:
+    if not times:
         return None
-    return (upcoming.astimezone(_UTC) - now.astimezone(_UTC)).total_seconds()
+    local = now.astimezone(zone)
+    for day_offset in (0, -1, -2):
+        day = local.date() + timedelta(days=day_offset)
+        for at in reversed(times):
+            candidate = _on(day, at, zone)
+            if candidate <= local:
+                return candidate
+    # Unreachable with a non-empty times tuple: two days always contain one of them.
+    raise AssertionError("no previous run found")  # pragma: no cover
 
 
 def describe(times: Iterable[time], zone: ZoneInfo) -> str:
