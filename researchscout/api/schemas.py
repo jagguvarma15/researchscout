@@ -485,6 +485,11 @@ class SystemStatus(BaseModel):
     papers: int
     newest_paper_at: datetime | None
     runs: list[SchedulerRun]
+    # The pipeline slot most recently due (None on an interval schedule) and the newest
+    # scheduler start-up. Together they let a verifier tell "the ledger is young" apart from
+    # "a slot passed with the scheduler up and nothing ran".
+    pipeline_due_at: datetime | None = None
+    scheduler_started_at: datetime | None = None
 
 
 class NotableModelInfo(BaseModel):
