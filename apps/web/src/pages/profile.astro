@@ -1,8 +1,11 @@
 ---
 import AccountSettings from '../components/AccountSettings.svelte';
+import AvatarArt from '../components/AvatarArt.svelte';
+import AvatarPicker from '../components/AvatarPicker.svelte';
 import InterestsEditor from '../components/InterestsEditor.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchAccount, fetchInterests } from '../lib/api';
+import { isAvatarSlug } from '../lib/avatars';
 
 const user = Astro.locals.user;
 const token = Astro.locals.accessToken;
@@ -11,6 +14,17 @@ const account = user ? await fetchAccount(token) : null;
 // Deleting an account only means anything when there is an identity provider behind it; a
 // local install has one built-in user that other rows point at.
 const canDelete = account !== null && account.sub !== 'local';
+const avatarSlug = account?.avatar && isAvatarSlug(account.avatar) ? account.avatar : null;
+// The picker's fallback tile shows what "no avatar" looks like: the header's initials
+// recipe, over the name the site would use.
+const initials =
+  (account?.display_name || user?.username || '')
+    .split(/[\s._@-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join('')
+    .toUpperCase() || '?';
 ---
 
 <Base title="Profile">
@@ -24,10 +38,17 @@ const canDelete = account !== null && account.sub !== 'local';
             feed that learns what you care about.
           </p>
         ) : (
-          <p class="who">
-            Browsing as <strong>{account?.display_name || user.username}</strong>
-            {account?.email && <span class="email">{account.email}</span>}
-          </p>
+          <>
+            {avatarSlug && (
+              <div class="hero-owl">
+                <AvatarArt slug={avatarSlug} size={72} />
+              </div>
+            )}
+            <p class="who">
+              Browsing as <strong>{account?.display_name || user.username}</strong>
+              {account?.email && <span class="email">{account.email}</span>}
+            </p>
+          </>
         )
       }
     </header>
@@ -42,6 +63,17 @@ const canDelete = account !== null && account.sub !== 'local';
             </p>
             <div class="panel-body">
               <InterestsEditor client:load initial={interests} />
+            </div>
+          </section>
+
+          <section class="panel">
+            <h2>Avatar</h2>
+            <p class="blurb">
+              Pick the crew member the site shows for you - in the header here, nowhere
+              else. Choices save as you click.
+            </p>
+            <div class="panel-body">
+              <AvatarPicker client:load current={account?.avatar ?? null} initials={initials} />
             </div>
           </section>
 
@@ -81,6 +113,11 @@ const canDelete = account !== null && account.sub !== 'local';
   }
   .hero .page-title {
     margin-bottom: 0.5rem;
+  }
+  .hero-owl {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 0.6rem;
   }
   .who {
     margin: 0;
