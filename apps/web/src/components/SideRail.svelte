@@ -23,7 +23,7 @@
 
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
 
-  let { current }: { current: string } = $props();
+  let { current, showSignIn = false }: { current: string; showSignIn?: boolean } = $props();
 
   // Grouped rather than listed: the rail carries three different kinds of destination now, and
   // eight undifferentiated rows read as a pile. The headings are list items with a
@@ -147,6 +147,13 @@
       {/each}
     {/each}
   </ul>
+  {#if showSignIn}
+    <!-- Narrow widths only (CSS): in the drawer the header has no room for the button, so
+         the account entry lives here; the wide rail never duplicates the header's. -->
+    <div class="account">
+      <a class="btn btn-primary signin" href="/login">Sign in</a>
+    </div>
+  {/if}
 </nav>
 
 <style>
@@ -202,22 +209,33 @@
   .rail a[aria-current] :global(svg) {
     color: var(--accent-ink, #78350f);
   }
-  /* The close button and backdrop exist for the narrow panel; both are revealed below. */
+  /* The close button, backdrop, and account entry exist for the narrow panel; all are
+     revealed below. */
   .close,
-  .backdrop {
+  .backdrop,
+  .account {
     display: none;
   }
 
   @media (max-width: 64rem) {
     .rail {
       top: 0;
+      /* An explicit height, not top+bottom: a fixed box stretched to bottom: 0 sizes
+         against the large viewport on iOS, and the band under the collapsed URL bar showed
+         the page through the drawer. dvh tracks the visible viewport. */
+      bottom: auto;
+      height: 100dvh;
+      border-left: none;
       /* Above the filter sidebar (35), which can already be open on the feed when the
          menu is reached; the last surface opened should be the one on top. */
       z-index: 38;
       width: min(17rem, 82vw);
-      padding-top: 1rem;
+      /* The top inset is live in installed mode, where top: 0 is under the status bar. */
+      padding-top: calc(1rem + env(safe-area-inset-top));
       background: var(--surface, #fff);
       box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
+      display: flex;
+      flex-direction: column;
       /* Hidden rather than merely off-screen: this is what keeps the closed panel out of
          the tab order without a script deciding the viewport width. */
       visibility: hidden;
@@ -252,9 +270,10 @@
       position: fixed;
       inset: 0;
       z-index: 37;
-      background: rgb(0 0 0 / 0.32);
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
+      /* Dim without blur: a backdrop-filter animating opacity beside a sliding fixed panel
+         is the classic iOS half-painted frame, which read as the drawer "mixing" with the
+         page. The other backdrops keep their blur - nothing animates against them. */
+      background: rgb(0 0 0 / 0.4);
       opacity: 0;
       visibility: hidden;
       transition:
@@ -264,6 +283,22 @@
     .backdrop.open {
       opacity: 1;
       visibility: visible;
+    }
+    /* Neither flex child may compress: the rail itself scrolls when they outgrow it. */
+    .rail ul,
+    .account {
+      flex-shrink: 0;
+    }
+    .account {
+      display: block;
+      margin-top: auto;
+      padding-top: 1rem;
+      border-top: 1px solid var(--line, #e6e1d5);
+    }
+    .account .signin {
+      display: flex;
+      justify-content: center;
+      width: 100%;
     }
   }
 
