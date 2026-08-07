@@ -158,6 +158,17 @@
   }
 
   async function show() {
+    // Phones hand the paper to the native viewer: pinch zoom, share, and text selection all
+    // work there, and this chrome's 30px tools and hover-gated wake do not. Every entrance -
+    // the Read button, card links, a ?read=1 deep link - funnels through here, so this is
+    // the one place the split lives. The query is cleaned off so reload does not re-trigger.
+    if (window.matchMedia('(max-width: 40rem)').matches) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('read');
+      history.replaceState({ ...history.state }, '', url);
+      window.open(pdfUrl, '_blank', 'noopener');
+      return;
+    }
     previousFocus = document.activeElement;
     open = true;
     minimized = false;
@@ -1333,7 +1344,7 @@
     bottom: 4.2rem;
     z-index: 4;
     width: min(22rem, calc(100vw - 2rem));
-    max-height: 60vh;
+    max-height: 60dvh;
     overflow-y: auto;
     padding: 0.9rem 1rem;
     border: 1px solid var(--line, #e6e1d5);
