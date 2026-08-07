@@ -136,9 +136,50 @@ async function shoot(browser, name, viewport) {
     await page.waitForTimeout(400);
   }
 
+  if (viewport.width >= 1024) {
+    // The avatar menu opens into the rail band, so this shot is the stacking fix's proof
+    // (local no-auth mode always has a signed-in user, so the button is always there).
+    if (await page.$('.avatar')) {
+      await page.click('.avatar');
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: `${OUT}/${name}-avatar-menu.png` });
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(200);
+    }
+    // The rail's Settings entry is visible at this width; on phones it lives inside the
+    // drawer, which the drawer shot above already shows.
+    await page.click('[data-open-settings]');
+    await page.waitForTimeout(700);
+    await page.screenshot({ path: `${OUT}/${name}-settings.png` });
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(400);
+  }
+
   await page.click('.field input');
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${OUT}/${name}-chat.png` });
+  await context.close();
+}
+
+// A second pass with stored preferences: dark theme, ocean accent, large type, compact
+// density - seeded before load, so the shots prove the pre-paint script applies them under
+// the built content policy, and the profile shot shows the avatar grid in dark.
+async function shootPrefs(browser) {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+  await context.addInitScript(() => {
+    localStorage.setItem('rs-theme', 'dark');
+    localStorage.setItem(
+      'rs-prefs',
+      JSON.stringify({ v: 1, accent: 'ocean', fontSize: 'large', density: 'compact' }),
+    );
+  });
+  const page = await context.newPage();
+  await page.goto(BASE, { waitUntil: 'load' });
+  await page.waitForTimeout(1200);
+  await page.screenshot({ path: `${OUT}/desktop-prefs.png`, fullPage: false });
+  await page.goto(`${BASE}/profile`, { waitUntil: 'load' });
+  await page.waitForTimeout(900);
+  await page.screenshot({ path: `${OUT}/desktop-profile.png`, fullPage: false });
   await context.close();
 }
 
@@ -149,8 +190,10 @@ try {
   const browser = await chromium.launch();
   for (const [name, viewport] of VIEWPORTS) {
     await shoot(browser, name, viewport);
-    console.log(`captured ${name}: home, drawer, chat`);
+    console.log(`captured ${name}: home, drawer or avatar menu and settings, chat`);
   }
+  await shootPrefs(browser);
+  console.log('captured desktop-prefs and desktop-profile (dark, ocean, large, compact)');
   await browser.close();
 } finally {
   server.kill();
