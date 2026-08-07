@@ -31,7 +31,7 @@ def test_day_slug_format() -> None:
 
 
 def test_empty_window_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(report_mod, "list_papers", lambda *a, **k: [])
+    monkeypatch.setattr(report_mod, "papers_arrived_since", lambda *a, **k: [])
     assert build_daily_report(None) is None
 
 
@@ -50,7 +50,7 @@ def test_report_ranks_counts_and_cites(monkeypatch: pytest.MonkeyPatch) -> None:
         SimpleNamespace(label="Efficient attention", trend="rising", size=6),
         SimpleNamespace(label="Old stable topic", trend="steady", size=9),
     ]
-    monkeypatch.setattr(report_mod, "list_papers", lambda *a, **k: papers)
+    monkeypatch.setattr(report_mod, "papers_arrived_since", lambda *a, **k: papers)
     monkeypatch.setattr(report_mod, "breakthrough_many", lambda session, ids: scores)
     monkeypatch.setattr(report_mod, "list_topics", lambda session: topics)
 
@@ -80,7 +80,7 @@ def test_ties_break_by_recency(monkeypatch: pytest.MonkeyPatch) -> None:
         _paper("arxiv:2607.5", "Newer", hours_old=1),
     ]
     scores = {pid: _Score(total=0.0) for pid in ("arxiv:2607.4", "arxiv:2607.5")}
-    monkeypatch.setattr(report_mod, "list_papers", lambda *a, **k: papers)
+    monkeypatch.setattr(report_mod, "papers_arrived_since", lambda *a, **k: papers)
     monkeypatch.setattr(report_mod, "breakthrough_many", lambda session, ids: scores)
     monkeypatch.setattr(report_mod, "list_topics", lambda session: [])
 
