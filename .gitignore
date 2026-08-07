@@ -31,3 +31,4 @@ config/eval_queries.yaml
 
 # macOS
 .DS_Store
+.smoke/
