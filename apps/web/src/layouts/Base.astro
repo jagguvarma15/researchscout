@@ -36,11 +36,17 @@ const renderedAt = new Date().toISOString();
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    {/* viewport-fit=cover hands over the safe-area insets on notched phones; the overlays
+        that pad with env(safe-area-inset-*) are inert without it. */}
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#faf7f1" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#191713" media="(prefers-color-scheme: dark)" />
     <!-- Both files carry the brand mark below (.brand-mark); the ico covers browsers
-         that will not take an SVG icon. -->
+         that will not take an SVG icon, the PNGs cover install surfaces. -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="alternate icon" href="/favicon.ico" sizes="16x16 32x32 64x64" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>{pageTitle}</title>
     <script is:inline set:html={THEME_SCRIPT} />
     {/* Navigation swaps the page rather than reloading the document, so the header, the rail
@@ -221,6 +227,14 @@ const renderedAt = new Date().toISOString();
     gap: 1rem;
     margin-left: auto;
     text-align: right;
+  }
+  /* Stacked under the text on a phone, the links read as part of the same column; keeping
+     them pushed right made the stack look misaligned rather than deliberate. */
+  @media (max-width: 40rem) {
+    .footer-inner .footer-links {
+      margin-left: 0;
+      text-align: left;
+    }
   }
   .footer-legal a {
     white-space: nowrap;
