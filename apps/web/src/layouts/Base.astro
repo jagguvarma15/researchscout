@@ -15,6 +15,33 @@ import ThemeToggle from '../components/ThemeToggle.svelte';
 import { fetchAccount } from '../lib/api';
 import { THEME_SCRIPT } from '../lib/theme-script.js';
 
+// CSS anchors. Astro's client build deletes the styles of Svelte components that never
+// render during SSR - the chat thread is `{#if open}` behind the omnibox, so ScoutPanel,
+// ChatMessage, and WebHitCard shipped to production with no styles at all
+// (withastro/astro#9093; the fix in #16823 has not reached the 7.x line as of 7.2.0, and a
+// bare import is not enough - the pruning keys on rendered-ness). The invisible server-only
+// render at the end of body keeps their CSS in the build; it hydrates nothing and costs a
+// few hundred hidden bytes. scripts/verify-styles.mjs fails the build if any of these ever
+// goes missing again; drop all of this when the upstream fix ships.
+import ChatMessage from '../components/ChatMessage.svelte';
+import ScoutPanel from '../components/ScoutPanel.svelte';
+import WebHitCard from '../components/WebHitCard.svelte';
+import type { Message, WebHit } from '../lib/chat-types';
+
+const anchorMessage: Message = { role: 'user', text: 'anchor', phase: 'done' };
+const anchorHit: WebHit = {
+  provider: 'arxiv',
+  title: 'anchor',
+  authors: [],
+  year: null,
+  snippet: '',
+  arxiv_id: null,
+  url: null,
+  already_known: false,
+  paper_id: null,
+};
+const noop = () => {};
+
 interface Props {
   title?: string;
 }
@@ -90,7 +117,11 @@ const renderedAt = new Date().toISOString();
     </header>
     <!-- Before the content, not after the footer: it is fixed either way, but a screen
          reader and the tab key both follow the document, and navigation belongs up here. -->
-    <div transition:name="side-rail" transition:animate="none">
+    {/* The transition name makes this wrapper a stacking context, which TRAPS the fixed
+        drawer's z-index inside it - at level 0, everything later in the DOM (main, the
+        footer) painted OVER the open drawer, which is exactly the "half displayed, half
+        mixed with the page" drawer bug. The wrapper itself must carry the drawer's level. */}
+    <div class="rail-anchor" transition:name="side-rail" transition:animate="none">
       <SideRail client:load current={Astro.url.pathname} showSignIn={!user} />
     </div>
     <main class="container">
@@ -114,6 +145,19 @@ const renderedAt = new Date().toISOString();
       </div>
     </footer>
     {termsOutstanding && account && <TermsGate client:load version={account.terms_required} />}
+    {/* The CSS anchors from the frontmatter: server-rendered, hidden, never hydrated. */}
+    <div hidden aria-hidden="true">
+      <ScoutPanel onactivity={noop} />
+      <ChatMessage
+        message={anchorMessage}
+        busy={false}
+        last={false}
+        onsummarize={noop}
+        onwebsearch={noop}
+        onimport={noop}
+      />
+      <WebHitCard hit={anchorHit} onimport={noop} />
+    </div>
   </body>
 </html>
 
@@ -193,6 +237,13 @@ const renderedAt = new Date().toISOString();
   .site-nav .rail-trigger {
     display: none;
     padding: 0.4rem;
+  }
+  /* The stacking context the transition name creates must sit at the drawer's level (38,
+     with its backdrop at 37 inside), or the drawer's own z-index is trapped at level 0 and
+     later siblings paint over it. Harmless while closed: the rail is visibility hidden. */
+  .rail-anchor {
+    position: relative;
+    z-index: 38;
   }
   main {
     padding-top: var(--space-6);
