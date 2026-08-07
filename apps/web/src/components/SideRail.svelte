@@ -15,6 +15,7 @@
     Gauge,
     Info,
     Newspaper,
+    Settings2,
     Sparkles,
     TrendingUp,
     X,
@@ -146,6 +147,15 @@
         </li>
       {/each}
     {/each}
+    <li>
+      <!-- A control among destinations, so it rides at the end of Library. The settings
+           drawer's document-level delegate reads the attribute off the bubbled click; the
+           narrow panel closes itself first (hide is a no-op when it is the wide rail). -->
+      <button class="btn btn-nav settings" type="button" data-open-settings onclick={hide}>
+        <Settings2 size={16} aria-hidden="true" />
+        <span>Settings</span>
+      </button>
+    </li>
   </ul>
   {#if showSignIn}
     <!-- Narrow widths only (CSS): in the drawer the header has no room for the button, so
@@ -193,17 +203,21 @@
   .section-title:first-child {
     margin-top: 0;
   }
-  /* Full width and left-aligned: these are destinations in a list, not buttons in a row. */
-  .rail a {
+  /* Full width and left-aligned: these are destinations in a list, not buttons in a row.
+     The settings button dresses exactly like them. */
+  .rail a,
+  .rail .settings {
     justify-content: flex-start;
     width: 100%;
     padding: 0.5rem 0.7rem;
     border-radius: var(--radius-sm, 10px);
   }
-  .rail a:focus-visible {
+  .rail a:focus-visible,
+  .rail .settings:focus-visible {
     border-radius: var(--radius-sm, 10px);
   }
-  .rail a :global(svg) {
+  .rail a :global(svg),
+  .rail .settings :global(svg) {
     color: var(--muted, #5d6570);
   }
   .rail a[aria-current] :global(svg) {
