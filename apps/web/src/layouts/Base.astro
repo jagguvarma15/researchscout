@@ -165,8 +165,9 @@ const renderedAt = new Date().toISOString();
   .site-header {
     position: sticky;
     top: 0;
-    /* Above the rail (12): backdrop-filter makes this a stacking context, so the omnibox
-       panel cannot escape it and inherits whatever the header sits at. */
+    /* Above the rail's anchor (10 on wide screens), so the avatar menu - trapped in this
+       stacking context (backdrop-filter creates it; the omnibox panel cannot escape it
+       either) - paints over the rail band it opens into. */
     z-index: 20;
     background: var(--bg-translucent);
     backdrop-filter: blur(10px);
@@ -238,12 +239,20 @@ const renderedAt = new Date().toISOString();
     display: none;
     padding: 0.4rem;
   }
-  /* The stacking context the transition name creates must sit at the drawer's level (38,
-     with its backdrop at 37 inside), or the drawer's own z-index is trapped at level 0 and
-     later siblings paint over it. Harmless while closed: the rail is visibility hidden. */
+  /* The transition name makes this wrapper a stacking context, so the wrapper itself must
+     carry the rail's level - anything inside is trapped. Two tiers: on wide screens it
+     sits between the page (auto) and the header (20), because the avatar menu lives in the
+     header's context and must paint over the rail it opens onto. Below 64rem it takes the
+     drawer's level (38, backdrop 37 inside) or the open drawer falls under later siblings -
+     the original "half mixed with the page" bug. */
   .rail-anchor {
     position: relative;
-    z-index: 38;
+    z-index: 10;
+  }
+  @media (max-width: 64rem) {
+    .rail-anchor {
+      z-index: 38;
+    }
   }
   main {
     padding-top: var(--space-6);
