@@ -296,8 +296,20 @@
     }).catch(() => undefined);
   }
 
+  // The body shows one thing at a time: the suggestion list while typing, the conversation
+  // once one exists, the welcome otherwise. Stacked, the list pushed the transcript out of
+  // view and the auto-scroll jumped past whichever the reader wanted.
+  const listShown = $derived(Boolean(trimmed) || !chat.asked);
+
   function scrollToLatest() {
     if (body) body.scrollTop = body.scrollHeight;
+  }
+
+  // Streaming only follows a reader who is already at the end; scrolling up to reread must
+  // not be fought by every arriving token. Sending a question still forces the jump.
+  function followLatest() {
+    if (!body) return;
+    if (body.scrollHeight - body.scrollTop - body.clientHeight < 80) scrollToLatest();
   }
 
   function insertKeyword(keyword: string) {
@@ -328,6 +340,9 @@
     }
     closing = false;
     open = true;
+    // A reopened conversation lands on its latest exchange; the gentle follow alone would
+    // leave a fresh mount at the top.
+    requestAnimationFrame(scrollToLatest);
   }
 
   function hide() {
@@ -354,11 +369,15 @@
       query = '';
       rememberSearch(entry.question);
       void askScout(entry.question, intent === 'command' ? 'llm' : 'fast', dictionary);
+      // The thread replaces the list on the next frame; land on the fresh question even if
+      // the reader had scrolled up through the transcript.
+      requestAnimationFrame(scrollToLatest);
     } else if (entry.kind === 'web') {
       if (chat.busy) return;
       query = '';
       rememberSearch(entry.query);
       void runWebSearch(entry.query);
+      requestAnimationFrame(scrollToLatest);
     } else {
       // Searches and questions are remembered (the two branches above record theirs);
       // opening one paper is a click, and the reading history covers it. The navigation
@@ -390,15 +409,18 @@
   }
 
   function onInputKeydown(event: KeyboardEvent) {
+    // While the thread is showing the list is not rendered, so the keyboard must not act
+    // on its hidden rows - Enter over the transcript firing a stale recent would be worse
+    // than doing nothing.
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      if (entries.length > 0) selected = (selected + 1) % entries.length;
+      if (listShown && entries.length > 0) selected = (selected + 1) % entries.length;
     } else if (event.key === 'ArrowUp') {
       event.preventDefault();
-      if (entries.length > 0) selected = (selected - 1 + entries.length) % entries.length;
+      if (listShown && entries.length > 0) selected = (selected - 1 + entries.length) % entries.length;
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const entry = entries[selected];
+      const entry = listShown ? entries[selected] : undefined;
       if (entry) run(entry);
       else if (trimmed) window.location.href = searchUrl(trimmed);
     }
@@ -450,7 +472,7 @@
   {#if open}
     <div class="panel" class:closing id="omnibox-panel">
       <div class="body" bind:this={body}>
-        {#if suggestions.length > 0}
+        {#if trimmed && suggestions.length > 0}
           <p class="chips" aria-label="Keyword suggestions">
             {#each suggestions as suggestion}
               <button type="button" class="chip" onclick={() => insertKeyword(suggestion.keyword)}>
@@ -460,7 +482,7 @@
           </p>
         {/if}
 
-        {#if entries.length > 0}
+        {#if listShown && entries.length > 0}
           <ul class="entries" role="listbox" aria-label="Results">
             {#each entries as entry, index}
               {@const label = heading(index)}
@@ -508,7 +530,7 @@
           <p class="none">Nothing matches - keep typing.</p>
         {/if}
 
-        {#if searching && papers.length === 0 && intent !== 'command'}
+        {#if trimmed && searching && papers.length === 0 && intent !== 'command'}
           <!-- Only while there is nothing to show. Once results exist they stay put through
                the next keystroke, so refining a query never flashes the list away. -->
           <div class="loading" aria-hidden="true">
@@ -518,11 +540,9 @@
           </div>
         {/if}
 
-        <div class:hidden={!chat.asked}>
-          <ScoutPanel onactivity={scrollToLatest} />
-        </div>
-
-        {#if !chat.asked && !trimmed}
+        {#if !trimmed && chat.asked}
+          <ScoutPanel onactivity={followLatest} />
+        {:else if !trimmed && !chat.asked}
           <div class="welcome">
             <ScoutMascot size={48} />
             <p>Type to find papers, or ask a question and Scout answers from what it has read.</p>
@@ -673,10 +693,6 @@
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .hidden {
-    display: none;
-  }
-
   .entries {
     list-style: none;
     margin: 0;
@@ -783,14 +799,14 @@
     flex-direction: column;
     align-items: center;
     gap: 0.6rem;
-    padding: 1.75rem 2rem 2rem;
+    padding: 1.5rem 1rem 1.75rem;
     text-align: center;
   }
   .welcome p {
     margin: 0;
     max-width: 26rem;
     color: var(--muted, #5d6570);
-    font-size: 0.88rem;
+    font-size: var(--text-sm, 0.875rem);
   }
 
   .foot {
