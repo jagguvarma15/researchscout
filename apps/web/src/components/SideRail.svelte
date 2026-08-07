@@ -267,6 +267,23 @@
     }
   }
 
+  /* Phone: the drawer is the primary navigation, so its targets get finger sizing, and the
+     safe-area padding keeps the last link above a home indicator (live because the layout
+     sets viewport-fit=cover). */
+  @media (max-width: 40rem) {
+    .rail {
+      width: min(19rem, 88vw);
+      padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+    }
+    .rail .btn-nav {
+      padding: 0.7rem 0.8rem;
+    }
+    .close {
+      width: 2.5rem;
+      height: 2.5rem;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .rail,
     .backdrop {
