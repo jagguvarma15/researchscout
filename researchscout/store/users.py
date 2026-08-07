@@ -92,6 +92,7 @@ def export_user_data(session: Session, sub: str) -> dict[str, Any]:
             "sub": sub,
             "email": user.email if user else None,
             "display_name": user.display_name if user else None,
+            "avatar": user.avatar if user else None,
             "created_at": _iso(user.created_at) if user else None,
             "terms_version": user.tos_version if user else None,
             "terms_accepted_at": _iso(user.tos_accepted_at) if user else None,
