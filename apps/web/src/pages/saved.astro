@@ -122,4 +122,15 @@ function formatDayHeading(iso: string): string {
     font-size: 0.85rem;
     margin: 0.35rem 0 0;
   }
+  /* Compact density, same idea as the feed's: the attribute lives on <html>, so the
+     ancestor must be :global or the rule silently never matches. */
+  :global(html[data-density='compact']) .row {
+    padding: 0.6rem 0;
+  }
+  :global(html[data-density='compact']) .meta {
+    margin-top: 0.2rem;
+  }
+  :global(html[data-density='compact']) .day {
+    margin-bottom: var(--space-4);
+  }
 </style>
