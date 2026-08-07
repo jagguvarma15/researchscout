@@ -1,11 +1,11 @@
 <script lang="ts">
-  // One chat exchange entry: Scout's avatar plus whichever body the message state calls
-  // for - the phase loader, fast-mode result cards, formatted LLM prose, or a plain
-  // bubble - followed by citations, actions, and the web-search fallback. All state
-  // lives in the parent; this component only renders and forwards intents.
+  // One chat exchange entry in the document layout: the user's question as a compact
+  // right-aligned pill, Scout's side as full-width blocks - status line, fast-mode result
+  // cards, formatted prose, citations, actions, and the web-search fallback - all sharing
+  // one column edge. All state lives in the parent; this component only renders and
+  // forwards intents.
   import type { Message, WebHit } from '../lib/chat-types';
   import { formatMonthYear, renderAnswerHtml } from '../lib/chat-format';
-  import ScoutMascot from './ScoutMascot.svelte';
   import WebHitCard from './WebHitCard.svelte';
 
   let {
@@ -47,12 +47,12 @@
   const streamingCaret = $derived(message.role === 'assistant' && busy && last);
   // Completed LLM answers render as formatted HTML; renderAnswerHtml escapes everything
   // and linkifies only the server-confirmed used ids, which is what makes @html safe.
+  // Stopped answers format too - a half answer still reads better with its lists intact.
   const formatted = $derived(
     message.role === 'assistant' &&
       message.mode === 'llm' &&
-      message.phase === 'done' &&
+      (message.phase === 'done' || message.stopped) &&
       !message.error &&
-      !message.stopped &&
       message.text
       ? renderAnswerHtml(message.text, new Set((message.used ?? []).map((paper) => paper.id)))
       : null,
@@ -60,114 +60,118 @@
 </script>
 
 <div class="msg {message.role}" class:error={message.error}>
-  {#if message.role === 'assistant'}
-    <span class="avatar" aria-hidden="true"><ScoutMascot size={18} /></span>
-  {/if}
-  <div class="content">
-    {#if status}
-      <p class="bubble pending" role="status">
-        {status}<span class="dots" aria-hidden="true"
-          ><span>.</span><span>.</span><span>.</span></span
-        >
+  {#if status}
+    <p class="status" role="status">
+      {status}<span class="dots" aria-hidden="true"
+        ><span>.</span><span>.</span><span>.</span></span
+      >
+    </p>
+  {:else if message.results}
+    <div class="cards">
+      <p class="lead">
+        Found {message.results.length} matching paper{message.results.length === 1 ? '' : 's'}.
       </p>
-    {:else if message.results}
-      <div class="cards">
-        <p class="lead">
-          Found {message.results.length} matching paper{message.results.length === 1 ? '' : 's'}.
-        </p>
-        {#each message.results as result}
-          <div class="card">
+      {#each message.results as result}
+        <div class="card">
+          <div class="cardhead">
             <a class="cardtitle" href={`/papers/${result.id}`}>{result.title}</a>
-            <p class="cardmeta">
-              <span>{formatMonthYear(result.published_at)}</span>
-              {#if result.venue}<span>{result.venue}</span>{/if}
-              {#if result.relevance !== null}
-                <span class="cardmatch">{Math.round(result.relevance * 100)}% match</span>
-              {/if}
-            </p>
-            {#if result.matches.length > 0}
-              <p class="cardmatches">Matches: {result.matches.join(', ')}</p>
-            {/if}
-            {#if result.keywords.length > 0}
-              <p class="cardtags">
-                {#each result.keywords as keyword}
-                  <a href={`/?q=${encodeURIComponent(keyword)}`}>{keyword}</a>
-                {/each}
-              </p>
-            {/if}
-            {#if result.excerpt}
-              <blockquote class="excerpt">{result.excerpt}</blockquote>
+            {#if result.relevance !== null}
+              <span class="cardmatch">{Math.round(result.relevance * 100)}%</span>
             {/if}
           </div>
-        {/each}
-      </div>
-    {:else if formatted}
-      <div class="bubble prose">{@html formatted}</div>
-    {:else if message.text || streamingCaret}
-      <!-- A /web message carries no text of its own; skip the empty bubble. -->
-      <p class="bubble">
-        {message.text}{#if streamingCaret}<span class="cursor" aria-hidden="true"></span>{/if}
-      </p>
-    {/if}
-    {#if message.needsSignIn}
-      <p class="actions">
-        <a class="ghost" href="/login">Sign in to continue</a>
-      </p>
-    {/if}
-    {#if message.stopped}
-      <p class="note">Stopped</p>
-    {/if}
-    {#if !message.results && message.cited && message.cited.length > 0}
-      <p class="citations">
-        {#each message.used ?? [] as paper}
-          {#if message.cited.includes(paper.id)}
-            <a href={`/papers/${paper.id}`} title={paper.title}>{paper.id}</a>
-          {/if}
-        {/each}
-      </p>
-    {/if}
-    {#if message.mode === 'fast' && message.phase === 'done' && !message.error && message.cited && message.cited.length > 0}
-      <p class="actions">
-        <button class="ghost" onclick={onsummarize} disabled={busy}>Summarize with AI</button>
-      </p>
-    {/if}
-    {#if (message.notfound && message.phase === 'done') || message.webHits}
-      <div class="webfallback">
-        {#if message.notfound?.webSearch && !message.webHits}
-          <p class="actions">
-            <button class="ghost" onclick={onwebsearch} disabled={message.webBusy}>
-              {message.webBusy ? 'Searching the web' : 'Search the web'}
-            </button>
+          <p class="cardmeta">
+            <span>{formatMonthYear(result.published_at)}</span>
+            {#if result.venue}<span>{result.venue}</span>{/if}
           </p>
-        {/if}
-        {#if message.webHits}
-          {#if message.webHits.length === 0}
-            <p class="note">Nothing found on the web either.</p>
+          {#if result.matches.length > 0}
+            <p class="cardmatches">Matches: {result.matches.join(', ')}</p>
           {/if}
-          {#each message.webHits as hit}
-            <WebHitCard
-              {hit}
-              state={hit.arxiv_id ? message.imports?.[hit.arxiv_id] : undefined}
-              {onimport}
-            />
-          {/each}
-          {#if message.webFailed && message.webFailed.length > 0}
-            <p class="note">Search unavailable for: {message.webFailed.join(', ')}</p>
+          {#if result.keywords.length > 0}
+            <p class="cardtags">
+              {#each result.keywords as keyword}
+                <a href={`/?q=${encodeURIComponent(keyword)}`}>{keyword}</a>
+              {/each}
+            </p>
           {/if}
+          {#if result.excerpt}
+            <blockquote class="excerpt">{result.excerpt}</blockquote>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  {:else if message.error && message.text}
+    <p class="errorbox">{message.text}</p>
+  {:else if formatted}
+    <div class="prose">{@html formatted}</div>
+  {:else if message.role === 'user'}
+    <p class="bubble">{message.text}</p>
+  {:else if message.text || streamingCaret}
+    <!-- A /web message carries no text of its own; skip the empty block. -->
+    <p class="plain">
+      {message.text}{#if streamingCaret}<span class="cursor" aria-hidden="true"></span>{/if}
+    </p>
+  {/if}
+  {#if message.needsSignIn}
+    <p class="actions">
+      <a class="ghost" href="/login">Sign in to continue</a>
+    </p>
+  {/if}
+  {#if message.stopped}
+    <p class="note">Stopped</p>
+  {/if}
+  {#if !message.results && message.cited && message.cited.length > 0}
+    <p class="citations">
+      {#each message.used ?? [] as paper}
+        {#if message.cited.includes(paper.id)}
+          <a href={`/papers/${paper.id}`} title={paper.title}>{paper.id}</a>
         {/if}
-      </div>
-    {/if}
-  </div>
+      {/each}
+    </p>
+  {/if}
+  {#if message.mode === 'fast' && message.phase === 'done' && !message.error && message.cited && message.cited.length > 0}
+    <p class="actions">
+      <button class="ghost" onclick={onsummarize} disabled={busy}>Summarize with AI</button>
+    </p>
+  {/if}
+  {#if (message.notfound && message.phase === 'done') || message.webHits}
+    <div class="webfallback">
+      {#if message.notfound?.webSearch && !message.webHits}
+        <p class="actions">
+          <button class="ghost" onclick={onwebsearch} disabled={message.webBusy}>
+            {message.webBusy ? 'Searching the web' : 'Search the web'}
+          </button>
+        </p>
+      {/if}
+      {#if message.webHits}
+        {#if message.webHits.length === 0}
+          <p class="note">Nothing found on the web either.</p>
+        {/if}
+        {#each message.webHits as hit}
+          <WebHitCard
+            {hit}
+            state={hit.arxiv_id ? message.imports?.[hit.arxiv_id] : undefined}
+            {onimport}
+          />
+        {/each}
+        {#if message.webFailed && message.webFailed.length > 0}
+          <p class="note">Search unavailable for: {message.webFailed.join(', ')}</p>
+        {/if}
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
+  /* One column for everything: the user pill aligns itself right inside it, and every
+     assistant block shares the same left and right edges. The old two-margin layout put
+     the user bubble 2rem right of assistant content while chips and buttons jutted past
+     the bubble they belonged to. */
   .msg {
     display: flex;
-    gap: 0.5rem;
+    flex-direction: column;
+    gap: 0.4rem;
+    min-width: 0;
     animation: msg-in 0.18s ease-out;
-  }
-  .msg.user {
-    justify-content: flex-end;
   }
   @keyframes msg-in {
     from {
@@ -179,51 +183,86 @@
       transform: translateY(0);
     }
   }
-  .avatar {
-    flex-shrink: 0;
-    margin-top: 0.4rem;
-    color: var(--ink, #17191c);
-  }
-  .content {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1;
-  }
   .bubble {
+    align-self: flex-end;
+    max-width: 85%;
     margin: 0;
-    padding: 0.6rem 0.9rem;
-    border-radius: 14px;
-    font-size: 0.92rem;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    color: var(--ink, #17191c);
-  }
-  .msg.user .bubble {
+    padding: 0.5rem 0.85rem;
+    border-radius: var(--radius-md, 14px);
+    border-bottom-right-radius: 4px;
     background: var(--accent, #c2410c);
     color: var(--accent-contrast, #fff);
-    margin-left: 2rem;
-    align-self: flex-end;
-    border-bottom-right-radius: 4px;
+    font-size: var(--text-sm, 0.875rem);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
-  .msg.assistant .bubble {
-    background: var(--surface-2, #f4f0e8);
-    border: 1px solid var(--line, #e6e1d5);
-    margin-right: 2rem;
-    border-bottom-left-radius: 4px;
+  .plain {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--ink, #17191c);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
-  .msg.error .bubble {
+  .status {
+    margin: 0;
+    font-size: var(--text-xs, 0.75rem);
+    color: var(--muted, #5d6570);
+  }
+  .errorbox {
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--danger, #b91c1c);
+    border-radius: var(--radius-sm, 10px);
     background: var(--danger-soft, #fee2e2);
-    border-color: var(--danger, #b91c1c);
     color: var(--danger-ink, #7f1d1d);
+    font-size: var(--text-sm, 0.875rem);
+    overflow-wrap: anywhere;
   }
+  /* The prose rhythm follows .digest-body (global.css): same size, same line height, so
+     an answer reads like the site's other long-form text. */
   .prose {
-    white-space: normal;
+    font-size: 0.95rem;
+    line-height: 1.65;
+    color: var(--ink, #17191c);
+    overflow-wrap: anywhere;
   }
   .prose :global(p) {
-    margin: 0 0 0.5rem;
+    margin: 0 0 0.75em;
   }
-  .prose :global(p:last-child) {
+  .prose :global(ul),
+  .prose :global(ol) {
+    margin: 0 0 0.75em;
+    padding-left: 1.25em;
+  }
+  .prose :global(li) {
+    margin: 0.2em 0;
+  }
+  .prose :global(h4) {
+    margin: 0.9em 0 0.35em;
+    font-size: var(--text-md, 1rem);
+    font-weight: 650;
+  }
+  .prose :global(h4:first-child) {
+    margin-top: 0;
+  }
+  .prose :global(pre) {
+    margin: 0 0 0.75em;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--line, #e6e1d5);
+    border-radius: var(--radius-sm, 10px);
+    background: var(--surface-2, #f4f0e8);
+    overflow-x: auto;
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+  .prose :global(pre code) {
+    border: none;
+    background: none;
+    padding: 0;
+    font-size: inherit;
+  }
+  .prose :global(> :last-child) {
     margin-bottom: 0;
   }
   .prose :global(a) {
@@ -237,29 +276,32 @@
     padding: 0 0.25rem;
     font-size: 0.85em;
   }
-  .pending {
-    color: var(--muted, #5d6570);
-  }
   .cards {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    margin-right: 2rem;
+    gap: 0.6rem;
   }
   .lead {
     margin: 0;
-    font-size: 0.85rem;
+    font-size: 0.9rem;
     color: var(--muted, #5d6570);
   }
   .card {
     border: 1px solid var(--line, #e6e1d5);
-    border-radius: 10px;
-    padding: 0.6rem 0.75rem;
+    border-radius: var(--radius-sm, 10px);
+    padding: 0.65rem 0.8rem;
     background: var(--surface, #fff);
   }
+  /* Title and match share one row; the badge cannot wander under the date the way the
+     old auto-margin pill did on a wrapped meta row. */
+  .cardhead {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
   .cardtitle {
-    display: block;
-    font-size: 0.88rem;
+    font-size: var(--text-sm, 0.875rem);
     font-weight: 600;
     color: var(--ink, #17191c);
     text-decoration: none;
@@ -268,23 +310,27 @@
     color: var(--accent, #c2410c);
     text-decoration: underline;
   }
+  .cardmatch {
+    flex-shrink: 0;
+    font-size: var(--text-xs, 0.75rem);
+    font-weight: 600;
+    color: var(--accent-ink, #78350f);
+    background: var(--accent-soft, #fef3c7);
+    border-radius: var(--radius-full, 999px);
+    padding: 0.1rem 0.5rem;
+  }
   .cardmeta {
     display: flex;
     align-items: baseline;
     flex-wrap: wrap;
     gap: 0.5rem;
     margin: 0.15rem 0 0;
-    font-size: 0.72rem;
+    font-size: var(--text-xs, 0.75rem);
     color: var(--muted, #5d6570);
-  }
-  .cardmatch {
-    margin-left: auto;
-    font-weight: 500;
-    color: var(--accent-ink, #78350f);
   }
   .cardmatches {
     margin: 0.25rem 0 0;
-    font-size: 0.75rem;
+    font-size: var(--text-xs, 0.75rem);
     color: var(--muted, #5d6570);
   }
   .cardtags {
@@ -293,29 +339,31 @@
     gap: 0.35rem;
     margin: 0.35rem 0 0;
   }
-  .cardtags a {
-    font-size: 0.72rem;
+  .cardtags a,
+  .citations a {
+    font-size: var(--text-xs, 0.75rem);
     font-weight: 500;
     background: var(--accent-soft, #fef3c7);
-    border-radius: 999px;
-    padding: 0.05rem 0.55rem;
+    border-radius: var(--radius-full, 999px);
+    padding: 0.1rem 0.6rem;
     text-decoration: none;
     color: var(--accent-ink, #78350f);
-    transition: background-color 0.15s ease;
+    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
-  .cardtags a:hover {
+  .cardtags a:hover,
+  .citations a:hover {
     background: var(--chip-hover, #fde68a);
   }
   .excerpt {
     margin: 0.4rem 0 0;
     padding: 0.1rem 0 0.1rem 0.6rem;
     border-left: 3px solid var(--line-strong, #d1d6dc);
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     color: var(--muted, #5d6570);
   }
   .note {
-    margin: 0.25rem 0 0;
-    font-size: 0.78rem;
+    margin: 0;
+    font-size: var(--text-xs, 0.75rem);
     color: var(--muted, #5d6570);
   }
   .citations {
@@ -323,37 +371,22 @@
     flex-wrap: wrap;
     gap: 0.4rem;
     margin: 0;
-    padding: 0.4rem 0 0;
-  }
-  .citations a {
-    font-size: 0.75rem;
-    font-weight: 500;
-    background: var(--accent-soft, #fef3c7);
-    border-radius: 999px;
-    padding: 0.05rem 0.55rem;
-    text-decoration: none;
-    color: var(--accent-ink, #78350f);
-    transition: background-color 0.15s ease;
-  }
-  .citations a:hover {
-    background: var(--chip-hover, #fde68a);
   }
   .actions {
     margin: 0;
-    padding: 0.4rem 0 0;
   }
   /* Shared by the action buttons and the sign-in link, which is an anchor because it
      navigates - hence the display and text-decoration resets. */
   .ghost {
     display: inline-block;
     border: 1px solid var(--line, #e6e1d5);
-    border-radius: 999px;
+    border-radius: var(--radius-full, 999px);
     background: var(--surface, #fff);
     color: var(--ink, #17191c);
     font: inherit;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     font-weight: 500;
-    padding: 0.25rem 0.75rem;
+    padding: 0.35rem 0.85rem;
     text-decoration: none;
     cursor: pointer;
     transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
@@ -374,7 +407,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    margin: 0.4rem 2rem 0 0;
   }
   .cursor {
     display: inline-block;
@@ -418,16 +450,10 @@
       animation: none;
     }
   }
-  @media (max-width: 480px) {
-    .msg.user .bubble {
-      margin-left: 1.25rem;
-    }
-    .msg.assistant .bubble {
-      margin-right: 1.25rem;
-    }
-    .cards,
-    .webfallback {
-      margin-right: 1.25rem;
+  /* The app-wide phone tier, not the stray 480px the old layout used. */
+  @media (max-width: 40rem) {
+    .bubble {
+      max-width: 92%;
     }
   }
 </style>
