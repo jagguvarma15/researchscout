@@ -7,7 +7,7 @@
 
   import { Moon, Sun } from 'lucide-svelte';
 
-  import { applyTheme } from '../lib/prefs';
+  import { applyTheme, withViewTransition } from '../lib/prefs';
 
   let theme = $state<'light' | 'dark'>('light');
 
@@ -25,7 +25,12 @@
   });
 
   function flip() {
-    theme = applyTheme(theme === 'dark' ? 'light' : 'dark');
+    // Computed before the wrap so the callback holds only mutations; the transition
+    // cross-fades the whole page to the new theme instead of cutting.
+    const next = theme === 'dark' ? 'light' : 'dark';
+    withViewTransition(() => {
+      theme = applyTheme(next);
+    });
   }
 </script>
 
@@ -35,11 +40,15 @@
   aria-label={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'}
   title={theme === 'dark' ? 'Switch to the light theme' : 'Switch to the dark theme'}
 >
-  {#if theme === 'dark'}
-    <Sun size={16} aria-hidden="true" />
-  {:else}
-    <Moon size={16} aria-hidden="true" />
-  {/if}
+  {#key theme}
+    <span class="icon">
+      {#if theme === 'dark'}
+        <Sun size={16} aria-hidden="true" />
+      {:else}
+        <Moon size={16} aria-hidden="true" />
+      {/if}
+    </span>
+  {/key}
 </button>
 
 <style>
@@ -70,9 +79,25 @@
     outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
+  /* The keyed swap mounts a fresh icon per theme; it arrives with a small settle-spin,
+     whichever island changed the theme (the drawer's change lands here via
+     rs:themechange). */
+  .icon {
+    display: inline-flex;
+    animation: icon-swap var(--dur-fast, 0.15s) var(--ease-out, ease);
+  }
+  @keyframes icon-swap {
+    from {
+      opacity: 0;
+      transform: rotate(-40deg) scale(0.7);
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
     .toggle {
       transition: none;
+    }
+    .icon {
+      animation: none;
     }
   }
 </style>
