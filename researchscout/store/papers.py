@@ -162,6 +162,26 @@ def list_papers(
     return _rows_to_papers(session, rows, full_text=False)
 
 
+def papers_arrived_since(session: Session, since: datetime, *, limit: int = 500) -> list[Paper]:
+    """Papers first stored at or after ``since``, newest arrivals first.
+
+    Arrival (``created_at``) rather than publication: arXiv's published_at is submission time,
+    which trails the announcement that actually delivers a paper here by a day or more. "What
+    arrived today" is a question about this corpus, not about the calendar, and it is the
+    daily report's window - filtering the report by published_at left it empty on almost
+    every real day.
+    """
+    stmt = (
+        select(PaperRow)
+        .options(defer(PaperRow.full_text, raiseload=False))
+        .where(PaperRow.created_at >= since)
+        .order_by(PaperRow.created_at.desc(), PaperRow.published_at.desc(), PaperRow.id)
+        .limit(limit)
+    )
+    rows = session.execute(stmt).scalars().all()
+    return _rows_to_papers(session, rows, full_text=False)
+
+
 def count_papers(session: Session, facets: PaperFacets) -> int:
     """How many papers match the facets (no pagination)."""
     stmt = select(func.count()).select_from(PaperRow)
