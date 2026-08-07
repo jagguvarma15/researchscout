@@ -16,6 +16,7 @@
   import { onMount } from 'svelte';
 
   import { flushEvents, logEvent } from '../lib/events';
+  import { prefersReducedMotion } from '../lib/motion';
 
   let {
     surface,
@@ -62,7 +63,7 @@
       if (wasOnlyCard && section) section.hidden = true;
     };
 
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (prefersReducedMotion()) {
       settled = true;
       finish();
     } else {
