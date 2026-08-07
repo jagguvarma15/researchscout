@@ -500,6 +500,16 @@
     color: var(--ink, #17191c);
     font-size: 0.9rem;
   }
+  /* Finger sizing where the panel is the whole screen: taller checkbox rows and tab
+     targets. The label is the target - the whole row toggles. */
+  @media (max-width: 40rem) {
+    .check {
+      padding: 0.45rem 0;
+    }
+    .tabs button {
+      padding: 0.75rem 0.65rem;
+    }
+  }
   /* Separates the four core fields from the five where this radar meets other disciplines. */
   .group-break {
     margin: 0.9rem 0 0.2rem;
