@@ -7,6 +7,10 @@
 
   let saved = $state(initial);
   let busy = $state(false);
+  // The pop plays only when THIS interaction saved something. Keying it off .saved alone
+  // would fire on every hydrated mount - a page full of saved bookmarks popping at once
+  // on load and after every soft navigation.
+  let justSaved = $state(false);
 
   async function toggle() {
     if (busy) return;
@@ -15,7 +19,10 @@
       const response = await fetch(`/api/papers/${paperId}/save`, {
         method: saved ? 'DELETE' : 'POST',
       });
-      if (response.ok) saved = !saved;
+      if (response.ok) {
+        saved = !saved;
+        justSaved = saved;
+      }
     } finally {
       busy = false;
     }
@@ -25,6 +32,8 @@
 <button
   class="save"
   class:saved
+  class:pop={justSaved}
+  onanimationend={() => (justSaved = false)}
   onclick={toggle}
   disabled={busy}
   aria-pressed={saved}
@@ -52,9 +61,9 @@
     cursor: pointer;
     color: var(--muted, #5d6570);
     transition:
-      color 0.15s ease,
-      background-color 0.15s ease,
-      transform 0.15s ease;
+      color var(--dur-fast, 0.15s) var(--ease-out, ease),
+      background-color var(--dur-fast, 0.15s) var(--ease-out, ease),
+      transform var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
   .save:hover:not(:disabled) {
     background: var(--surface-2, #f5f7fa);
@@ -78,9 +87,23 @@
     background: var(--accent-soft, #fef3c7);
     color: var(--accent-hover, #9a3412);
   }
+  /* A save just landed: the fresh check icon does one quick spring. The {#if} swap mounts
+     a new svg each time, so repeats restart cleanly; animationend bubbles to the button
+     and drops the class. */
+  .save.pop :global(svg) {
+    animation: save-pop var(--dur-slow, 0.25s) var(--ease-out, ease);
+  }
+  @keyframes save-pop {
+    45% {
+      transform: scale(1.18);
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
     .save {
       transition: none;
+    }
+    .save.pop :global(svg) {
+      animation: none;
     }
   }
 </style>
