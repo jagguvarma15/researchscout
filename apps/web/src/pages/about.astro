@@ -296,6 +296,14 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
     padding-left: 0.9rem;
     border-left: 1px solid var(--line);
   }
+  /* The separators assume one line; on a wrapped phone row each new line would start with
+     an orphan rule. The gap alone separates well enough there. */
+  @media (max-width: 40rem) {
+    .jump a + a {
+      padding-left: 0;
+      border-left: none;
+    }
+  }
   .jump a:hover {
     color: var(--ink);
     text-decoration: underline;
