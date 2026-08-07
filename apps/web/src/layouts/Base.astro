@@ -79,7 +79,7 @@ const renderedAt = new Date().toISOString();
             user ? (
               <AvatarMenu client:load username={user.username} />
             ) : (
-              <a class="btn btn-primary" href="/login">Sign in</a>
+              <a class="btn btn-primary signin" href="/login">Sign in</a>
             )
           }
           <button class="rail-trigger btn btn-nav" type="button" data-open-rail aria-label="Menu">
@@ -91,7 +91,7 @@ const renderedAt = new Date().toISOString();
     <!-- Before the content, not after the footer: it is fixed either way, but a screen
          reader and the tab key both follow the document, and navigation belongs up here. -->
     <div transition:name="side-rail" transition:animate="none">
-      <SideRail client:load current={Astro.url.pathname} />
+      <SideRail client:load current={Astro.url.pathname} showSignIn={!user} />
     </div>
     <main class="container">
       <slot />
@@ -128,6 +128,9 @@ const renderedAt = new Date().toISOString();
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border-bottom: 1px solid var(--line);
+    /* Live only where the page extends under system UI (installed mode, notches); zero in
+       a normal browser. --nav-height carries the same inset so dependents stay in step. */
+    padding-top: env(safe-area-inset-top);
   }
   /* Three columns rather than a row: the two outer ones are equal, so the field lands in the
      middle of the window instead of wherever the brand happens to end. The outer columns
@@ -139,7 +142,10 @@ const renderedAt = new Date().toISOString();
     grid-template-columns: 1fr minmax(0, 44rem) 1fr;
     align-items: center;
     gap: 0.75rem;
-    min-height: calc(var(--nav-height) - 1px);
+    /* The base height, not var(--nav-height): the token already includes the safe-area
+       inset that the header carries as padding-top, so using it here would count the inset
+       twice. inset + this + the 1px border is exactly --nav-height. */
+    min-height: calc(3.75rem - 1px);
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
   }
@@ -180,8 +186,11 @@ const renderedAt = new Date().toISOString();
   .site-nav .btn {
     padding: 0.35rem 0.85rem;
   }
-  /* The rail is a rail on wide screens and a menu below 64rem; this opens the second one. */
-  .rail-trigger {
+  /* The rail is a rail on wide screens and a menu below 64rem; this opens the second one.
+     Scoped under .site-nav so the square padding outranks the .site-nav .btn pill padding
+     above - unscoped, that rule won and shipped the hamburger as a wide pill crowding the
+     Sign in button. */
+  .site-nav .rail-trigger {
     display: none;
     padding: 0.4rem;
   }
@@ -245,8 +254,13 @@ const renderedAt = new Date().toISOString();
     .site-footer .container {
       padding-right: var(--gutter);
     }
-    .rail-trigger {
+    .site-nav .rail-trigger {
       display: inline-flex;
+    }
+    /* Signed-out account entry moves into the drawer whenever the hamburger is present:
+       the two side by side crowded the header, and the search field paid for it. */
+    .site-nav .signin {
+      display: none;
     }
   }
   @media (max-width: 40rem) {
@@ -255,6 +269,10 @@ const renderedAt = new Date().toISOString();
     }
     .site-nav .btn {
       padding: 0.35rem 0.6rem;
+    }
+    /* The hamburger keeps its square padding at every width. */
+    .site-nav .rail-trigger {
+      padding: 0.4rem;
     }
     .brand-word {
       display: none;
