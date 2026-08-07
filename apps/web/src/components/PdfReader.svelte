@@ -45,6 +45,7 @@
     type Highlight,
     type HighlightRect,
   } from '../lib/highlights';
+  import { prefersReducedMotion } from '../lib/motion';
   import { lockBodyScroll, trapFocus } from '../lib/overlay';
   import {
     currentPage,
@@ -144,16 +145,12 @@
   const pageCount = $derived(baseSizes.length);
   const ordered = $derived([...highlights].sort((a, b) => a.page - b.page));
 
-  function reducedMotion(): boolean {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  }
-
   // The chrome fades out while you read and comes back the moment you reach for it. Under
   // reduced motion it simply never hides - a control that vanishes is its own kind of motion.
   function wake() {
     chromeOn = true;
     clearTimeout(idleTimer);
-    if (reducedMotion() || pending || removing || listOpen || marking) return;
+    if (prefersReducedMotion() || pending || removing || listOpen || marking) return;
     idleTimer = setTimeout(() => (chromeOn = false), IDLE_MS);
   }
 
@@ -379,7 +376,7 @@
   }
 
   function step(delta: number) {
-    goTo(page + delta, reducedMotion() ? 'auto' : 'smooth');
+    goTo(page + delta, prefersReducedMotion() ? 'auto' : 'smooth');
   }
 
   async function rescale(next: number) {
