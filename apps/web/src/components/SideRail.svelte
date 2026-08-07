@@ -140,7 +140,11 @@
             class="btn btn-nav"
             href={item.href}
             aria-current={isCurrent(item.href) ? 'page' : undefined}
+            style={isCurrent(item.href) ? 'view-transition-name: rail-active' : undefined}
           >
+            <!-- The name makes the active pill its own transition group, so on navigation
+                 it slides from the section you left to the one you opened (tuned in
+                 global.css). The hrefs are prefix-disjoint: never two names on one page. -->
             <item.icon size={16} aria-hidden="true" />
             <span>{item.label}</span>
           </a>
