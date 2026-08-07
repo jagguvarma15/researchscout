@@ -155,7 +155,7 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
         <div class="table-scroll">
           {/* No morph names here: a model in this strip is usually in the main table too,
               and duplicate view-transition names on one page cancel the morph. */}
-          <table class="data-table">
+          <table class="data-table notable-table">
             <thead>
               <tr>
                 <th scope="col" class="cell-name">Model</th>
@@ -506,6 +506,14 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
     .catalog-table :global(th:nth-child(4)),
     .catalog-table :global(td:nth-child(5)),
     .catalog-table :global(th:nth-child(5)) {
+      display: none;
+    }
+    /* The strip keeps Model, Lab, Released - parameters and weights are catalogue detail,
+       and a phone reads this table as a headline list. */
+    .notable-table :global(td:nth-child(4)),
+    .notable-table :global(th:nth-child(4)),
+    .notable-table :global(td:nth-child(5)),
+    .notable-table :global(th:nth-child(5)) {
       display: none;
     }
   }
