@@ -422,9 +422,11 @@ function pageLink(target: number): string {
             Showing {showingFrom}–{showingTo} of {total}
           </span>
         )}
+        {/* data-page-dir tells lib/nav-direction which way the timeline moves, so the
+            transition slides the feed accordingly. */}
         <div class="pages">
           {page > 1 && (
-            <a class="btn btn-ghost" href={pageLink(page - 1)}>
+            <a class="btn btn-ghost" href={pageLink(page - 1)} data-page-dir="newer">
               <Icon name="lucide:chevron-left" aria-hidden="true" />
               Newer
             </a>
@@ -437,13 +439,13 @@ function pageLink(target: number): string {
                 {p}
               </span>
             ) : (
-              <a class="page-num" href={pageLink(p)}>
+              <a class="page-num" href={pageLink(p)} data-page-dir={p < page ? 'newer' : 'older'}>
                 {p}
               </a>
             ),
           )}
           {page < pageCount && (
-            <a class="btn btn-ghost" href={pageLink(page + 1)}>
+            <a class="btn btn-ghost" href={pageLink(page + 1)} data-page-dir="older">
               Older
               <Icon name="lucide:chevron-right" aria-hidden="true" />
             </a>
@@ -470,6 +472,37 @@ function pageLink(target: number): string {
       venue,
     }}
   />
+  <script>
+    // The pinned date's floating shadow. A heading reports intersectionRatio < 1 once the
+    // header offset clips it; the top check keeps the shadow off headings that are merely
+    // entering at the bottom edge. One observer, re-built per soft navigation because this
+    // module runs once ever - and pages without day headings get a cheap no-op.
+    function watchStuckHeadings(): () => void {
+      const headings = document.querySelectorAll<HTMLElement>('.day .day-heading');
+      if (headings.length === 0) return () => {};
+      // The pixel offset is measured, not parsed: --nav-height is a calc over
+      // env(safe-area-inset-top), which no script can evaluate.
+      const offset = (document.querySelector<HTMLElement>('.site-header')?.offsetHeight ?? 60) + 1;
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            const stuck =
+              entry.intersectionRatio < 1 && entry.boundingClientRect.top <= offset + 1;
+            entry.target.classList.toggle('stuck', stuck);
+          }
+        },
+        { threshold: [1], rootMargin: `-${offset}px 0px 0px 0px` },
+      );
+      for (const heading of headings) observer.observe(heading);
+      return () => observer.disconnect();
+    }
+
+    let stopWatching = watchStuckHeadings();
+    document.addEventListener('astro:page-load', () => {
+      stopWatching();
+      stopWatching = watchStuckHeadings();
+    });
+  </script>
 </Base>
 
 <style>
@@ -644,6 +677,21 @@ function pageLink(target: number): string {
     padding: 0.35rem 0.75rem 0.5rem;
     background: var(--bg);
   }
+  /* While pinned, a soft falloff under the date says "floating over the rows" - toggled
+     by the page script below, faded on opacity only. */
+  .day .day-heading::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 -7px 0;
+    height: 6px;
+    background: linear-gradient(to bottom, rgb(23 25 28 / 0.08), rgb(23 25 28 / 0));
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+    pointer-events: none;
+  }
+  .day .day-heading.stuck::after {
+    opacity: 1;
+  }
   .day-heading {
     margin: 0;
     padding-bottom: 0.5rem;
@@ -683,6 +731,38 @@ function pageLink(target: number): string {
   .row:last-child::after {
     display: none;
   }
+  /* Rows rise into place as they scroll into view - scroll-driven, so the browser owns
+     every frame and there is no script. Progressive: browsers without the timeline render
+     the list static. Rows already past their range at load hold the settled values via
+     the both fill. */
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (animation-timeline: view()) {
+      .feed .row {
+        animation: row-reveal var(--ease-out) both;
+        /* After the shorthand on purpose: the shorthand resets the timeline. */
+        animation-timeline: view();
+        animation-range: entry 0% entry 35%;
+      }
+      @keyframes row-reveal {
+        from {
+          opacity: 0.2;
+          transform: translateY(8px);
+        }
+      }
+    }
+  }
+  /* The reveal must never outrank the dismiss collapse: a timeline animation stays
+     active, and animations beat transitions for opacity and transform - so it goes off by
+     name when a row is leaving. */
+  .feed .row.going {
+    animation: none;
+  }
+  /* The universal .01ms guard cannot still a scroll-driven animation - duration does not
+     drive it - so the site switch turns it off explicitly; the media wrap above covers
+     the OS switch. */
+  :global(html[data-motion='reduced']) .feed .row {
+    animation: none;
+  }
   /* Leaving slides and collapses, so the list closes over the gap instead of jumping.
      Telemetry fixes the row's height inline before this class lands - which is what lets
      height transition to zero - and detaches the node only once the collapse has run.
@@ -719,6 +799,12 @@ function pageLink(target: number): string {
   }
   .title:hover {
     color: var(--accent);
+  }
+  /* During a directional page slide the per-title morph names would pin every title in
+     place while the root moves; lib/nav-direction holds the attribute across both
+     snapshots so the titles ride the slide instead. */
+  :global(html[data-paging]) .title {
+    view-transition-name: none;
   }
   .meta {
     color: var(--muted);
