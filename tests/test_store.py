@@ -13,6 +13,7 @@ from researchscout.store.papers import (
     get_paper,
     link_external_ids,
     list_papers,
+    papers_arrived_since,
     set_citation_count,
     set_full_text,
     upsert_paper,
@@ -345,6 +346,28 @@ def test_legacy_kwargs_still_filter(session: Session) -> None:
     _seed_mixed(session)
     by_category = list_papers(session, categories=["hep-th"])
     assert _ids(by_category) == ["arxiv:2401.00003"]
+
+
+def test_papers_arrived_since_windows_on_arrival_not_publication(session: Session) -> None:
+    """The daily report's window: created_at decides, however old the submission date is."""
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    now = datetime.now(UTC)
+    # Both papers carry ancient published_at dates; only arrival should matter.
+    upsert_paper(session, _paper("arxiv:2401.00001", "2401.00001", "Old arrival"))
+    upsert_paper(session, _paper("arxiv:2401.00002", "2401.00002", "Fresh arrival"))
+    session.flush()
+    session.execute(
+        update(PaperRow)
+        .where(PaperRow.id == "arxiv:2401.00001")
+        .values(created_at=now - timedelta(days=3))
+    )
+
+    arrived = papers_arrived_since(session, now - timedelta(hours=24))
+    assert _ids(arrived) == ["arxiv:2401.00002"]
+    assert papers_arrived_since(session, now + timedelta(hours=1)) == []
 
 
 def test_raw_append_returns_id(session: Session) -> None:
