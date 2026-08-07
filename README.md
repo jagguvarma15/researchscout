@@ -69,10 +69,19 @@ deployment stack sets them, along with `RS_SCHEDULER_BATCH_PIPELINE`, as its com
 rather than relying on `deploy/.env` carrying them:
 
 ```bash
-RS_SCHEDULER_PIPELINE_AT=05:00,10:00,14:00,17:00   # ingest, index, full text, signals
-RS_SCHEDULER_DAILY_AT=17:00                        # catalogue, digest, topics, report
-RS_SCHEDULER_TIMEZONE=America/New_York             # a named zone, not a fixed offset
+RS_SCHEDULER_PIPELINE_AT=05:00,10:00,14:00,17:00,20:30   # ingest, index, full text, signals
+RS_SCHEDULER_DAILY_AT=17:00                              # catalogue, digest, topics
+RS_SCHEDULER_REPORT_AT=21:00                             # daily report (empty: with the daily set)
+RS_SCHEDULER_TIMEZONE=America/New_York                   # a named zone, not a fixed offset
 ```
+
+The 20:30 slot is the one that keeps evenings honest: arXiv announces the day's papers at
+20:00 ET, so a schedule whose last fetch is 17:00 always shows yesterday until the next
+morning. The daily report runs after that fetch and windows on when papers **arrived** in the
+corpus, not on arXiv's published_at (submission time, a day or more behind the announcement) -
+windowed on published_at it was empty on almost every real day. Weekend reports still skip
+publishing: arXiv announces Sunday through Thursday evenings, so an empty Saturday is truth,
+not a fault.
 
 A named zone rather than `UTC-5` because the runs should stay where they are on the local clock
 when daylight saving moves; the two days a year that differ are covered by tests. A time the
