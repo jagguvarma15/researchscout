@@ -107,7 +107,7 @@
   }
   .gate {
     width: min(34rem, 100%);
-    max-height: 90vh;
+    max-height: 90dvh;
     overflow-y: auto;
     padding: 1.5rem 1.6rem;
     border-radius: var(--radius-md);
