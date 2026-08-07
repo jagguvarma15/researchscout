@@ -240,6 +240,11 @@ so every panel failed to resolve its data source and the dashboard rendered empt
 6. Import each file in `config/grafana/dashboards/` through **Dashboards -> New -> Import**.
    Each one asks which PostgreSQL data source to use; pick the one from step 5.
 
+   The imports are copies, not links: a panel added to the JSON in the repo does not appear
+   on Cloud until the file is imported again (same flow; importing over an existing dashboard
+   replaces it). This is how the Ingest health dashboard's "Scheduler runs" panel went
+   missing for a wave - re-import `ingest.json` after any dashboard change.
+
    | Dashboard | Answers |
    | --- | --- |
    | Ingest health | Is anything still arriving, and how enriched is it once it does |
