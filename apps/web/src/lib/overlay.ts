@@ -37,11 +37,42 @@ export function clickedOutside(event: Event, root: Element | undefined): boolean
   return !event.composedPath().includes(root);
 }
 
-// Returns the unlock function; call it on close so nesting restores the previous value.
+// One shared lock count across every overlay. The naive per-caller save/restore stranded the
+// lock when two overlays overlapped: the second captured "hidden" as its previous value and
+// restored it, leaving the page unscrollable after both closed. With a count, the styles are
+// written once by the first acquire and removed only by the last release.
+let lockCount = 0;
+let savedRootOverflow = '';
+let savedBodyOverflow = '';
+let savedOverscroll = '';
+
+// Returns the unlock function; each is idempotent, and overlapping overlays nest safely.
+// Both html and body are locked - iOS ignores overflow on the body alone for touch drags,
+// which is how a page kept scrolling behind the open drawer - and overscroll-behavior stops
+// the rubber-band from reaching the page underneath. Deliberately not the fixed-body
+// technique: that settles sticky elements at their in-flow offset, which would slide the
+// header (and the search field in it) off-screen whenever a lock lands mid-page.
 export function lockBodyScroll(): () => void {
-  const previous = document.body.style.overflow;
-  document.body.style.overflow = 'hidden';
+  if (lockCount === 0) {
+    const root = document.documentElement;
+    savedRootOverflow = root.style.overflow;
+    savedBodyOverflow = document.body.style.overflow;
+    savedOverscroll = root.style.overscrollBehavior;
+    root.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+    root.style.overscrollBehavior = 'none';
+  }
+  lockCount += 1;
+  let released = false;
   return () => {
-    document.body.style.overflow = previous;
+    if (released) return;
+    released = true;
+    lockCount -= 1;
+    if (lockCount === 0) {
+      const root = document.documentElement;
+      root.style.overflow = savedRootOverflow;
+      document.body.style.overflow = savedBodyOverflow;
+      root.style.overscrollBehavior = savedOverscroll;
+    }
   };
 }
