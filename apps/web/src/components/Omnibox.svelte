@@ -33,6 +33,7 @@
   import { commandHint, parseInput } from '../lib/commands';
   import { matchKeywords } from '../lib/keyword-match';
   import { stripMath } from '../lib/math-text';
+  import { prefersReducedMotion } from '../lib/motion';
   import { classify, createSequencer, debounce, searchUrl } from '../lib/omnibox';
   import { clickedOutside, lockBodyScroll } from '../lib/overlay';
   import ScoutMascot from './ScoutMascot.svelte';
@@ -355,7 +356,7 @@
     if (!open || closeTimer) return;
     // The panel animates in, so it leaves the same way - a beat of fade rather than a cut.
     // Reduced motion skips straight to closed, and show() cancels a close in flight.
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (prefersReducedMotion()) {
       open = false;
       selected = 0;
       return;
