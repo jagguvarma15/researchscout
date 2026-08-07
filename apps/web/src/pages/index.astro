@@ -466,7 +466,9 @@ function pageLink(target: number): string {
     display: inline-flex;
     border: 1px solid var(--line);
     border-radius: var(--radius-full);
-    overflow: hidden;
+    /* Scrolls rather than clips if the topic set ever outgrows the row. */
+    overflow-x: auto;
+    overflow-y: hidden;
   }
   .kind-quick .kt {
     padding: 0.35rem 0.8rem;
@@ -781,6 +783,7 @@ function pageLink(target: number): string {
   }
   .pages {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.35rem;
     margin-left: auto;
@@ -813,6 +816,16 @@ function pageLink(target: number): string {
     .pages {
       margin-left: 0;
     }
+    /* Numbered slots need more width than a phone has - the row's rigid minimum is what
+       used to scroll the whole document sideways. Newer / current / Older says the same
+       thing, and the models pager already proves the shape fits. */
+    .page-num,
+    .gap {
+      display: none;
+    }
+    .current {
+      padding: 0.5rem 0.75rem;
+    }
     /* At this width the toolbar wraps; the count reads better under it than squeezed
        against the right edge of a wrapped row. */
     .toolbar-total {
@@ -821,6 +834,25 @@ function pageLink(target: number): string {
     /* The quick link would otherwise be pushed onto a line of its own by the badges. */
     .quick {
       margin-left: 0;
+    }
+    /* Finger-sized targets without moving the type: padding grows the hit area and the
+       negative margins hand the space back to the row. */
+    .quick,
+    .dismiss {
+      padding: 0.55rem 0.45rem;
+      margin-top: -0.55rem;
+      margin-bottom: -0.55rem;
+    }
+    .chip {
+      padding: 0.4rem 0.8rem;
+    }
+    .kind-quick .kt {
+      padding: 0.5rem 0.9rem;
+    }
+    /* A smaller slide: the transform extends the root's scrollable overflow while it
+       plays, and a phone has no slack to absorb it. */
+    .row.going {
+      transform: translateX(0.75rem);
     }
   }
   /* Pointer polish: the pills and links above declare hover colors that used to snap, and
