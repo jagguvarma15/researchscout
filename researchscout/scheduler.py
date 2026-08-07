@@ -407,6 +407,9 @@ def build_tasks(settings: Settings) -> list[Task]:
     zone = ZoneInfo(settings.scheduler_timezone)
     pipeline_at = parse_times(settings.scheduler_pipeline_at)
     daily_at = parse_times(settings.scheduler_daily_at)
+    # The report reads best after the evening announcement lands, so it can run on its own
+    # clock; unset, it stays with the daily set.
+    report_at = parse_times(settings.scheduler_report_at) or daily_at
 
     def task(
         name: str, interval: float, run: Callable[[], None], at: tuple[clock_time, ...]
@@ -466,7 +469,7 @@ def build_tasks(settings: Settings) -> list[Task]:
             "topics", settings.scheduler_topics_interval_sec, partial(_topics, settings), daily_at
         ),
         task(
-            "report", settings.scheduler_report_interval_sec, partial(_report, settings), daily_at
+            "report", settings.scheduler_report_interval_sec, partial(_report, settings), report_at
         ),
     ]
     return tasks
