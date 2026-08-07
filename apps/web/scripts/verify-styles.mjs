@@ -21,6 +21,10 @@ const SENTINELS = [
   ['WebHitCard', '.webhit.svelte-'],
   ['SideRail', '.rail.svelte-'],
   ['Omnibox', '.field.svelte-'],
+  ['SettingsDrawer', '.prefs-panel.svelte-'],
+  ['ShortcutsHelp', '.shortcuts-card.svelte-'],
+  ['AvatarArt', '.owl-avatar.svelte-'],
+  ['AvatarPicker', '.avatar-grid.svelte-'],
 ];
 
 let css = '';
