@@ -173,13 +173,22 @@ class MeResponse(BaseModel):
     username: str
     email: str | None = None
     display_name: str | None = None
+    avatar: str | None = None
     terms_required: str
     terms_accepted_version: str | None = None
     terms_accepted: bool
 
 
 class MeUpdate(BaseModel):
-    display_name: str = Field(min_length=1, max_length=80)
+    """A partial update: only the fields present are applied.
+
+    The avatar is a slug naming one of the web app's drawn set; the server checks the shape
+    only, because the set lives in the web app and unknown values fall back to initials
+    there. An empty string clears it.
+    """
+
+    display_name: str | None = Field(default=None, min_length=1, max_length=80)
+    avatar: str | None = Field(default=None, pattern=r"^[a-z0-9-]{0,32}$")
 
 
 class TermsAcceptance(BaseModel):
