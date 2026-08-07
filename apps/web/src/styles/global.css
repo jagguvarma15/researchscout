@@ -120,6 +120,20 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  /* The focus ring and the pressed states are the tap feedback; the default grey flash
+     double-announces every touch. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* iOS Safari zooms the page whenever a focused control's font is under 16px, and every input
+   here idles at 14px. One declaration at the phone tier beats chasing the copies in scoped
+   component styles - which is what the important is for. */
+@media (max-width: 40rem) {
+  input,
+  select,
+  textarea {
+    font-size: max(16px, 1em) !important;
+  }
 }
 
 body {
@@ -418,8 +432,11 @@ svg[data-icon] {
   transition: background-color var(--dur-fast) var(--ease-out);
 }
 
-.data-table tbody tr:hover {
-  background: var(--surface-2);
+/* Hover-gated: on touch this row-scanning aid would stick to whatever was last tapped. */
+@media (hover: hover) {
+  .data-table tbody tr:hover {
+    background: var(--surface-2);
+  }
 }
 
 /* The one column that may wrap: a model name is the row's subject, not a value. */
@@ -555,7 +572,7 @@ html[data-navigating]::before {
   position: fixed;
   top: 0;
   left: 0;
-  width: 30vw;
+  width: 30%;
   height: 2px;
   border-radius: var(--radius-full);
   background: var(--accent);
@@ -563,12 +580,15 @@ html[data-navigating]::before {
   animation: nav-progress 1s var(--ease-out) infinite;
 }
 
+/* Percentages of the bar itself, not vw: on iOS 100vw includes the scrollbar gutter and
+   ignores the URL-bar inset, so a vw translate could itself widen the scroll area. A 30%
+   bar travels from fully off the left edge to fully past the right at 433% of its width. */
 @keyframes nav-progress {
   from {
-    transform: translateX(-30vw);
+    transform: translateX(-100%);
   }
   to {
-    transform: translateX(100vw);
+    transform: translateX(433%);
   }
 }
 
@@ -586,7 +606,7 @@ html[data-navigating]::before {
   /* The guard above reduces the sweep to a single instant frame; a still, full-width
      hairline keeps the "something is loading" fact without the motion. */
   html[data-navigating]::before {
-    width: 100vw;
+    width: 100%;
     animation: none;
     opacity: 0.5;
   }
