@@ -8,6 +8,8 @@ import { Icon } from 'astro-icon/components';
 import AvatarMenu from '../components/AvatarMenu.svelte';
 import FooterStatus from '../components/FooterStatus.svelte';
 import Omnibox from '../components/Omnibox.svelte';
+import SettingsDrawer from '../components/SettingsDrawer.svelte';
+import ShortcutsHelp from '../components/ShortcutsHelp.svelte';
 import SideRail from '../components/SideRail.svelte';
 import StaleBanner from '../components/StaleBanner.svelte';
 import TermsGate from '../components/TermsGate.svelte';
@@ -23,6 +25,7 @@ import { THEME_SCRIPT } from '../lib/theme-script.js';
 // render at the end of body keeps their CSS in the build; it hydrates nothing and costs a
 // few hundred hidden bytes. scripts/verify-styles.mjs fails the build if any of these ever
 // goes missing again; drop all of this when the upstream fix ships.
+import AvatarArt from '../components/AvatarArt.svelte';
 import ChatMessage from '../components/ChatMessage.svelte';
 import ScoutPanel from '../components/ScoutPanel.svelte';
 import WebHitCard from '../components/WebHitCard.svelte';
@@ -104,7 +107,7 @@ const renderedAt = new Date().toISOString();
           <ThemeToggle client:load />
           {
             user ? (
-              <AvatarMenu client:load username={user.username} />
+              <AvatarMenu client:load username={user.username} avatar={account?.avatar ?? null} />
             ) : (
               <a class="btn btn-primary signin" href="/login">Sign in</a>
             )
@@ -145,7 +148,14 @@ const renderedAt = new Date().toISOString();
       </div>
     </footer>
     {termsOutstanding && account && <TermsGate client:load version={account.terms_required} />}
-    {/* The CSS anchors from the frontmatter: server-rendered, hidden, never hydrated. */}
+    {/* Direct children of body, outside every transition:name wrapper - a name creates a
+        stacking context that would trap these fixed overlays under later siblings. */}
+    <SettingsDrawer client:load />
+    <ShortcutsHelp client:load />
+    {/* The CSS anchors from the frontmatter: server-rendered, hidden, never hydrated.
+        AvatarArt joins them because it renders inside AvatarMenu only for signed-in
+        accounts that picked one - exactly the sometimes-never-SSR'd shape the pruning
+        bug eats, and its styles must live in this shared chunk for every page's header. */}
     <div hidden aria-hidden="true">
       <ScoutPanel onactivity={noop} />
       <ChatMessage
@@ -157,6 +167,7 @@ const renderedAt = new Date().toISOString();
         onimport={noop}
       />
       <WebHitCard hit={anchorHit} onimport={noop} />
+      <AvatarArt slug="captain" />
     </div>
   </body>
 </html>
