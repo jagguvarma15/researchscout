@@ -35,10 +35,12 @@
 </div>
 
 <style>
+  /* Same card shape and type scale as the fast-answer cards in ChatMessage: one border,
+     one radius token, one title size, so the two kinds of result read as siblings. */
   .webhit {
     border: 1px solid var(--line, #e6e1d5);
-    border-radius: 10px;
-    padding: 0.55rem 0.75rem;
+    border-radius: var(--radius-sm, 10px);
+    padding: 0.65rem 0.8rem;
     background: var(--surface, #fff);
   }
   .webhit p {
@@ -46,16 +48,16 @@
     padding: 0;
   }
   .webtitle {
-    font-size: 0.85rem;
+    font-size: var(--text-sm, 0.875rem);
     font-weight: 600;
     color: var(--ink, #17191c);
   }
   .webmeta {
-    font-size: 0.75rem;
+    font-size: var(--text-xs, 0.75rem);
     color: var(--muted, #5d6570);
   }
   .websnippet {
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     margin-top: 0.25rem;
     color: var(--ink, #17191c);
   }
@@ -65,43 +67,40 @@
     flex-wrap: wrap;
     gap: 0.5rem;
     margin-top: 0.4rem;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
   }
   .webactions a {
     color: var(--accent-ink, #78350f);
     font-weight: 500;
   }
   .provider {
-    font-size: 0.68rem;
+    font-size: var(--text-xs, 0.75rem);
     text-transform: uppercase;
     letter-spacing: 0.04em;
     color: var(--muted, #5d6570);
     border: 1px solid var(--line, #e6e1d5);
-    border-radius: 999px;
+    border-radius: var(--radius-full, 999px);
     padding: 0.05rem 0.45rem;
   }
   .webnote {
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     color: var(--muted, #5d6570);
   }
   .weberror {
-    font-size: 0.78rem;
-    color: #8b1d1d;
-  }
-  :global([data-theme='dark']) .weberror {
-    color: #f2b8b8;
+    font-size: 0.8rem;
+    color: var(--danger-ink, #7f1d1d);
   }
   .ghost {
     border: 1px solid var(--line, #e6e1d5);
-    border-radius: 999px;
+    border-radius: var(--radius-full, 999px);
     background: var(--surface, #fff);
     color: var(--ink, #17191c);
     font: inherit;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
     font-weight: 500;
-    padding: 0.25rem 0.75rem;
+    padding: 0.35rem 0.85rem;
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
   .ghost:hover:not(:disabled) {
     background: var(--surface-2, #f4f0e8);
