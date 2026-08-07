@@ -118,6 +118,91 @@
   --shadow-lg: 0 2px 4px rgb(0 0 0 / 0.4), 0 16px 48px rgb(0 0 0 / 0.6);
 }
 
+/* Accent choices ------------------------------------------------------------- */
+
+/* Three alternates to the amber default, applied by the pre-paint script via
+   <html data-accent="...">, chosen in the settings drawer. Each remaps the whole accent
+   family for both themes - neutrals, danger and shadows stay the theme's own. The paired
+   dark block carries every token the light block does, so it wins wholesale over the
+   equal-specificity dark-theme block above regardless of which attribute landed first.
+   Contrast (WCAG, computed) is at or above the amber incumbent's own bars in every slot. */
+
+/* Forest: 5.4:1 on the beige bg, 5.1:1 on surface-2; ink 8.3:1 on the soft. */
+:root[data-accent='forest'] {
+  --accent: #15753a;
+  --accent-hover: #166534;
+  --accent-soft: #dcfce7;
+  --accent-ink: #14532d;
+  --accent-contrast: #ffffff; /* 5.8:1 on solid accent */
+  --chip-hover: #bbf7d0;
+  /* White glyph 3.3:1 on the light stop (non-text 3:1 bar). */
+  --accent-grad: linear-gradient(135deg, #16a34a, #166534);
+}
+:root[data-theme='dark'][data-accent='forest'] {
+  --accent: #4ade80; /* 10.3:1 on bg, 8.6:1 on surface-2 */
+  --accent-hover: #86efac;
+  --accent-soft: #122f1c;
+  --accent-ink: #86efac; /* 10.3:1 on the soft, 8.1:1 on chip-hover */
+  --accent-contrast: #191713;
+  --chip-hover: #1a4227;
+  --accent-grad: linear-gradient(135deg, #86efac, #22c55e);
+}
+
+/* Ocean: 6.3:1 on the beige bg, 5.9:1 on surface-2; ink 8.5:1 on the soft. */
+:root[data-accent='ocean'] {
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --accent-soft: #dbeafe;
+  --accent-ink: #1e3a8a;
+  --accent-contrast: #ffffff; /* 6.7:1 on solid accent */
+  --chip-hover: #bfdbfe;
+  /* White glyph 3.7:1 on the light stop. */
+  --accent-grad: linear-gradient(135deg, #3b82f6, #1e40af);
+}
+:root[data-theme='dark'][data-accent='ocean'] {
+  --accent: #60a5fa; /* 7.0:1 on bg, 5.9:1 on surface-2 */
+  --accent-hover: #93c5fd;
+  --accent-soft: #152944;
+  --accent-ink: #93c5fd; /* 8.1:1 on the soft, 6.4:1 on chip-hover */
+  --accent-contrast: #191713;
+  --chip-hover: #1c3a5f;
+  --accent-grad: linear-gradient(135deg, #93c5fd, #3b82f6);
+}
+
+/* Plum: 6.5:1 on the beige bg, 6.1:1 on surface-2; ink 9.2:1 on the soft. */
+:root[data-accent='plum'] {
+  --accent: #7e22ce;
+  --accent-hover: #6b21a8;
+  --accent-soft: #f3e8ff;
+  --accent-ink: #581c87;
+  --accent-contrast: #ffffff; /* 7.0:1 on solid accent */
+  --chip-hover: #e9d5ff;
+  /* White glyph 4.0:1 on the light stop. */
+  --accent-grad: linear-gradient(135deg, #a855f7, #6b21a8);
+}
+:root[data-theme='dark'][data-accent='plum'] {
+  --accent: #c084fc; /* 6.8:1 on bg, 5.7:1 on surface-2 */
+  --accent-hover: #d8b4fe;
+  --accent-soft: #2f1b45;
+  --accent-ink: #d8b4fe; /* 8.7:1 on the soft, 7.2:1 on chip-hover */
+  --accent-contrast: #191713;
+  --chip-hover: #3f2560;
+  --accent-grad: linear-gradient(135deg, #d8b4fe, #a855f7);
+}
+
+/* Type scale choice ---------------------------------------------------------- */
+
+/* html carries no base font-size otherwise, so one percentage scales every rem in the
+   layout together - text, rhythm, the rail, the header token. The clamp()ed display sizes
+   follow partially (their vw terms do not scale), and the 16px input floor below stays in
+   px on purpose: iOS zooms on anything smaller no matter what the page prefers. */
+:root[data-fontsize='small'] {
+  font-size: 93.75%;
+}
+:root[data-fontsize='large'] {
+  font-size: 106.25%;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -623,4 +708,28 @@ html[data-navigating]::before {
   ::view-transition-new(*) {
     animation: none !important;
   }
+}
+
+/* The same guard again for the site's own switch (html[data-motion], set in the settings
+   drawer), so someone can ask this site for stillness without changing their OS. Component
+   code branches through lib/motion.ts, which answers for both. */
+html[data-motion='reduced'] *,
+html[data-motion='reduced'] *::before,
+html[data-motion='reduced'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+html[data-motion='reduced'][data-navigating]::before {
+  width: 100%;
+  animation: none;
+  opacity: 0.5;
+}
+
+/* The view-transition pseudos hang off the root element, so the attribute compounds. */
+html[data-motion='reduced']::view-transition-group(*),
+html[data-motion='reduced']::view-transition-old(*),
+html[data-motion='reduced']::view-transition-new(*) {
+  animation: none !important;
 }
