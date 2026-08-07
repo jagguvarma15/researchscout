@@ -28,7 +28,7 @@
   import { matchKeywords } from '../lib/keyword-match';
   import { stripMath } from '../lib/math-text';
   import { classify, createSequencer, debounce, searchUrl } from '../lib/omnibox';
-  import { clickedOutside } from '../lib/overlay';
+  import { clickedOutside, lockBodyScroll } from '../lib/overlay';
   import ScoutMascot from './ScoutMascot.svelte';
   import ScoutPanel from './ScoutPanel.svelte';
 
@@ -309,6 +309,17 @@
 
   let closing = $state(false);
   let closeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // On a phone the panel covers the page, so the page must not keep scrolling under it -
+  // the same discipline as the rail drawer. Wider tiers keep the dropdown feel, where
+  // background scroll is expected. The effect cleanup releases the lock on close, on
+  // navigation, and on destroy alike.
+  $effect(() => {
+    if (!open) return;
+    if (!window.matchMedia('(max-width: 40rem)').matches) return;
+    const unlock = lockBodyScroll();
+    return () => unlock();
+  });
 
   function show() {
     if (closeTimer) {
@@ -608,14 +619,15 @@
   }
 
   /* Anchored to the field's right edge, never its left: that is what keeps a wide panel
-     clear of the navigation rail on a middling window without measuring anything. */
+     clear of the navigation rail on a middling window without measuring anything. dvh, not
+     vh: under a phone URL bar the two differ by the bar's height. */
   .panel {
     position: absolute;
     top: calc(100% + 0.5rem);
     right: 0;
     z-index: 5;
     width: min(45rem, calc(100vw - 2rem));
-    max-height: 70vh;
+    max-height: 70dvh;
     display: flex;
     flex-direction: column;
     border: 1px solid var(--line, #e6e1d5);
@@ -624,6 +636,21 @@
     box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
     overflow: hidden;
     animation: panel-in var(--dur-fast, 0.15s) var(--ease-out, ease);
+  }
+  /* Phone: right-anchored to a field that sits mid-header, the dropdown ran off the left
+     edge of the screen. Fixed instead - the header's backdrop-filter makes it the
+     containing block for fixed descendants, and the header spans the viewport, so these
+     edge offsets are viewport offsets. Height comes from the visible viewport, not the
+     field. */
+  @media (max-width: 40rem) {
+    .panel {
+      position: fixed;
+      top: calc(var(--nav-height, 3.75rem) + 0.4rem);
+      left: 0.4rem;
+      right: 0.4rem;
+      width: auto;
+      max-height: calc(100dvh - var(--nav-height, 3.75rem) - 1rem);
+    }
   }
   @keyframes panel-in {
     from {
