@@ -291,6 +291,16 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
   .links .back {
     margin-left: auto;
   }
+  /* Wrapped to two or three lines on a phone, the buttons breathe better with a hair more
+     row gap, and the back link joins the flow instead of floating right. */
+  @media (max-width: 40rem) {
+    .links {
+      gap: 0.7rem 0.6rem;
+    }
+    .links .back {
+      margin-left: 0;
+    }
+  }
   .cite-row {
     margin-top: 0.75rem;
   }
