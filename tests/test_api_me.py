@@ -108,6 +108,43 @@ def test_display_name_updates(monkeypatch: pytest.MonkeyPatch) -> None:
     assert body["display_name"] == "Ada"
 
 
+def test_me_echoes_a_stored_avatar(monkeypatch: pytest.MonkeyPatch) -> None:
+    row = UserRow(sub="local", avatar="cook")
+    body = _client(monkeypatch, _Store(row)).get("/v1/me").json()
+    assert body["avatar"] == "cook"
+
+
+def test_avatar_updates(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _Store()
+    body = _client(monkeypatch, store).patch("/v1/me", json={"avatar": "captain"}).json()
+    assert body["avatar"] == "captain"
+
+
+def test_avatar_clears_with_an_empty_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _Store(UserRow(sub="local", avatar="cook"))
+    body = _client(monkeypatch, store).patch("/v1/me", json={"avatar": ""}).json()
+    assert body["avatar"] is None
+
+
+@pytest.mark.parametrize("bad", ["Captain", "straw hat", "x" * 33])
+def test_avatar_rejects_malformed_slugs(monkeypatch: pytest.MonkeyPatch, bad: str) -> None:
+    response = _client(monkeypatch, _Store()).patch("/v1/me", json={"avatar": bad})
+    assert response.status_code == 422
+
+
+def test_avatar_patch_leaves_the_display_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The update is partial: absent fields must stay untouched in both directions."""
+    store = _Store(UserRow(sub="local", display_name="Ada", avatar=None))
+    body = _client(monkeypatch, store).patch("/v1/me", json={"avatar": "navigator"}).json()
+    assert (body["display_name"], body["avatar"]) == ("Ada", "navigator")
+
+
+def test_display_name_patch_leaves_the_avatar(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _Store(UserRow(sub="local", display_name="Ada", avatar="cook"))
+    body = _client(monkeypatch, store).patch("/v1/me", json={"display_name": "Grace"}).json()
+    assert (body["display_name"], body["avatar"]) == ("Grace", "cook")
+
+
 def test_export_returns_the_stored_shape(monkeypatch: pytest.MonkeyPatch) -> None:
     body = _client(monkeypatch, _Store()).get("/v1/me/export").json()
     assert set(body) == {"account", "saved_papers", "interests", "reading_events"}
