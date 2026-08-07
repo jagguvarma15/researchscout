@@ -42,6 +42,7 @@ def _me(user: User, session: Session) -> MeResponse:
         username=user.username,
         email=row.email if row else None,
         display_name=row.display_name if row else None,
+        avatar=row.avatar if row else None,
         terms_required=required,
         terms_accepted_version=accepted,
         terms_accepted=accepted == required,
@@ -63,12 +64,18 @@ def update_account(
     user: Annotated[User, Depends(require_user)],
     session: Annotated[Session, Depends(get_session)],
 ) -> MeResponse:
-    """Change the display name. Email comes from the identity provider and is read-only here."""
+    """Change the display name or the avatar; absent fields stay as they are.
+
+    Email comes from the identity provider and is read-only here.
+    """
     upsert_user(session, user.sub)
     row = get_user(session, user.sub)
     if row is None:  # pragma: no cover - upsert just created it
         raise HTTPException(status_code=500, detail="account row missing")
-    row.display_name = body.display_name.strip()
+    if body.display_name is not None:
+        row.display_name = body.display_name.strip()
+    if body.avatar is not None:
+        row.avatar = body.avatar or None
     session.flush()
     return _me(user, session)
 
