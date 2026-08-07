@@ -88,7 +88,8 @@
           {/if}
           {#if result.keywords.length > 0}
             <p class="cardtags">
-              {#each result.keywords as keyword}
+              <!-- Four is a scan; seven long phrases were noise even styled. -->
+              {#each result.keywords.slice(0, 4) as keyword}
                 <a href={`/?q=${encodeURIComponent(keyword)}`}>{keyword}</a>
               {/each}
             </p>
