@@ -15,6 +15,7 @@ import {
 } from '../lib/api';
 import { renderMathHTML } from '../lib/math';
 import { morphName } from '../lib/morph';
+import { FEED_DEFAULTS_COOKIE, parseFeedDefaults } from '../lib/prefs';
 import { categoryName, subjectLabel, TOPICS, topicLabel } from '../lib/taxonomy';
 
 const params = Astro.url.searchParams;
@@ -25,17 +26,35 @@ const month = params.get('month') ?? '';
 const author = params.get('author') ?? '';
 const venue = params.get('venue') ?? '';
 const minCitations = params.get('min_citations') ?? '';
-const sort = params.get('sort') ?? '';
+const sortParam = params.get('sort') ?? '';
 const category = params.getAll('category');
 const subject = params.getAll('subject');
-const topic = params.getAll('topic');
+const topicParam = params.getAll('topic');
 const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
 
 // The feed is a radar, so it opens on the last week. A default rather than a cap: an explicit
 // ?days= or ?year= wins, the filters can widen it, and every link ever shared still resolves.
 // A search is not the feed and is never windowed.
 const DEFAULT_DAYS = '7';
-const days = daysParam || (q || year ? '' : DEFAULT_DAYS);
+
+// The settings drawer can choose how the front page opens (sort, window, technique); those
+// ride a cookie because this render is where they apply. Only a URL that asks for nothing
+// gets them - page is deliberately absent from the list, so paging keeps the defaults - and
+// the chip below links to an explicit ?days=7, which reproduces the stock radar and
+// suppresses the merge. Nothing redirects, so every state stays reachable (same stance as
+// the saved-filters offer further down). The 'all' window is internal only: the API takes
+// numeric days or none, so it becomes "no window" here and is never sent or linked.
+const FILTER_PARAMS = ['q', 'days', 'year', 'month', 'author', 'venue', 'min_citations', 'sort', 'category', 'subject', 'topic'];
+const defaults = FILTER_PARAMS.some((name) => params.has(name))
+  ? null
+  : parseFeedDefaults(Astro.cookies.get(FEED_DEFAULTS_COOKIE)?.value);
+const sort = defaults?.sort ?? sortParam;
+const topic = defaults?.topic ? [defaults.topic] : topicParam;
+const days = defaults?.days
+  ? defaults.days === 'all'
+    ? ''
+    : defaults.days
+  : daysParam || (q || year ? '' : DEFAULT_DAYS);
 
 // Topic toggles: the same URL with one technique added or removed (page reset).
 function withTopic(value: string): string {
@@ -73,6 +92,9 @@ interface Chip {
   href: string;
 }
 const chips: Chip[] = [];
+// First, because it explains the state of everything after it. Its clear link is explicit
+// rather than bare, which is what suppresses the merge above.
+if (defaults) chips.push({ label: 'Your defaults', href: '/?days=7' });
 if (q) chips.push({ label: `“${q}”`, href: withoutParams([['q']]) });
 for (const s of subject) {
   chips.push({ label: subjectLabel(s), href: withoutParams([['subject', s]]) });
@@ -227,10 +249,12 @@ function pageLink(target: number): string {
              aria-pressed is only meaningful on something with a button role. */
           <a
             class:list={['kt', { on: topic.includes(option.key) }]}
-            href={withTopic(option.key)}
+            href={defaults?.topic === option.key ? '/?days=7' : withTopic(option.key)}
             title={option.label}
             aria-current={topic.includes(option.key) ? 'true' : undefined}
           >
+            {/* The pill lit by a cookie default toggles off through the same explicit
+                clear as the chip - withTopic would add the param and light it harder. */}
             {option.short}
           </a>
         ))
@@ -435,12 +459,12 @@ function pageLink(target: number): string {
     client:load
     initial={{
       subjects: subject,
-      topics: topic,
+      topics: topicParam,
       categories: category,
       days: daysParam,
       year,
       month,
-      sort,
+      sort: sortParam,
       minCitations,
       author,
       venue,
@@ -768,6 +792,28 @@ function pageLink(target: number): string {
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+  /* Compact density (html[data-density], chosen in the settings drawer): tighter rows and
+     a one-line abstract, so a screen holds more of the day. The ancestor is :global because
+     the attribute lives on <html>, outside this page's scope - the scoped form would
+     silently never match. */
+  :global(html[data-density='compact']) .row {
+    padding: 0.5rem 0.75rem;
+  }
+  :global(html[data-density='compact']) .title {
+    font-size: 0.98rem;
+  }
+  :global(html[data-density='compact']) .meta,
+  :global(html[data-density='compact']) .tags,
+  :global(html[data-density='compact']) .abstract {
+    margin-top: 0.25rem;
+  }
+  :global(html[data-density='compact']) .abstract {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
+  :global(html[data-density='compact']) .day {
+    margin-bottom: var(--space-4);
   }
   .pager {
     display: flex;
