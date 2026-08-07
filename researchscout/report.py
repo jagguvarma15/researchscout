@@ -4,6 +4,12 @@ Reuses the digest store and pages under a daily slug (2026-07-30, disjoint from 
 2026-w31 namespace). The body is deterministic markdown, so the daily run never depends on
 the LLM being up; the must-read ranking is the breakthrough momentum score, which already
 blends citation level, velocity, and acceleration with the popularity signals.
+
+"Arrived" means stored in the last day (``created_at``), not published: arXiv's published_at
+is submission time, a day or more behind the announcement that actually lands a paper here,
+and a report windowed on it was empty on almost every real day. Weekend reports still come
+up empty legitimately - arXiv announces Sunday through Thursday evenings - and an empty
+window publishes nothing rather than a hollow page.
 """
 
 from __future__ import annotations
@@ -15,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from researchscout.digest import Digest, RankedPaper
 from researchscout.score import breakthrough_many
-from researchscout.store.papers import list_papers
+from researchscout.store.papers import papers_arrived_since
 from researchscout.store.topics import list_topics
 from researchscout.taxonomy import group_for
 
@@ -34,7 +40,8 @@ def day_slug(moment: datetime) -> str:
 def build_daily_report(session: Session, *, now: datetime | None = None) -> Digest | None:
     """The day's report, or None when nothing arrived in the window."""
     now = now or datetime.now(UTC)
-    papers = list_papers(session, days=1, limit=_CANDIDATE_POOL)
+    since = now - timedelta(hours=_WINDOW_HOURS)
+    papers = papers_arrived_since(session, since, limit=_CANDIDATE_POOL)
     if not papers:
         return None
 
