@@ -7,6 +7,7 @@ import {
   serializeFeedDefaults,
   themeChoice,
   updatePrefs,
+  withViewTransition,
 } from './prefs';
 
 // A storage of our own rather than the environment's - the same dodge chat-persist.test.ts
@@ -98,6 +99,43 @@ describe('theme', () => {
     });
     applyTheme('light');
     expect(seen).toEqual({ choice: 'light', resolved: 'light' });
+  });
+});
+
+describe('withViewTransition', () => {
+  type Transitional = { startViewTransition?: (cb: () => void) => unknown };
+
+  it('routes the change through startViewTransition when available', () => {
+    const start = vi.fn((cb: () => void) => {
+      cb();
+      return {};
+    });
+    (document as Transitional).startViewTransition = start;
+    const mutate = vi.fn();
+    withViewTransition(mutate);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(mutate).toHaveBeenCalledTimes(1);
+    delete (document as Transitional).startViewTransition;
+  });
+
+  it('applies directly when the API is missing', () => {
+    const mutate = vi.fn();
+    withViewTransition(mutate);
+    expect(mutate).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies directly, without a transition, under the site motion switch', () => {
+    const start = vi.fn((cb: () => void) => {
+      cb();
+      return {};
+    });
+    (document as Transitional).startViewTransition = start;
+    document.documentElement.dataset.motion = 'reduced';
+    const mutate = vi.fn();
+    withViewTransition(mutate);
+    expect(start).not.toHaveBeenCalled();
+    expect(mutate).toHaveBeenCalledTimes(1);
+    delete (document as Transitional).startViewTransition;
   });
 });
 
