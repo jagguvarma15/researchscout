@@ -61,6 +61,54 @@ describe('renderAnswerHtml', () => {
       '<p>chapter 3 of <code>x</code> is out</p>',
     );
   });
+
+  it('renders dash and star runs as one unordered list', () => {
+    expect(renderAnswerHtml('intro\n- first\n* second\nafter', IDS)).toBe(
+      '<p>intro</p><ul><li>first</li><li>second</li></ul><p>after</p>',
+    );
+  });
+
+  it('renders numbered runs as an ordered list', () => {
+    expect(renderAnswerHtml('1. one\n2. two', IDS)).toBe('<ol><li>one</li><li>two</li></ol>');
+  });
+
+  it('applies emphasis and citations inside list items', () => {
+    expect(renderAnswerHtml('- **bold** [arxiv:2401.00001]', IDS)).toBe(
+      '<ul><li><strong>bold</strong> <a href="/papers/arxiv:2401.00001">[arxiv:2401.00001]</a></li></ul>',
+    );
+  });
+
+  it('keeps a whole-line italic out of the bullet parser', () => {
+    // No space after the asterisk: emphasis, not a list marker.
+    expect(renderAnswerHtml('*aside*', IDS)).toBe('<p><em>aside</em></p>');
+  });
+
+  it('flattens heading levels to h4', () => {
+    expect(renderAnswerHtml('## Findings\ntext', IDS)).toBe('<h4>Findings</h4><p>text</p>');
+    expect(renderAnswerHtml('### Sub', IDS)).toBe('<h4>Sub</h4>');
+  });
+
+  it('renders fenced blocks with their content escaped and unenriched', () => {
+    const html = renderAnswerHtml('```python\nx = "<b>" # **not bold**\n```', IDS);
+    expect(html).toBe('<pre><code>x = "&lt;b&gt;" # **not bold**</code></pre>');
+    expect(html).not.toContain('<strong>');
+  });
+
+  it('keeps citations and list markers literal inside fences', () => {
+    const html = renderAnswerHtml('```\n- [arxiv:2401.00001]\n```', IDS);
+    expect(html).toBe('<pre><code>- [arxiv:2401.00001]</code></pre>');
+    expect(html).not.toContain('<a');
+    expect(html).not.toContain('<ul>');
+  });
+
+  it('escapes injection attempts inside every new block type', () => {
+    expect(renderAnswerHtml('- <img src=x onerror=alert(1)>', IDS)).toBe(
+      '<ul><li>&lt;img src=x onerror=alert(1)&gt;</li></ul>',
+    );
+    expect(renderAnswerHtml('## <script>x</script>', IDS)).toBe(
+      '<h4>&lt;script&gt;x&lt;/script&gt;</h4>',
+    );
+  });
 });
 
 describe('formatMonthYear', () => {
