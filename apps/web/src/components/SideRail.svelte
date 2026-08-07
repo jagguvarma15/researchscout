@@ -270,10 +270,13 @@
       position: fixed;
       inset: 0;
       z-index: 37;
-      /* Dim without blur: a backdrop-filter animating opacity beside a sliding fixed panel
-         is the classic iOS half-painted frame, which read as the drawer "mixing" with the
-         page. The other backdrops keep their blur - nothing animates against them. */
-      background: rgb(0 0 0 / 0.4);
+      /* A bg-tinted veil (TermsGate's recipe), not a translucent black: the blur can drop
+         a frame while the drawer animates beside it - iOS and headless captures both show
+         it - and when that happens a black scrim reads as raw transparency over the page.
+         This stays a surface even without the blur; the blur remains the enhancement. */
+      background: color-mix(in srgb, var(--bg, #faf7f1) 72%, transparent);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
       opacity: 0;
       visibility: hidden;
       transition:
