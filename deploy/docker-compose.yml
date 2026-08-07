@@ -50,11 +50,15 @@ x-backend-env: &backend-env
   # the request budget arXiv tolerates from one address.
   RS_SCHEDULER_INGEST_EARLY_STOP_PAGES: ${RS_SCHEDULER_INGEST_EARLY_STOP_PAGES:-2}
   # Wall-clock schedule: the fetch-and-enrich tasks run at each of these times and the
-  # once-a-day products at the daily one. Set either to an empty string to go back to
-  # intervals. The zone is named rather than an offset so the runs stay put across daylight
+  # once-a-day products at the daily one. The 20:30 slot is the one that matters most:
+  # arXiv announces the day's papers at 20:00 ET, so without it the evening always shows
+  # yesterday. The report runs after that fetch so it describes the day's actual
+  # announcement. Set any to an empty string to go back to intervals (report: to the daily
+  # set). The zone is named rather than an offset so the runs stay put across daylight
   # saving; the image has tzdata, so nothing else is needed.
-  RS_SCHEDULER_PIPELINE_AT: "${RS_SCHEDULER_PIPELINE_AT-05:00,10:00,14:00,17:00}"
+  RS_SCHEDULER_PIPELINE_AT: "${RS_SCHEDULER_PIPELINE_AT-05:00,10:00,14:00,17:00,20:30}"
   RS_SCHEDULER_DAILY_AT: "${RS_SCHEDULER_DAILY_AT-17:00}"
+  RS_SCHEDULER_REPORT_AT: "${RS_SCHEDULER_REPORT_AT-21:00}"
   RS_SCHEDULER_TIMEZONE: ${RS_SCHEDULER_TIMEZONE:-America/New_York}
   RS_OIDC_ISSUER: ${RS_OIDC_ISSUER:-}
   RS_OIDC_AUDIENCE: ${RS_OIDC_AUDIENCE:-api}
