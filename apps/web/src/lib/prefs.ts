@@ -5,6 +5,8 @@
 // cookie. Appearance lives in localStorage because only the browser needs it; the feed
 // defaults live in a cookie because the server applies them before the page exists.
 
+import { prefersReducedMotion } from './motion';
+
 export type Accent = 'forest' | 'ocean' | 'plum';
 export type FontSize = 'small' | 'large';
 export type Density = 'compact';
@@ -89,6 +91,24 @@ export function updatePrefs(changes: { [K in keyof Prefs]?: Prefs[K] | null }): 
   }
   applyPrefAttributes(prefs);
   return prefs;
+}
+
+/**
+ * Run a DOM-mutating change inside a view transition, so the page cross-fades to its new
+ * appearance instead of cutting. Falls back to a plain call when the API is missing or
+ * when either motion switch asks for stillness.
+ *
+ * Callers wrap their outermost event handler exactly once: every state change that should
+ * land in the "new" snapshot belongs inside `mutate` (Svelte flushes in a microtask,
+ * which the transition waits out before capturing), and nothing inside may call this
+ * again - a nested startViewTransition skips the one in flight.
+ */
+export function withViewTransition(mutate: () => void): void {
+  if (typeof document.startViewTransition !== 'function' || prefersReducedMotion()) {
+    mutate();
+    return;
+  }
+  document.startViewTransition(mutate);
 }
 
 /** The stored theme choice; absence has always meant "follow the OS". */
