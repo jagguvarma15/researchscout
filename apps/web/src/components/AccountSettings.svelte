@@ -145,6 +145,9 @@
     gap: 0.7rem;
   }
   .row.spaced {
+    /* Wraps so the destructive button drops under its explanation on a phone instead of
+       squeezing beside it. */
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: flex-start;
     gap: 1.5rem;
