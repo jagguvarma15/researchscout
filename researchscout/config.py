@@ -84,10 +84,13 @@ class Settings(BaseSettings):
     # default) leaves every task on its interval below, which is what a local checkout wants.
     # Set them and the named tasks run at those times instead: the pipeline set (ingest, index,
     # full text, signals) on the first, and the daily set (model catalogue, digest, topics,
-    # report) on the second. A named zone rather than a fixed offset, so the runs stay put on
-    # the local clock across daylight saving.
+    # report) on the second. The report can take its own times: it describes the day's
+    # announcement, so the deployment runs it after the evening fetch rather than with the
+    # 17:00 set; empty keeps it on the daily times. A named zone rather than a fixed offset,
+    # so the runs stay put on the local clock across daylight saving.
     scheduler_pipeline_at: str = ""
     scheduler_daily_at: str = ""
+    scheduler_report_at: str = ""
     scheduler_timezone: str = "America/New_York"
     scheduler_ingest_window_days: int = 2
     scheduler_ingest_interval_sec: int = 3600
