@@ -107,8 +107,22 @@ def test_configured_times_move_the_named_tasks_onto_the_clock() -> None:
     assert by_name["ingest"].at == (time(5, 0), time(10, 0), time(14, 0), time(17, 0))
     assert by_name["signals"].at == by_name["ingest"].at
     assert by_name["catalog"].at == (time(17, 0),)
-    assert by_name["report"].at == (time(17, 0),)
+    assert by_name["report"].at == (time(17, 0),)  # unset report times stay with the daily set
     assert by_name["ingest"].zone.key == "America/New_York"
+
+
+def test_the_report_can_run_on_its_own_clock() -> None:
+    # It describes the day's announcement, so the deployment runs it after the evening fetch
+    # while the rest of the daily set keeps its afternoon slot.
+    settings = Settings(
+        scheduler_batch_pipeline=True,
+        scheduler_daily_at="17:00",
+        scheduler_report_at="21:00",
+    )
+    by_name = {task.name: task for task in build_tasks(settings)}
+    assert by_name["report"].at == (time(21, 0),)
+    assert by_name["digest"].at == (time(17, 0),)
+    assert by_name["catalog"].at == (time(17, 0),)
 
 
 def test_a_wall_clock_task_waits_for_its_next_slot() -> None:
