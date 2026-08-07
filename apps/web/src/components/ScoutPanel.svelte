@@ -48,21 +48,23 @@
   .thread {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
-    padding: 0.75rem 1rem 0.25rem;
+    /* Exchanges breathe apart; the pieces inside one exchange stay close (ChatMessage
+       owns its internal 0.4rem). One gutter, shared with the foot and the welcome. */
+    gap: 0.9rem;
+    padding: 0.9rem 1rem 0.4rem;
   }
   .tools {
     display: flex;
     justify-content: flex-end;
-    margin: 0;
+    margin: -0.4rem 0 -0.5rem;
   }
   .clear {
     border: none;
     background: none;
-    padding: 0.1rem 0.3rem;
+    padding: 0.2rem 0.3rem;
     color: var(--muted, #5d6570);
     font: inherit;
-    font-size: 0.72rem;
+    font-size: var(--text-xs, 0.75rem);
     cursor: pointer;
     transition: color var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
