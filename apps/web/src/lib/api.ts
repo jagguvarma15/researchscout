@@ -167,6 +167,7 @@ export interface Account {
   username: string;
   email: string | null;
   display_name: string | null;
+  avatar: string | null;
   terms_required: string;
   terms_accepted_version: string | null;
   terms_accepted: boolean;
