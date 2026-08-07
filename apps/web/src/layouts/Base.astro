@@ -83,6 +83,14 @@ const renderedAt = new Date().toISOString();
         and the theme stay put instead of flashing white between every click. The reader
         needs no opt-out: it tears itself down in onDestroy when a swap removes it. */}
     <ClientRouter />
+    <script>
+      // Bundled, not inline: this needs no pre-paint guarantee, so it stays out of the
+      // hashed inline script. Module scripts run once per full load; the document
+      // listeners inside survive every swap.
+      import { initNavDirection } from '../lib/nav-direction';
+
+      initNavDirection();
+    </script>
   </head>
   <body>
     <StaleBanner client:idle renderedAt={renderedAt} />
