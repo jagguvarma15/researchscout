@@ -682,6 +682,90 @@ html[data-navigating]::before {
   }
 }
 
+/* View transitions ------------------------------------------------------------ */
+
+/* Soft navigations raise the incoming page a touch instead of flat cross-fading. Scoped to
+   [data-astro-transition], which the client router pins on <html> for the whole navigation
+   and which our own theme cross-fades (lib/prefs withViewTransition) never carry - without
+   the scope, flipping the theme would also nudge the page upward. Astro styles no (root)
+   rules of its own, and its named-scope rules live in @layer astro, so these unlayered
+   rules own the root. */
+@keyframes vt-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes vt-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+html[data-astro-transition]::view-transition-old(root) {
+  animation: vt-fade-out var(--dur-slow) var(--ease-out) both;
+}
+html[data-astro-transition]::view-transition-new(root) {
+  animation: vt-rise-in var(--dur-slow) var(--ease-out) both;
+}
+
+/* Feed paging slides along the timeline instead: Older exits left, Newer exits right.
+   lib/nav-direction.ts holds html[data-paging] for exactly the transition's lifetime
+   (astro's swap wipes custom html attributes, so it re-asserts through the swap). Only
+   animation-name changes here - duration, curve and fill carry over from the rules above,
+   which always co-apply during a router navigation and lose on source order. */
+@keyframes vt-page-out-left {
+  to {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+@keyframes vt-page-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+@keyframes vt-page-out-right {
+  to {
+    opacity: 0;
+    transform: translateX(28px);
+  }
+}
+@keyframes vt-page-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-28px);
+  }
+}
+html[data-paging='older']::view-transition-old(root) {
+  animation-name: vt-page-out-left;
+}
+html[data-paging='older']::view-transition-new(root) {
+  animation-name: vt-page-in-right;
+}
+html[data-paging='newer']::view-transition-old(root) {
+  animation-name: vt-page-out-right;
+}
+html[data-paging='newer']::view-transition-new(root) {
+  animation-name: vt-page-in-left;
+}
+
+/* The small morphing groups - the rail's active pill sliding between sections, and the
+   settings drawer's selected pills gliding between options - on the shared curve. The
+   reduced-motion blocks below still every one of these by the (*) wildcard. */
+::view-transition-group(rail-active),
+::view-transition-group(seg-theme),
+::view-transition-group(seg-accent),
+::view-transition-group(seg-fontsize),
+::view-transition-group(seg-density),
+::view-transition-group(seg-motion),
+::view-transition-group(seg-sort),
+::view-transition-group(seg-days),
+::view-transition-group(seg-topic) {
+  animation-duration: var(--dur-slow);
+  animation-timing-function: var(--ease-out);
+}
+
 /* Motion guard --------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
