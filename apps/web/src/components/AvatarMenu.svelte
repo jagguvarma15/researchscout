@@ -1,11 +1,17 @@
 <script lang="ts">
-  // Header account menu: an initials avatar that opens a small dropdown with the
-  // profile link. Closes on click-outside and Escape.
+  // Header account menu: the account's chosen crew avatar (initials until one is picked, or
+  // if a stored slug stops existing) opening a small dropdown with the profile link and the
+  // settings drawer trigger. Closes on click-outside and Escape.
 
-  let { username }: { username: string } = $props();
+  import { isAvatarSlug } from '../lib/avatars';
+  import AvatarArt from './AvatarArt.svelte';
+
+  let { username, avatar = null }: { username: string; avatar?: string | null } = $props();
 
   let open = $state(false);
   let root: HTMLElement | undefined = $state();
+
+  const art = $derived(avatar !== null && isAvatarSlug(avatar) ? avatar : null);
 
   const initials =
     username
@@ -30,18 +36,28 @@
 <div class="avatar-menu" bind:this={root}>
   <button
     class="avatar"
+    class:pictured={art !== null}
     onclick={() => (open = !open)}
     aria-expanded={open}
     aria-haspopup="menu"
     aria-label={`Account menu for ${username}`}
     title={username}
   >
-    {initials}
+    {#if art !== null}
+      <AvatarArt slug={art} size={32} />
+    {:else}
+      {initials}
+    {/if}
   </button>
   {#if open}
     <div class="menu" role="menu" aria-label="Account">
       <span class="menu-user" role="presentation">{username}</span>
-      <a role="menuitem" href="/profile">Profile settings</a>
+      <a role="menuitem" href="/profile">Profile</a>
+      <!-- The drawer's document-level delegate reads the attribute off the bubbled click;
+           closing here is this menu's own business. -->
+      <button role="menuitem" type="button" data-open-settings onclick={() => (open = false)}>
+        Settings
+      </button>
       <a role="menuitem" href="/logout">Sign out</a>
     </div>
   {/if}
@@ -81,6 +97,12 @@
     outline: 2px solid var(--accent, #c2410c);
     outline-offset: 2px;
   }
+  /* With art in the ring the soft wash would tint the drawing's own backdrop; the surface
+     lets the owl's circle read as the avatar. */
+  .avatar.pictured {
+    padding: 0;
+    background: var(--surface, #fff);
+  }
   .menu {
     position: absolute;
     top: calc(100% + 0.5rem);
@@ -102,17 +124,25 @@
     color: var(--muted, #5d6570);
     font-size: 0.78rem;
   }
-  .menu a {
+  .menu a,
+  .menu button {
     padding: 0.45rem 0.65rem;
+    border: none;
     border-radius: 8px;
+    background: none;
     color: var(--ink, #17191c);
+    font: inherit;
     font-size: 0.88rem;
+    text-align: left;
     text-decoration: none;
+    cursor: pointer;
   }
-  .menu a:hover {
+  .menu a:hover,
+  .menu button:hover {
     background: var(--surface-2, #f4f0e8);
   }
-  .menu a:focus-visible {
+  .menu a:focus-visible,
+  .menu button:focus-visible {
     outline: 2px solid var(--accent, #c2410c);
     outline-offset: -2px;
   }
