@@ -57,7 +57,11 @@
   /* Layout. The rail is fixed to the right edge below the header, so pages reserve
      its width and the header pins its own height for the rail to start under. */
   --rail-width: 13rem;
-  --nav-height: 3.75rem;
+  /* The header's full height including the top safe-area inset it carries as padding in
+     installed mode (zero in a browser). Everything that hangs off the header - sticky day
+     headings, the wide rail's top, the search panel - offsets by this token, so they all
+     follow. The header's inner pins its own 3.75rem base; see Base.astro. */
+  --nav-height: calc(3.75rem + env(safe-area-inset-top));
 
   /* Type and rhythm: display sizes, rhythm, and gutters flex with the window. */
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -570,7 +574,8 @@ svg[data-icon] {
 html[data-navigating]::before {
   content: '';
   position: fixed;
-  top: 0;
+  /* Below the status bar in installed mode; zero in a browser. */
+  top: env(safe-area-inset-top);
   left: 0;
   width: 30%;
   height: 2px;
