@@ -22,7 +22,13 @@
 
   import { navigate } from 'astro:transitions/client';
 
-  import { ask as askScout, chat, runWebSearch, stopStreaming } from '../lib/chat-state.svelte';
+  import {
+    ask as askScout,
+    chat,
+    clearConversation,
+    runWebSearch,
+    stopStreaming,
+  } from '../lib/chat-state.svelte';
   import type { KeywordCount } from '../lib/chat-types';
   import { commandHint, parseInput } from '../lib/commands';
   import { matchKeywords } from '../lib/keyword-match';
@@ -551,12 +557,20 @@
       </div>
 
       <p class="foot">
-        {#if hint}
-          {hint}
-        {:else if chat.asked}
-          Scout can make mistakes, double check responses.
-        {:else}
-          Try /web for a quick web search, or /ai to ask the model directly.
+        <span class="footnote">
+          {#if hint}
+            {hint}
+          {:else if chat.asked}
+            Scout can make mistakes, double check responses.
+          {:else}
+            Try /web for a quick web search, or /ai to ask the model directly.
+          {/if}
+        </span>
+        {#if chat.asked && chat.messages.length > 0 && !trimmed}
+          <!-- The transcript survives closing and reloading for a day, so forgetting it has
+               to be a button rather than an accident; it lives here so the thread starts
+               with the conversation, not a control. -->
+          <button type="button" class="clear" onclick={clearConversation}>Clear</button>
         {/if}
       </p>
     </div>
@@ -810,11 +824,32 @@
   }
 
   .foot {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
     margin: 0;
     padding: 0.5rem 1rem;
     border-top: 1px solid var(--line, #e6e1d5);
     color: var(--muted, #5d6570);
     font-size: 0.72rem;
+  }
+  .footnote {
+    flex: 1;
+    min-width: 0;
+  }
+  .clear {
+    flex-shrink: 0;
+    border: none;
+    background: none;
+    padding: 0.2rem 0.3rem;
+    color: var(--muted, #5d6570);
+    font: inherit;
+    cursor: pointer;
+    transition: color var(--dur-fast, 0.15s) var(--ease-out, ease);
+  }
+  .clear:hover {
+    color: var(--ink, #17191c);
+    text-decoration: underline;
   }
 
   @media (prefers-reduced-motion: reduce) {
