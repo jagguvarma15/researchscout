@@ -1,8 +1,13 @@
 <script lang="ts">
   // Light/dark switch. The pre-paint inline script in Base.astro has already set
-  // <html data-theme>; this island only flips the attribute and persists the choice.
+  // <html data-theme>; this island flips it through the shared applier (which also keeps
+  // the browser-chrome color in step) and follows the settings drawer's announcements, so
+  // the icon stays honest when the change comes from there - including a System choice
+  // this binary control cannot express, which it shows as whatever the OS resolved to.
 
   import { Moon, Sun } from 'lucide-svelte';
+
+  import { applyTheme } from '../lib/prefs';
 
   let theme = $state<'light' | 'dark'>('light');
 
@@ -10,10 +15,17 @@
     theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   });
 
+  $effect(() => {
+    const follow = (event: Event) => {
+      const resolved = (event as CustomEvent).detail?.resolved;
+      if (resolved === 'dark' || resolved === 'light') theme = resolved;
+    };
+    document.addEventListener('rs:themechange', follow);
+    return () => document.removeEventListener('rs:themechange', follow);
+  });
+
   function flip() {
-    theme = theme === 'dark' ? 'light' : 'dark';
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem('rs-theme', theme);
+    theme = applyTheme(theme === 'dark' ? 'light' : 'dark');
   }
 </script>
 
