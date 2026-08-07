@@ -19,6 +19,7 @@
     readPrefs,
     themeChoice,
     updatePrefs,
+    withViewTransition,
     writeFeedDefaultsCookie,
     type Accent,
     type Density,
@@ -95,26 +96,44 @@
     if (panel) trapFocus(panel, event);
   }
 
+  // Every setter puts ALL of its mutations inside the view-transition callback - Svelte
+  // flushes in a microtask, which the transition waits out before capturing the old
+  // state, so a mutation outside the wrap would land in the "old" snapshot and the pill
+  // morph would silently no-op. The page cross-fade and the pill glide are one snapshot.
   function setTheme(choice: ThemeChoice) {
-    theme = choice;
-    applyTheme(choice);
+    withViewTransition(() => {
+      theme = choice;
+      applyTheme(choice);
+    });
   }
 
   function setAccent(value: Accent | null) {
-    prefs = updatePrefs({ accent: value });
+    withViewTransition(() => {
+      prefs = updatePrefs({ accent: value });
+    });
   }
 
   function setFontSize(value: FontSize | null) {
-    prefs = updatePrefs({ fontSize: value });
+    withViewTransition(() => {
+      prefs = updatePrefs({ fontSize: value });
+    });
   }
 
   function setDensity(value: Density | null) {
-    prefs = updatePrefs({ density: value });
+    withViewTransition(() => {
+      prefs = updatePrefs({ density: value });
+    });
   }
 
   function setMotion(value: Motion | null) {
+    // Never animated: engaging stillness must not itself animate, and disengaging runs
+    // while the attribute still says reduced anyway.
     prefs = updatePrefs({ motion: value });
   }
+
+  // One name per group, carried by whichever button is on - that is what the browser
+  // morphs between the old and new snapshots. At most one .on per group by construction.
+  const seg = (on: boolean, name: string) => (on ? `view-transition-name: seg-${name}` : undefined);
 
   // Only departures from the stock radar are worth storing; an all-stock choice clears the
   // cookie, so the feed never claims defaults that change nothing.
@@ -127,25 +146,33 @@
   }
 
   function setFeedSort(value: FeedSort) {
-    feedSort = value;
-    syncFeedCookie();
+    withViewTransition(() => {
+      feedSort = value;
+      syncFeedCookie();
+    });
   }
 
   function setFeedDays(value: FeedDays) {
-    feedDays = value;
-    syncFeedCookie();
+    withViewTransition(() => {
+      feedDays = value;
+      syncFeedCookie();
+    });
   }
 
   function setFeedTopic(value: FeedTopic | '') {
-    feedTopic = value;
-    syncFeedCookie();
+    withViewTransition(() => {
+      feedTopic = value;
+      syncFeedCookie();
+    });
   }
 
   function clearFeedDefaults() {
-    feedSort = 'newest';
-    feedDays = '7';
-    feedTopic = '';
-    clearFeedDefaultsCookie();
+    withViewTransition(() => {
+      feedSort = 'newest';
+      feedDays = '7';
+      feedTopic = '';
+      clearFeedDefaultsCookie();
+    });
   }
 </script>
 
@@ -180,9 +207,9 @@
         <fieldset>
           <legend>Theme</legend>
           <div class="segmented" role="group" aria-label="Theme">
-            <button class:on={theme === 'light'} aria-pressed={theme === 'light'} onclick={() => setTheme('light')}>Light</button>
-            <button class:on={theme === 'dark'} aria-pressed={theme === 'dark'} onclick={() => setTheme('dark')}>Dark</button>
-            <button class:on={theme === 'system'} aria-pressed={theme === 'system'} onclick={() => setTheme('system')}>System</button>
+            <button class:on={theme === 'light'} aria-pressed={theme === 'light'} style={seg(theme === 'light', 'theme')} onclick={() => setTheme('light')}>Light</button>
+            <button class:on={theme === 'dark'} aria-pressed={theme === 'dark'} style={seg(theme === 'dark', 'theme')} onclick={() => setTheme('dark')}>Dark</button>
+            <button class:on={theme === 'system'} aria-pressed={theme === 'system'} style={seg(theme === 'system', 'theme')} onclick={() => setTheme('system')}>System</button>
           </div>
         </fieldset>
 
@@ -194,6 +221,7 @@
                 class="swatch"
                 class:on={(prefs.accent ?? null) === choice.value}
                 aria-pressed={(prefs.accent ?? null) === choice.value}
+                style={seg((prefs.accent ?? null) === choice.value, 'accent')}
                 onclick={() => setAccent(choice.value)}
               >
                 <span class="dot {choice.dot}" aria-hidden="true"></span>
@@ -206,17 +234,17 @@
         <fieldset>
           <legend>Text size</legend>
           <div class="segmented" role="group" aria-label="Text size">
-            <button class:on={prefs.fontSize === 'small'} aria-pressed={prefs.fontSize === 'small'} onclick={() => setFontSize('small')}>Small</button>
-            <button class:on={!prefs.fontSize} aria-pressed={!prefs.fontSize} onclick={() => setFontSize(null)}>Default</button>
-            <button class:on={prefs.fontSize === 'large'} aria-pressed={prefs.fontSize === 'large'} onclick={() => setFontSize('large')}>Large</button>
+            <button class:on={prefs.fontSize === 'small'} aria-pressed={prefs.fontSize === 'small'} style={seg(prefs.fontSize === 'small', 'fontsize')} onclick={() => setFontSize('small')}>Small</button>
+            <button class:on={!prefs.fontSize} aria-pressed={!prefs.fontSize} style={seg(!prefs.fontSize, 'fontsize')} onclick={() => setFontSize(null)}>Default</button>
+            <button class:on={prefs.fontSize === 'large'} aria-pressed={prefs.fontSize === 'large'} style={seg(prefs.fontSize === 'large', 'fontsize')} onclick={() => setFontSize('large')}>Large</button>
           </div>
         </fieldset>
 
         <fieldset>
           <legend>Feed density</legend>
           <div class="segmented" role="group" aria-label="Feed density">
-            <button class:on={!prefs.density} aria-pressed={!prefs.density} onclick={() => setDensity(null)}>Comfortable</button>
-            <button class:on={prefs.density === 'compact'} aria-pressed={prefs.density === 'compact'} onclick={() => setDensity('compact')}>Compact</button>
+            <button class:on={!prefs.density} aria-pressed={!prefs.density} style={seg(!prefs.density, 'density')} onclick={() => setDensity(null)}>Comfortable</button>
+            <button class:on={prefs.density === 'compact'} aria-pressed={prefs.density === 'compact'} style={seg(prefs.density === 'compact', 'density')} onclick={() => setDensity('compact')}>Compact</button>
           </div>
           <p class="hint">Compact tightens the paper lists to fit more on screen.</p>
         </fieldset>
@@ -224,8 +252,8 @@
         <fieldset>
           <legend>Motion</legend>
           <div class="segmented" role="group" aria-label="Motion">
-            <button class:on={!prefs.motion} aria-pressed={!prefs.motion} onclick={() => setMotion(null)}>Follow system</button>
-            <button class:on={prefs.motion === 'reduced'} aria-pressed={prefs.motion === 'reduced'} onclick={() => setMotion('reduced')}>Reduced</button>
+            <button class:on={!prefs.motion} aria-pressed={!prefs.motion} style={seg(!prefs.motion, 'motion')} onclick={() => setMotion(null)}>Follow system</button>
+            <button class:on={prefs.motion === 'reduced'} aria-pressed={prefs.motion === 'reduced'} style={seg(prefs.motion === 'reduced', 'motion')} onclick={() => setMotion('reduced')}>Reduced</button>
           </div>
           <p class="hint">Reduced stills the site's animations without touching your OS setting.</p>
         </fieldset>
@@ -235,29 +263,30 @@
           <div class="sub">
             <span class="sublabel">Sort</span>
             <div class="segmented" role="group" aria-label="Default sort">
-              <button class:on={feedSort === 'newest'} aria-pressed={feedSort === 'newest'} onclick={() => setFeedSort('newest')}>Newest</button>
-              <button class:on={feedSort === 'citations'} aria-pressed={feedSort === 'citations'} onclick={() => setFeedSort('citations')}>Most cited</button>
-              <button class:on={feedSort === 'activity'} aria-pressed={feedSort === 'activity'} onclick={() => setFeedSort('activity')}>Most active</button>
+              <button class:on={feedSort === 'newest'} aria-pressed={feedSort === 'newest'} style={seg(feedSort === 'newest', 'sort')} onclick={() => setFeedSort('newest')}>Newest</button>
+              <button class:on={feedSort === 'citations'} aria-pressed={feedSort === 'citations'} style={seg(feedSort === 'citations', 'sort')} onclick={() => setFeedSort('citations')}>Most cited</button>
+              <button class:on={feedSort === 'activity'} aria-pressed={feedSort === 'activity'} style={seg(feedSort === 'activity', 'sort')} onclick={() => setFeedSort('activity')}>Most active</button>
             </div>
           </div>
           <div class="sub">
             <span class="sublabel">Window</span>
             <div class="segmented" role="group" aria-label="Default time window">
-              <button class:on={feedDays === '7'} aria-pressed={feedDays === '7'} onclick={() => setFeedDays('7')}>7 days</button>
-              <button class:on={feedDays === '14'} aria-pressed={feedDays === '14'} onclick={() => setFeedDays('14')}>14</button>
-              <button class:on={feedDays === '30'} aria-pressed={feedDays === '30'} onclick={() => setFeedDays('30')}>30</button>
-              <button class:on={feedDays === 'all'} aria-pressed={feedDays === 'all'} onclick={() => setFeedDays('all')}>All time</button>
+              <button class:on={feedDays === '7'} aria-pressed={feedDays === '7'} style={seg(feedDays === '7', 'days')} onclick={() => setFeedDays('7')}>7 days</button>
+              <button class:on={feedDays === '14'} aria-pressed={feedDays === '14'} style={seg(feedDays === '14', 'days')} onclick={() => setFeedDays('14')}>14</button>
+              <button class:on={feedDays === '30'} aria-pressed={feedDays === '30'} style={seg(feedDays === '30', 'days')} onclick={() => setFeedDays('30')}>30</button>
+              <button class:on={feedDays === 'all'} aria-pressed={feedDays === 'all'} style={seg(feedDays === 'all', 'days')} onclick={() => setFeedDays('all')}>All time</button>
             </div>
           </div>
           <div class="sub">
             <span class="sublabel">Technique</span>
             <div class="segmented" role="group" aria-label="Default technique">
-              <button class:on={feedTopic === ''} aria-pressed={feedTopic === ''} onclick={() => setFeedTopic('')}>Any</button>
+              <button class:on={feedTopic === ''} aria-pressed={feedTopic === ''} style={seg(feedTopic === '', 'topic')} onclick={() => setFeedTopic('')}>Any</button>
               {#each TOPICS as option}
                 <button
                   class:on={feedTopic === option.key}
                   aria-pressed={feedTopic === option.key}
                   title={option.label}
+                  style={seg(feedTopic === option.key, 'topic')}
                   onclick={() => setFeedTopic(option.key as 'nlp' | 'cv' | 'rl')}
                 >
                   {option.short}
@@ -391,6 +420,10 @@
     background: var(--accent-soft, #fef3c7);
     color: var(--accent-ink, #78350f);
     font-weight: 600;
+    /* Its own radius, not just the group's clipping: the morph snapshots ignore ancestor
+       clipping, so without this the pill shows squared corners mid-flight at the group's
+       ends. */
+    border-radius: var(--radius-full, 999px);
   }
   .swatches {
     display: flex;
