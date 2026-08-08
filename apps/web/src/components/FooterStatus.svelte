@@ -1,8 +1,10 @@
 <script lang="ts">
   // "Newest paper N hours old" in the footer - the freshness fact the deployment outage
-  // taught us to want on the page rather than only in a log. Best-effort: fetched lazily
-  // through the proxy, and any failure renders nothing rather than an error.
+  // taught us to want on the page rather than only in a log. Best-effort, but never mute:
+  // a failure renders a muted "unavailable" line, because an absent fact and an
+  // unreachable API should not look identical.
   let line = $state('');
+  let failed = $state(false);
 
   function describe(newest: string): string {
     const hours = (Date.now() - new Date(newest).getTime()) / 3_600_000;
@@ -19,11 +21,16 @@
   $effect(() => {
     let cancelled = false;
     fetch('/api/system/status')
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (!res.ok) throw new Error(String(res.status));
+        return res.json();
+      })
       .then((status) => {
         if (!cancelled && status?.newest_paper_at) line = describe(status.newest_paper_at);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) failed = true;
+      });
     return () => {
       cancelled = true;
     };
@@ -31,7 +38,9 @@
 </script>
 
 {#if line}
-  <p class="freshness">{line}</p>
+  <p class="freshness" role="status">{line}</p>
+{:else if failed}
+  <p class="freshness" role="status">Freshness unknown - the status endpoint is unreachable.</p>
 {/if}
 
 <style>
