@@ -100,7 +100,7 @@
     font-weight: 500;
     padding: 0.35rem 0.85rem;
     cursor: pointer;
-    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
+    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .ghost:hover:not(:disabled) {
     background: var(--surface-2, #f4f0e8);
