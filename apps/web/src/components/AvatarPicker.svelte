@@ -88,8 +88,8 @@
     color: var(--ink, #17191c);
     cursor: pointer;
     transition:
-      border-color var(--dur-fast, 0.15s) var(--ease-out, ease),
-      background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
+      border-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+      background-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .pick:hover:not(:disabled) {
     border-color: var(--line-strong, #d1d6dc);
