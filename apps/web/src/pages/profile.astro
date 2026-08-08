@@ -2,6 +2,7 @@
 import AccountSettings from '../components/AccountSettings.svelte';
 import AvatarArt from '../components/AvatarArt.svelte';
 import AvatarPicker from '../components/AvatarPicker.svelte';
+import EmptyState from '../components/EmptyState.astro';
 import InterestsEditor from '../components/InterestsEditor.svelte';
 import Base from '../layouts/Base.astro';
 import { fetchAccount, fetchInterests } from '../lib/api';
@@ -27,8 +28,10 @@ const initials =
     .toUpperCase() || '?';
 ---
 
-<Base title="Profile">
-  <div class="profile">
+{/* The account fetched here doubles as the shell's: passing it down is what keeps this the
+    one page that does not ask the API for the account twice per request. */}
+<Base title="Profile" account={account}>
+  <div class="prose-page profile">
     <header class="hero">
       <h1 class="page-title">Profile</h1>
       {
@@ -56,28 +59,46 @@ const initials =
     {
       user !== null && (
         <>
-          <section class="panel">
+          <section class="block panel">
             <h2>Research interests</h2>
             <p class="blurb">
               Topics you care about - up to 20, each a short phrase. Changes save as you go.
             </p>
             <div class="panel-body">
-              <InterestsEditor client:load initial={interests} />
+              {interests === null ? (
+                <EmptyState
+                  kind="error"
+                  icon="lucide:cloud-off"
+                  message="Your interests could not be loaded - the API did not answer."
+                  action={{ href: '/profile', label: 'Retry' }}
+                />
+              ) : (
+                <InterestsEditor client:load initial={interests} />
+              )}
             </div>
           </section>
 
-          <section class="panel">
+          <section class="block panel">
             <h2>Avatar</h2>
             <p class="blurb">
               Pick the crew member the site shows for you - in the header here, nowhere
               else. Choices save as you click.
             </p>
             <div class="panel-body">
-              <AvatarPicker client:load current={account?.avatar ?? null} initials={initials} />
+              {account === null ? (
+                <EmptyState
+                  kind="error"
+                  icon="lucide:cloud-off"
+                  message="Your account could not be loaded - the API did not answer."
+                  action={{ href: '/profile', label: 'Retry' }}
+                />
+              ) : (
+                <AvatarPicker client:load current={account.avatar} initials={initials} />
+              )}
             </div>
           </section>
 
-          <section class="panel">
+          <section class="block panel">
             <h2>Account</h2>
             <p class="blurb">
               Your display name, a copy of everything stored about you, and the way out. Your
@@ -86,12 +107,21 @@ const initials =
               notice</a>.
             </p>
             <div class="panel-body">
-              <AccountSettings
-                client:load
-                displayName={account?.display_name ?? ''}
-                termsVersion={account?.terms_accepted_version ?? null}
-                canDelete={canDelete}
-              />
+              {account === null ? (
+                <EmptyState
+                  kind="error"
+                  icon="lucide:cloud-off"
+                  message="Your account could not be loaded - the API did not answer."
+                  action={{ href: '/profile', label: 'Retry' }}
+                />
+              ) : (
+                <AccountSettings
+                  client:load
+                  displayName={account.display_name ?? ''}
+                  termsVersion={account.terms_accepted_version}
+                  canDelete={canDelete}
+                />
+              )}
             </div>
           </section>
         </>
@@ -101,17 +131,14 @@ const initials =
 </Base>
 
 <style>
-  /* Centered column, like the about and legal pages: headings and prose center, the controls
-     sit in a comfortable measure rather than stretching across the window. */
+  /* The shared document column, one size narrower: controls in a comfortable measure
+     rather than stretched across the window. */
   .profile {
     max-width: 46rem;
-    margin: 0 auto;
   }
-  .hero {
-    text-align: center;
-    margin-bottom: var(--space-6);
-  }
-  .hero .page-title {
+  /* One element type deeper than the .prose-page rules they override, so they win on
+     specificity rather than on bundle order. */
+  .profile header.hero .page-title {
     margin-bottom: 0.5rem;
   }
   .hero-owl {
@@ -131,16 +158,12 @@ const initials =
   .email {
     margin-left: 0.5rem;
   }
+  /* On top of the shared .block: the profile's sections center their prose. */
   .panel {
-    margin-bottom: var(--space-6);
-    padding-top: var(--space-5);
-    border-top: 1px solid var(--line);
     text-align: center;
   }
-  .panel h2 {
-    font-size: var(--text-lg);
-    letter-spacing: -0.01em;
-    margin: 0 0 0.35rem;
+  .profile section.panel h2 {
+    margin-bottom: 0.35rem;
   }
   .blurb {
     max-width: 62ch;
