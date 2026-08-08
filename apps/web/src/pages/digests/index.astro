@@ -1,40 +1,40 @@
 ---
 import { Icon } from 'astro-icon/components';
+import EmptyState from '../../components/EmptyState.astro';
+import PageIntro from '../../components/PageIntro.astro';
 import Base from '../../layouts/Base.astro';
-import { fetchDigests, formatDate } from '../../lib/api';
+import { catalogMessage, fetchDigests, formatDate } from '../../lib/api';
 import { morphName } from '../../lib/morph';
 
-const digests = await fetchDigests();
+const result = await fetchDigests();
 ---
 
 <Base title="Digests">
-  <h1 class="page-title">Digests</h1>
+  <PageIntro title="Digests" />
 
   {
-    digests === null && (
-      <div class="card empty is-error">
-        <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>The API is unreachable — try again in a moment.</p>
-      </div>
-    )
-  }
-  {
-    digests !== null && digests.length === 0 && (
-      <div class="card empty">
-        <Icon name="lucide:hourglass" aria-hidden="true" />
-        <p>No digests published yet — the first one lands after the next scheduled sweep.</p>
-      </div>
-    )
-  }
-
-  {
-    digests !== null && (
+    !result.ok ? (
+      <EmptyState
+        kind="error"
+        icon="lucide:cloud-off"
+        message={catalogMessage(result.failure, 'digests')}
+        action={{ href: '/digests', label: 'Retry' }}
+      />
+    ) : result.data.length === 0 ? (
+      <EmptyState
+        icon="lucide:hourglass"
+        message="No digests published yet."
+        hint="The first one lands after the next scheduled sweep."
+      />
+    ) : (
       <ul class="list">
-        {digests.map((digest) => (
+        {result.data.map((digest) => (
           <li>
             <a class="entry" href={`/digests/${digest.slug}`}>
               <span class="text">
-                <span class="title" transition:name={morphName('digest', digest.slug)}>{digest.title}</span>
+                <span class="title" transition:name={morphName('digest', digest.slug)}>
+                  {digest.title}
+                </span>
                 <span class="meta">
                   {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
                 </span>
@@ -74,6 +74,7 @@ const digests = await fetchDigests();
   .title {
     font-weight: 600;
     line-height: 1.4;
+    transition: color var(--dur-fast) var(--ease-out);
   }
   .entry:hover .title {
     color: var(--accent);
