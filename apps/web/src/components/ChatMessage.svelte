@@ -62,7 +62,9 @@
 <div class="msg {message.role}" class:error={message.error}>
   {#if status}
     <p class="status" role="status">
-      {status}<span class="dots" aria-hidden="true"
+      <!-- Keyed so each phase label arrives with a small fade instead of snapping; the
+           dots stay outside the key and never restart. -->
+      {#key status}<span class="phase">{status}</span>{/key}<span class="dots" aria-hidden="true"
         ><span>.</span><span>.</span><span>.</span></span
       >
     </p>
@@ -71,8 +73,10 @@
       <p class="lead">
         Found {message.results.length} matching paper{message.results.length === 1 ? '' : 's'}.
       </p>
-      {#each message.results as result}
-        <div class="card">
+      {#each message.results as result, index}
+        <!-- The whole block mounts at once; the capped per-card delay turns that into a
+             short cascade. -->
+        <div class="card" style="--i: {Math.min(index, 5)}">
           <div class="cardhead">
             <a class="cardtitle" href={`/papers/${result.id}`}>{result.title}</a>
             {#if result.relevance !== null}
@@ -172,7 +176,7 @@
     flex-direction: column;
     gap: 0.4rem;
     min-width: 0;
-    animation: msg-in 0.18s ease-out;
+    animation: msg-in var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
   @keyframes msg-in {
     from {
@@ -182,6 +186,17 @@
     to {
       opacity: 1;
       transform: translateY(0);
+    }
+  }
+  /* An inline box cannot be transformed; the phase label needs one for its entrance. */
+  .phase {
+    display: inline-block;
+    animation: phase-in var(--dur-fast, 0.15s) var(--ease-out, ease);
+  }
+  @keyframes phase-in {
+    from {
+      opacity: 0;
+      transform: translateY(2px);
     }
   }
   .bubble {
@@ -227,6 +242,10 @@
     line-height: 1.65;
     color: var(--ink, #17191c);
     overflow-wrap: anywhere;
+    /* The streamed paragraph and this formatted block are different nodes; the fade turns
+       the swap at completion into a settle instead of a flicker. Mounts once per answer -
+       later renders reuse the node. */
+    animation: msg-in var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
   .prose :global(p) {
     margin: 0 0 0.75em;
@@ -292,6 +311,11 @@
     border-radius: var(--radius-sm, 10px);
     padding: 0.65rem 0.8rem;
     background: var(--surface, #fff);
+    /* The both fill hides a card until its capped delay elapses, which is what turns the
+       block mount into a cascade. Delayed fill-both needs the explicit reduced-motion
+       opt-outs below - the universal guard shortens durations but leaves delays alone. */
+    animation: msg-in var(--dur-fast, 0.15s) var(--ease-out, ease) both;
+    animation-delay: calc(var(--i, 0) * 40ms);
   }
   /* Title and match share one row; the badge cannot wander under the date the way the
      old auto-margin pill did on a wrapped meta row. */
@@ -447,9 +471,17 @@
   @media (prefers-reduced-motion: reduce) {
     .msg,
     .cursor,
-    .dots span {
+    .dots span,
+    .phase,
+    .card,
+    .prose {
       animation: none;
     }
+  }
+  /* The site switch needs the card called out by name: its delayed both fill would
+     otherwise blank each card for the length of its delay. */
+  :global(html[data-motion='reduced']) .card {
+    animation: none;
   }
   /* The app-wide phone tier, not the stray 480px the old layout used. */
   @media (max-width: 40rem) {
