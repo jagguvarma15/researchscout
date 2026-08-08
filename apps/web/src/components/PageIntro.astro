@@ -1,0 +1,17 @@
+---
+// The standard page opening: one h1 and an optional muted intro, wrapping the global
+// .page-title / .lede classes. Having one component render it is what guarantees every
+// page opens with exactly one heading that names it. An intro that needs markup (a link
+// in the sentence) comes through the slot as the page's own p.lede instead.
+
+interface Props {
+  title: string;
+  lede?: string;
+}
+
+const { title, lede } = Astro.props;
+---
+
+<h1 class="page-title">{title}</h1>
+{lede && <p class="lede">{lede}</p>}
+<slot />
