@@ -988,7 +988,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    z-index: 50;
+    z-index: var(--z-reader, 50);
     background: var(--bg, #faf7f1);
   }
   .overlay.minimized {
@@ -1008,8 +1008,8 @@
     border: 1px solid var(--line, #e6e1d5);
     border-radius: var(--radius-full, 999px);
     background: var(--surface, #fff);
-    box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
-    transition: opacity var(--dur-slow, 0.25s) var(--ease-out, ease);
+    box-shadow: var(--shadow-lg, 0 2px 4px rgb(23 25 28 / 0.06), 0 16px 48px rgb(23 25 28 / 0.16));
+    transition: opacity var(--dur-slow, 0.25s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .chrome.top {
     top: 0.75rem;
@@ -1149,7 +1149,7 @@
     left: 50%;
     transform: translateX(-50%);
     background: #fff;
-    box-shadow: var(--shadow-md, 0 12px 32px rgb(23 25 28 / 0.12));
+    box-shadow: var(--shadow-md, 0 4px 12px rgb(23 25 28 / 0.08), 0 12px 32px rgb(23 25 28 / 0.1));
   }
   .pdfpage canvas {
     display: block;
@@ -1192,7 +1192,7 @@
     border: 2px solid var(--surface, #fff);
     border-radius: 999px;
     background: var(--accent, #c2410c);
-    box-shadow: var(--shadow-sm, 0 1px 3px rgb(23 25 28 / 0.3));
+    box-shadow: var(--shadow-sm, 0 1px 2px rgb(23 25 28 / 0.04));
     cursor: grab;
     touch-action: none;
   }
@@ -1238,7 +1238,7 @@
     color: var(--muted, #5d6570);
     cursor: pointer;
     opacity: 0;
-    transition: opacity var(--dur-fast, 0.15s) var(--ease-out, ease);
+    transition: opacity var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .edge.left {
     left: 0;
@@ -1261,7 +1261,7 @@
     padding: 0.35rem;
     border-radius: 999px;
     background: var(--surface, #fff);
-    box-shadow: var(--shadow-md, 0 12px 32px rgb(23 25 28 / 0.12));
+    box-shadow: var(--shadow-md, 0 4px 12px rgb(23 25 28 / 0.08), 0 12px 32px rgb(23 25 28 / 0.1));
   }
 
   .dock {
@@ -1276,7 +1276,7 @@
     color: var(--ink, #17191c);
     font: inherit;
     font-size: 0.82rem;
-    box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
+    box-shadow: var(--shadow-lg, 0 2px 4px rgb(23 25 28 / 0.06), 0 16px 48px rgb(23 25 28 / 0.16));
     cursor: pointer;
   }
   .dock-title {
@@ -1302,7 +1302,7 @@
     border: 1px solid var(--line, #e6e1d5);
     border-radius: var(--radius-full, 999px);
     background: var(--surface, #fff);
-    box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
+    box-shadow: var(--shadow-lg, 0 2px 4px rgb(23 25 28 / 0.06), 0 16px 48px rgb(23 25 28 / 0.16));
     transform: translate(-50%, -130%);
   }
   .swatch {
@@ -1347,7 +1347,7 @@
     border: 1px solid var(--line, #e6e1d5);
     border-radius: var(--radius-md, 14px);
     background: var(--surface, #fff);
-    box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
+    box-shadow: var(--shadow-lg, 0 2px 4px rgb(23 25 28 / 0.06), 0 16px 48px rgb(23 25 28 / 0.16));
   }
   .list h2 {
     margin: 0 0 0.6rem;
