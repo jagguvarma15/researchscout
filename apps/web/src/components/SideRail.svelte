@@ -119,7 +119,7 @@
 <svelte:window onkeydown={onWindowKeydown} />
 
 <!-- Backdrop belongs to the narrow case only; CSS keeps it out of the way above 64rem. -->
-<div class="backdrop" class:open role="presentation" onclick={hide}></div>
+<div class="backdrop backdrop-veil" class:open role="presentation" onclick={hide}></div>
 
 <nav
   class="rail"
@@ -131,9 +131,12 @@
   <button class="close" onclick={hide} aria-label="Close the menu">
     <X size={18} aria-hidden="true" />
   </button>
-  <ul>
-    {#each SECTIONS as section}
-      <li class="section-title" role="presentation">{section.title}</li>
+  <!-- One list per section, its title outside as plain text: a title inside the ul (even
+       as a presentation-role li) breaks the list's semantics, which is how a screen
+       reader miscounts the items. -->
+  {#each SECTIONS as section, sectionIndex}
+    <p class="section-title">{section.title}</p>
+    <ul>
       {#each section.items as item}
         <li>
           <a
@@ -150,17 +153,20 @@
           </a>
         </li>
       {/each}
-    {/each}
-    <li>
-      <!-- A control among destinations, so it rides at the end of Library. The settings
-           drawer's document-level delegate reads the attribute off the bubbled click; the
-           narrow panel closes itself first (hide is a no-op when it is the wide rail). -->
-      <button class="btn btn-nav settings" type="button" data-open-settings onclick={hide}>
-        <Settings2 size={16} aria-hidden="true" />
-        <span>Settings</span>
-      </button>
-    </li>
-  </ul>
+      {#if sectionIndex === SECTIONS.length - 1}
+        <li>
+          <!-- A control among destinations, so it rides at the end of Library. The settings
+               drawer's document-level delegate reads the attribute off the bubbled click;
+               the narrow panel closes itself first (hide is a no-op when it is the wide
+               rail). -->
+          <button class="btn btn-nav settings" type="button" data-open-settings onclick={hide}>
+            <Settings2 size={16} aria-hidden="true" />
+            <span>Settings</span>
+          </button>
+        </li>
+      {/if}
+    </ul>
+  {/each}
   {#if showSignIn}
     <!-- Narrow widths only (CSS): in the drawer the header has no room for the button, so
          the account entry lives here; the wide rail never duplicates the header's. -->
@@ -173,11 +179,11 @@
 <style>
   .rail {
     position: fixed;
-    top: var(--nav-height, 3.75rem);
+    top: var(--nav-height, calc(3.75rem + env(safe-area-inset-top)));
     right: 0;
     bottom: 0;
     /* Under the header, which floats the omnibox panel out of its own stacking context. */
-    z-index: 12;
+    z-index: var(--z-rail, 12);
     width: var(--rail-width, 13rem);
     padding: var(--space-5, 1.25rem) 0.75rem;
     border-left: 1px solid var(--line, #e6e1d5);
@@ -196,7 +202,7 @@
   /* Small, quiet and set in from the links it heads, so the eye reads the destinations first
      and the grouping only when it is looking for one. */
   .section-title {
-    margin-top: 1.1rem;
+    margin: 1.1rem 0 0;
     padding: 0 0.7rem 0.3rem;
     color: var(--muted, #5d6570);
     font-size: 0.7rem;
@@ -204,7 +210,7 @@
     letter-spacing: 0.07em;
     text-transform: uppercase;
   }
-  .section-title:first-child {
+  .section-title:first-of-type {
     margin-top: 0;
   }
   /* Full width and left-aligned: these are destinations in a list, not buttons in a row.
@@ -246,12 +252,12 @@
       border-left: none;
       /* Above the filter sidebar (35), which can already be open on the feed when the
          menu is reached; the last surface opened should be the one on top. */
-      z-index: 38;
+      z-index: var(--z-drawer, 38);
       width: min(17rem, 82vw);
       /* The top inset is live in installed mode, where top: 0 is under the status bar. */
       padding-top: calc(1rem + env(safe-area-inset-top));
       background: var(--surface, #fff);
-      box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
+      box-shadow: var(--shadow-lg, 0 2px 4px rgb(23 25 28 / 0.06), 0 16px 48px rgb(23 25 28 / 0.16));
       display: flex;
       flex-direction: column;
       /* Hidden rather than merely off-screen: this is what keeps the closed panel out of
@@ -259,7 +265,7 @@
       visibility: hidden;
       transform: translateX(100%);
       transition:
-        transform var(--dur-slow, 0.25s) var(--ease-out, ease),
+        transform var(--dur-slow, 0.25s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
         visibility var(--dur-slow, 0.25s);
     }
     .rail.open {
@@ -287,26 +293,21 @@
       display: block;
       position: fixed;
       inset: 0;
-      z-index: 37;
-      /* A bg-tinted veil (TermsGate's recipe), not a translucent black: the blur can drop
-         a frame while the drawer animates beside it - iOS and headless captures both show
-         it - and when that happens a black scrim reads as raw transparency over the page.
-         This stays a surface even without the blur; the blur remains the enhancement. */
-      background: color-mix(in srgb, var(--bg, #faf7f1) 72%, transparent);
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
+      z-index: var(--z-rail-backdrop, 37);
+      /* The veil look itself comes from the shared .backdrop-veil class. */
       opacity: 0;
       visibility: hidden;
       transition:
-        opacity var(--dur-slow, 0.25s) var(--ease-out, ease),
+        opacity var(--dur-slow, 0.25s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
         visibility var(--dur-slow, 0.25s);
     }
     .backdrop.open {
       opacity: 1;
       visibility: visible;
     }
-    /* Neither flex child may compress: the rail itself scrolls when they outgrow it. */
+    /* No flex child may compress: the rail itself scrolls when they outgrow it. */
     .rail ul,
+    .section-title,
     .account {
       flex-shrink: 0;
     }
