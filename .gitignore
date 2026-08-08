@@ -32,3 +32,6 @@ config/eval_queries.yaml
 # macOS
 .DS_Store
 .smoke/
+
+# Riptide artifacts (cloud-synced)
+.humanlayer/tasks/
