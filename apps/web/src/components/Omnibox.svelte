@@ -548,7 +548,11 @@
         {/if}
 
         {#if !trimmed && chat.asked}
-          <ScoutPanel onactivity={followLatest} />
+          <!-- The wrapper exists so the mode fade animates one element, not every message
+               in the thread. -->
+          <div class="mode">
+            <ScoutPanel onactivity={followLatest} />
+          </div>
         {:else if !trimmed && !chat.asked}
           <div class="welcome">
             <ScoutMascot size={48} />
@@ -732,9 +736,27 @@
     font-size: 0.9rem;
     text-align: left;
     cursor: pointer;
+    /* The highlight follows the pointer and the arrow keys; easing it makes the handoff
+       between rows read as one moving light. */
+    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
   }
   .entries li.active {
     background: var(--surface-2, #f4f0e8);
+  }
+  /* The body shows one thing at a time (list, thread, welcome, skeletons, empty note);
+     each arrives with a short fade instead of a pop. Mount-only: keystrokes inside a mode
+     never re-fire it, branch swaps do. */
+  .entries,
+  .none,
+  .loading,
+  .welcome,
+  .mode {
+    animation: body-in var(--dur-fast, 0.15s) var(--ease-out, ease);
+  }
+  @keyframes body-in {
+    from {
+      opacity: 0;
+    }
   }
   .entries li[role='option'] :global(svg) {
     flex-shrink: 0;
@@ -854,8 +876,16 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .panel {
+    .panel,
+    .entries,
+    .none,
+    .loading,
+    .welcome,
+    .mode {
       animation: none;
+    }
+    .entries li[role='option'] {
+      transition: none;
     }
   }
   @media (max-width: 52rem) {
