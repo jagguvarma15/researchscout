@@ -32,7 +32,9 @@ export const ALL: APIRoute = async ({ clientAddress, locals, params, request, ur
     headers.set('x-rs-service-token', SERVICE_TOKEN);
     // Every request reaches the API from this server, so without this the rate limiter would
     // put every signed-out visitor in one bucket. The API believes it only because the token
-    // above proves where it came from.
+    // above proves where it came from - sent without one it is ignored by design (a header
+    // anyone can set is a fresh bucket for the asking; see api/ratelimit.py), so the nesting
+    // here mirrors the API's trust model rather than hiding a bug.
     if (clientAddress) headers.set('x-rs-client-ip', clientAddress);
   }
 
@@ -45,7 +47,13 @@ export const ALL: APIRoute = async ({ clientAddress, locals, params, request, ur
   } as RequestInit);
 
   const out = new Headers();
-  const contentType = response.headers.get('content-type');
-  if (contentType) out.set('content-type', contentType);
+  // content-type so bodies parse; retry-after because the chat's 429 copy tells the reader
+  // how long to wait and can only be honest if the number survives the proxy; the caching
+  // and buffering directives because the API set them for a reason (SSE streams die behind
+  // a proxy that buffers them).
+  for (const name of ['content-type', 'retry-after', 'cache-control', 'x-accel-buffering']) {
+    const value = response.headers.get(name);
+    if (value) out.set(name, value);
+  }
   return new Response(response.body, { status: response.status, headers: out });
 };
