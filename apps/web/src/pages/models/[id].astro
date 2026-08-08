@@ -1,7 +1,10 @@
 ---
 import { Icon } from 'astro-icon/components';
+import EmptyState from '../../components/EmptyState.astro';
+import PageIntro from '../../components/PageIntro.astro';
 import Base from '../../layouts/Base.astro';
 import { catalogMessage, fetchModel, fetchPaper, formatScore } from '../../lib/api';
+import { compact, exponent, weightsLabel } from '../../lib/format';
 import { morphName } from '../../lib/morph';
 
 // One model, which is where its scores and the paper it came from can both be shown. The table
@@ -17,42 +20,22 @@ const failure = result.ok ? null : result.failure;
 // than showing an opaque id.
 const paper = model?.paper_id ? await fetchPaper(model.paper_id) : null;
 
-if (failure?.status === 404) {
-  return Astro.redirect('/models', 302);
+// A missing model used to redirect to the catalogue, which tells the reader nothing about
+// what happened to the link they followed. Now the page says so, with the way back on it.
+const notFound = failure?.status === 404;
+if (notFound) {
+  Astro.response.status = 404;
 }
 
-/** 1.76e12 parameters reads as "1.76T"; a number that long reads as nothing. */
-function compact(value: number | null): string {
-  if (value === null) return 'unknown';
-  for (const [size, suffix] of [
-    [1e12, 'T'],
-    [1e9, 'B'],
-    [1e6, 'M'],
-    [1e3, 'K'],
-  ] as const) {
-    if (value >= size) return `${(value / size).toFixed(value / size < 10 ? 1 : 0)}${suffix}`;
-  }
-  return String(Math.round(value));
-}
-
-function compute(value: number | null): string {
-  if (value === null || value <= 0) return 'unknown';
-  return `1e${Math.round(Math.log10(value))} FLOP`;
-}
-
-function weights(value: boolean | null): string {
-  if (value === null) return 'unknown';
-  return value ? 'open' : 'closed';
-}
-
+const flop = model ? exponent(model.training_compute_flop) : '';
 const facts = model
   ? [
       { label: 'Organisation', value: model.organization ?? 'unknown' },
       { label: 'Released', value: model.publication_date ?? 'unknown' },
       { label: 'Field', value: model.domains.join(', ') || model.task || 'unknown' },
-      { label: 'Parameters', value: compact(model.parameters) },
-      { label: 'Training compute', value: compute(model.training_compute_flop) },
-      { label: 'Weights', value: weights(model.open_weights) },
+      { label: 'Parameters', value: compact(model.parameters, 'unknown') },
+      { label: 'Training compute', value: flop ? `${flop} FLOP` : 'unknown' },
+      { label: 'Weights', value: weightsLabel(model.open_weights) },
       { label: 'Accessibility', value: model.accessibility ?? 'unknown' },
     ]
   : [];
@@ -62,12 +45,26 @@ const facts = model
   <p class="back"><a href="/models">Back to every model</a></p>
 
   {
-    failure && (
-      <div class="card empty is-error">
-        <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>{catalogMessage(failure, 'models')}</p>
-      </div>
-    )
+    notFound ? (
+      <Fragment>
+        <PageIntro title="Model not found" />
+        <EmptyState
+          icon="lucide:box"
+          message={`Nothing in the catalogue under ${id}.`}
+          action={{ href: '/models', label: 'Back to every model' }}
+        />
+      </Fragment>
+    ) : failure ? (
+      <Fragment>
+        <PageIntro title="Model" />
+        <EmptyState
+          kind="error"
+          icon="lucide:cloud-off"
+          message={catalogMessage(failure, 'models')}
+          action={{ href: `/models/${encodeURIComponent(id ?? '')}`, label: 'Retry' }}
+        />
+      </Fragment>
+    ) : null
   }
 
   {
