@@ -1,5 +1,6 @@
 ---
-import { Icon } from 'astro-icon/components';
+import EmptyState from '../components/EmptyState.astro';
+import PageIntro from '../components/PageIntro.astro';
 import Base from '../layouts/Base.astro';
 import {
   catalogMessage,
@@ -44,30 +45,31 @@ function benchmarkLink(id: string): string {
 ---
 
 <Base title="Benchmarks">
-  <h1 class="page-title">Benchmarks</h1>
-  <p class="lede">
-    How the models on the <a href="/models">Models</a> page score on the tests the field actually
-    uses. Pick a benchmark to see its leaderboard; a model this catalogue knows links back to its
-    entry.
-  </p>
+  <PageIntro title="Benchmarks">
+    <p class="lede">
+      How the models on the <a href="/models">Models</a> page score on the tests the field
+      actually uses. Pick a benchmark to see its leaderboard; a model this catalogue knows links
+      back to its entry.
+    </p>
+  </PageIntro>
 
   {
     listFailure && (
-      <div class="card empty is-error">
-        <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>{catalogMessage(listFailure, 'benchmarks')}</p>
-      </div>
+      <EmptyState
+        kind="error"
+        icon="lucide:cloud-off"
+        message={catalogMessage(listFailure, 'benchmarks')}
+        action={{ href: Astro.url.pathname + Astro.url.search, label: 'Retry' }}
+      />
     )
   }
   {
     benchmarks !== null && benchmarks.length === 0 && (
-      <div class="card empty">
-        <Icon name="lucide:gauge" aria-hidden="true" />
-        <p>
-          No benchmarks yet — they arrive with the daily catalogue refresh, or run{' '}
-          <code>scout catalog</code>.
-        </p>
-      </div>
+      <EmptyState
+        icon="lucide:gauge"
+        message="No benchmarks yet."
+        hint="They arrive with the daily catalogue refresh, or run: scout catalog"
+      />
     )
   }
 
@@ -179,17 +181,19 @@ function benchmarkLink(id: string): string {
 
         <section class="board">
           {detail === null ? (
-            <div class:list={['card', 'empty', { 'is-error': detailFailure }]}>
-              <Icon
-                name={detailFailure ? 'lucide:cloud-off' : 'lucide:search-x'}
-                aria-hidden="true"
+            detailFailure ? (
+              <EmptyState
+                kind="error"
+                icon="lucide:cloud-off"
+                message={catalogMessage(detailFailure, 'benchmarks')}
+                action={{ href: benchmarkLink(current), label: 'Retry' }}
               />
-              <p>
-                {detailFailure
-                  ? catalogMessage(detailFailure, 'benchmarks')
-                  : 'That benchmark is not in the catalogue.'}
-              </p>
-            </div>
+            ) : (
+              <EmptyState
+                icon="lucide:search-x"
+                message="That benchmark is not in the catalogue."
+              />
+            )
           ) : (
             <Fragment>
               <header class="board-head">
@@ -375,6 +379,15 @@ function benchmarkLink(id: string): string {
     }
     .picker a[aria-current] {
       border-color: transparent;
+    }
+  }
+  /* Finger-sized picker chips on a phone - by then the picker is a wrapped chip row. */
+  @media (max-width: 40rem) {
+    .picker a {
+      padding: 0.5rem 0.8rem;
+    }
+    .picker ul {
+      max-height: 11rem;
     }
   }
   /* Scoped by table: the ordinals mean different columns in each. The leaderboard drops
