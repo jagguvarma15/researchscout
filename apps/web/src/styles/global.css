@@ -63,6 +63,25 @@
      follow. The header's inner pins its own 3.75rem base; see Base.astro. */
   --nav-height: calc(3.75rem + env(safe-area-inset-top));
 
+  /* Layering. One scale for every surface that competes at the document root, so the
+     stacking order reads in one place instead of twenty-one scattered integers: sticky
+     in-flow furniture first, the omnibox panel, the rail band and its drawer tier, the
+     header, then the stacked overlays in last-opened-wins order, and the navigation
+     progress bar over everything. Values are exactly the ones each component documented
+     individually; the comment at each consumer still explains what it must outrank. */
+  --z-sticky: 1;
+  --z-omnibox: 5;
+  --z-rail-anchor: 10;
+  --z-rail: 12;
+  --z-header: 20;
+  --z-filters: 35;
+  --z-rail-backdrop: 37;
+  --z-drawer: 38;
+  --z-settings: 39;
+  --z-reader: 50;
+  --z-notice: 60;
+  --z-nav: 200;
+
   /* Type and rhythm: display sizes, rhythm, and gutters flex with the window. */
   --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --text-xs: 0.75rem;
@@ -393,6 +412,42 @@ svg[data-icon] {
   font-variant-numeric: tabular-nums;
 }
 
+/* Shared shapes ------------------------------------------------------------- */
+
+/* The rounded chip outline that pages kept re-declaring locally. Shape only - no
+   colors - so a page composes it with its own tint and the look stays the page's. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.65rem;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* The small uppercase section label. One letter-spacing for all of them - the table
+   headers set the register and everything else follows it. */
+.micro-label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* The overlay veil: a bg-tinted surface, not a translucent black. The blur can drop a
+   frame while a sheet animates beside it - iOS and headless captures both show it - and
+   when that happens a black scrim reads as raw transparency over the page. The tint
+   stays a surface even without the blur; the blur is the enhancement. Position, level,
+   and layout stay with each overlay - this class is only the look. */
+.backdrop-veil {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
 /* Inputs ------------------------------------------------------------------- */
 
 .input {
@@ -466,6 +521,70 @@ svg[data-icon] {
   color: var(--danger-ink);
 }
 
+/* The document column ------------------------------------------------------- */
+
+/* The centered long-form page: the legal pair, the about page, the profile. One hero
+   opening, then rule-separated blocks whose text caps its own measure. The two legal
+   pages used to carry this block byte-identically; now they carry only their words. */
+
+.prose-page {
+  max-width: 58rem;
+  margin: 0 auto;
+}
+
+.prose-page .hero {
+  text-align: center;
+  margin-bottom: var(--space-6);
+}
+
+.prose-page .hero .page-title {
+  margin-bottom: 0.35rem;
+}
+
+.prose-page .hero .micro-label {
+  margin: 0 0 0.9rem;
+}
+
+.prose-page .hero .lede {
+  max-width: 60ch;
+  margin: 0 auto;
+  font-size: var(--text-md);
+  line-height: 1.6;
+}
+
+.prose-page .block {
+  margin-bottom: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--line);
+}
+
+.prose-page .block h2 {
+  margin: 0 0 0.9rem;
+  font-size: var(--text-lg);
+  letter-spacing: -0.01em;
+  text-align: center;
+}
+
+.prose-page .block p,
+.prose-page .block ul {
+  max-width: 62ch;
+  margin: 0 auto 0.8rem;
+  line-height: 1.65;
+}
+
+.prose-page .block ul {
+  padding-left: 1.2rem;
+}
+
+.prose-page .block li {
+  margin-bottom: 0.45rem;
+}
+
+.prose-page .block p:last-child,
+.prose-page .block ul:last-child {
+  margin-bottom: 0;
+}
+
 /* Dense tables ------------------------------------------------------------- */
 
 /* The models and benchmarks pages are the first things here that are genuinely tabular -
@@ -504,7 +623,7 @@ svg[data-icon] {
 .data-table thead th {
   position: sticky;
   top: 0;
-  z-index: 1;
+  z-index: var(--z-sticky);
   background: var(--surface-2);
   color: var(--muted);
   font-size: var(--text-xs);
@@ -666,7 +785,7 @@ html[data-navigating]::before {
   height: 2px;
   border-radius: var(--radius-full);
   background: var(--accent);
-  z-index: 200;
+  z-index: var(--z-nav);
   animation: nav-progress 1s var(--ease-out) infinite;
 }
 
