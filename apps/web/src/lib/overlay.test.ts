@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { clickedOutside, lockBodyScroll } from './overlay';
+import { clickedOutside, lockBodyScroll, trapFocus } from './overlay';
 
 describe('clickedOutside', () => {
   it('reports a click elsewhere as outside', () => {
@@ -84,5 +84,96 @@ describe('lockBodyScroll', () => {
     expect(document.body.style.overflow).toBe('hidden');
     second();
     expect(document.body.style.overflow).toBe('');
+  });
+});
+
+// The trap keys visibility on offsetParent, which jsdom always reports as null because it
+// computes no layout - so visibility is modelled explicitly here: a "visible" control gets
+// a stubbed offsetParent, a hidden one keeps jsdom's null, which is exactly the signal the
+// trap's filter reads.
+describe('trapFocus', () => {
+  function control(visible = true): HTMLButtonElement {
+    const el = document.createElement('button');
+    if (visible) {
+      Object.defineProperty(el, 'offsetParent', { get: () => document.body });
+    }
+    return el;
+  }
+
+  function mount(...nodes: HTMLElement[]): HTMLElement {
+    const container = document.createElement('div');
+    container.append(...nodes);
+    document.body.appendChild(container);
+    return container;
+  }
+
+  function tab(container: HTMLElement, shiftKey = false): KeyboardEvent {
+    const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, cancelable: true });
+    trapFocus(container, event);
+    return event;
+  }
+
+  it('wraps Tab from the last control back to the first', () => {
+    const first = control();
+    const last = control();
+    const container = mount(first, last);
+    last.focus();
+    const event = tab(container);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(first);
+    container.remove();
+  });
+
+  it('wraps Shift+Tab from the first control to the last', () => {
+    const first = control();
+    const last = control();
+    const container = mount(first, last);
+    first.focus();
+    const event = tab(container, true);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(last);
+    container.remove();
+  });
+
+  it('leaves a mid-list Tab to the browser', () => {
+    const first = control();
+    const middle = control();
+    const last = control();
+    const container = mount(first, middle, last);
+    middle.focus();
+    const event = tab(container);
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(middle);
+    container.remove();
+  });
+
+  it('skips hidden controls when picking the endpoints', () => {
+    const hiddenFirst = control(false);
+    const first = control();
+    const last = control();
+    const hiddenLast = control(false);
+    const container = mount(hiddenFirst, first, last, hiddenLast);
+    last.focus();
+    const event = tab(container);
+    expect(event.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(first); // not the hidden one before it
+    container.remove();
+  });
+
+  it('is a no-op in a container with nothing focusable', () => {
+    const container = mount();
+    const event = tab(container);
+    expect(event.defaultPrevented).toBe(false);
+    container.remove();
+  });
+
+  it('ignores every key but Tab', () => {
+    const only = control();
+    const container = mount(only);
+    only.focus();
+    const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+    trapFocus(container, event);
+    expect(event.defaultPrevented).toBe(false);
+    container.remove();
   });
 });
