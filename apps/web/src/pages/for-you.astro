@@ -1,48 +1,39 @@
 ---
-import { Icon } from 'astro-icon/components';
+import EmptyState from '../components/EmptyState.astro';
+import PageIntro from '../components/PageIntro.astro';
+import PaperRow from '../components/PaperRow.astro';
 import Base from '../layouts/Base.astro';
-import { fetchForYou } from '../lib/api';
-import { renderMathHTML } from '../lib/math';
+import { catalogMessage, fetchForYou } from '../lib/api';
 
-const items = await fetchForYou(Astro.locals.accessToken);
+const result = await fetchForYou(Astro.locals.accessToken);
 ---
 
 <Base title="For you">
-  <h1 class="page-title">For you</h1>
-  <p class="lede">Recent papers ranked by your research interests.</p>
+  <PageIntro title="For you" lede="Recent papers ranked by your research interests." />
 
   {
-    items === null && (
-      <div class="card empty is-error">
-        <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>The API is unreachable — try again in a moment.</p>
-      </div>
-    )
-  }
-  {
-    items !== null && items.length === 0 && (
-      <div class="card empty">
-        <Icon name="lucide:sparkles" aria-hidden="true" />
-        <p>
-          Add research interests in your <a href="/profile">profile</a> to see personalized picks.
-        </p>
-      </div>
-    )
-  }
-  {
-    items !== null && items.length > 0 && (
+    !result.ok ? (
+      <EmptyState
+        kind="error"
+        icon="lucide:cloud-off"
+        message={catalogMessage(result.failure, 'personalized feed')}
+        action={{ href: '/for-you', label: 'Retry' }}
+      />
+    ) : result.data.length === 0 ? (
+      <EmptyState
+        icon="lucide:sparkles"
+        message="No personalized picks yet."
+        hint="Add research interests to your profile and recent papers get ranked against them."
+        action={{ href: '/profile', label: 'Open your profile' }}
+      />
+    ) : (
       <ul class="feed">
-        {items.map((paper) => (
-          <li class="row">
-            <a class="title" href={`/papers/${paper.id}`} set:html={renderMathHTML(paper.title)} />
-            <p class="meta">
-              {paper.authors
-                .slice(0, 3)
-                .map((author) => author.name)
-                .join(', ')}
-            </p>
-            {paper.reason && <p class="reason">{paper.reason}</p>}
-          </li>
+        {result.data.map((paper) => (
+          <PaperRow paper={paper}>
+            <Fragment slot="extra">
+              {paper.reason && <span class="pill reason">{paper.reason}</span>}
+            </Fragment>
+          </PaperRow>
         ))}
       </ul>
     )
@@ -55,34 +46,10 @@ const items = await fetchForYou(Astro.locals.accessToken);
     margin: 0;
     padding: 0;
   }
-  .row {
-    padding: 1.1rem 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .row:last-child {
-    border-bottom: none;
-  }
-  .title {
-    font-weight: 600;
-    line-height: 1.4;
-    color: var(--ink);
-    text-decoration: none;
-  }
-  .title:hover {
-    color: var(--accent);
-  }
-  .meta {
-    color: var(--muted);
-    font-size: 0.85rem;
-    margin: 0.35rem 0 0;
-  }
+  /* Why this paper is here - the personalized feed's one extra fact, as an accent chip
+     on the shared pill shape. */
   .reason {
-    display: inline-block;
-    margin: 0.45rem 0 0;
-    padding: 0.1rem 0.6rem;
-    border-radius: var(--radius-full);
     background: var(--accent-soft);
     color: var(--accent-ink);
-    font-size: 0.78rem;
   }
 </style>
