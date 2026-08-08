@@ -1,5 +1,8 @@
 ---
 import { Icon } from 'astro-icon/components';
+import EmptyState from '../components/EmptyState.astro';
+import PageIntro from '../components/PageIntro.astro';
+import Pager from '../components/Pager.astro';
 import Base from '../layouts/Base.astro';
 import {
   catalogMessage,
@@ -9,7 +12,9 @@ import {
   MODEL_SORTS,
   type AiModel,
 } from '../lib/api';
+import { compact, exponent, weightsLabel } from '../lib/format';
 import { morphName } from '../lib/morph';
+import { pageLink } from '../lib/paging';
 
 const params = Astro.url.searchParams;
 const q = params.get('q') ?? '';
@@ -97,37 +102,6 @@ function withParam(name: string, value: string): string {
   return query ? `/models?${query}` : '/models';
 }
 
-function pageLink(target: number): string {
-  const next = new URLSearchParams(Astro.url.searchParams);
-  next.set('page', String(target));
-  return `/models?${next}`;
-}
-
-/** 1.76e12 parameters reads as "1.76T"; a number that long reads as nothing. */
-function compact(value: number | null): string {
-  if (value === null) return '';
-  for (const [size, suffix] of [
-    [1e12, 'T'],
-    [1e9, 'B'],
-    [1e6, 'M'],
-    [1e3, 'K'],
-  ] as const) {
-    if (value >= size) return `${(value / size).toFixed(value / size < 10 ? 1 : 0)}${suffix}`;
-  }
-  return String(Math.round(value));
-}
-
-/** Training compute spans twelve orders of magnitude, so it is shown as one. */
-function exponent(value: number | null): string {
-  if (value === null || value <= 0) return '';
-  return `1e${Math.round(Math.log10(value))}`;
-}
-
-function weights(model: AiModel): string {
-  if (model.open_weights === null) return 'unknown';
-  return model.open_weights ? 'open' : 'closed';
-}
-
 /** Epoch AI files a model under domains; the Hub knows only its task. Either will do. */
 function field(model: AiModel): string {
   return model.domains.join(', ') || model.task || '';
@@ -137,12 +111,10 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
 ---
 
 <Base title="Models">
-  <h1 class="page-title">AI models</h1>
-  <p class="lede">
-    Language, vision and multimodal models with the facts that let you compare them: who built
-    them, how large, on how much compute, and whether the weights are yours to run. Models whose
-    paper is in this corpus link straight to it.
-  </p>
+  <PageIntro
+    title="AI models"
+    lede="Language, vision and multimodal models with the facts that let you compare them: who built them, how large, on how much compute, and whether the weights are yours to run. Models whose paper is in this corpus link straight to it."
+  />
 
   {
     notable.length > 0 && (
@@ -229,22 +201,24 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
 
   {
     failure && (
-      <div class="card empty is-error">
-        <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>{catalogMessage(failure, 'models')}</p>
-      </div>
+      <EmptyState
+        kind="error"
+        icon="lucide:cloud-off"
+        message={catalogMessage(failure, 'models')}
+        action={{ href: Astro.url.pathname + Astro.url.search, label: 'Retry' }}
+      />
     )
   }
   {
     models !== null && models.length === 0 && (
-      <div class="card empty">
-        <Icon name="lucide:box" aria-hidden="true" />
-        <p>
-          {q || domain || organization || openWeights || withPaper
+      <EmptyState
+        icon="lucide:box"
+        message={
+          q || domain || organization || openWeights || withPaper
             ? 'No models match those filters - widen them.'
-            : 'The catalogue is empty. It fills on the daily refresh, or run scout catalog now.'}
-        </p>
-      </div>
+            : 'The catalogue is empty. It fills on the daily refresh, or run scout catalog now.'
+        }
+      />
     )
   }
 
@@ -309,7 +283,9 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
                     {exponent(model.training_compute_flop)}
                   </td>
                   <td>
-                    <span class:list={['badge', `w-${weights(model)}`]}>{weights(model)}</span>
+                    <span class:list={['badge', `w-${weightsLabel(model.open_weights)}`]}>
+                      {weightsLabel(model.open_weights)}
+                    </span>
                   </td>
                   <td class="cell-num cell-muted">
                     {model.hf_downloads === null ? '' : model.hf_downloads.toLocaleString('en-US')}
@@ -333,13 +309,12 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
 
   {
     models !== null && pageCount > 1 && (
-      <nav class="pager" aria-label="Pagination">
-        {page > 1 && <a href={pageLink(page - 1)}>Previous</a>}
-        <span>
-          Page {page} of {pageCount}
-        </span>
-        {page < pageCount && <a href={pageLink(page + 1)}>Next</a>}
-      </nav>
+      <Pager
+        variant="prevnext"
+        page={page}
+        pageCount={pageCount}
+        link={(target) => pageLink(Astro.url.searchParams, target, '/models')}
+      />
     )
   }
 
@@ -458,15 +433,6 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
     width: 0.95em;
     height: 0.95em;
   }
-  .pager {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-    margin-top: var(--space-5);
-    color: var(--muted);
-    font-size: var(--text-sm);
-  }
   .credit {
     margin-top: var(--space-5);
     color: var(--muted);
@@ -499,6 +465,20 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
     .catalog-table :global(td:nth-child(8)),
     .catalog-table :global(th:nth-child(8)) {
       display: none;
+    }
+  }
+  /* Finger-sized filters: the chip row and the search field are the page's controls,
+       and at phone width their hit areas grow the way the feed's chips do. */
+  @media (max-width: 40rem) {
+    .chip-toggle {
+      padding: 0.5rem 0.85rem;
+    }
+    .find {
+      padding: 0.5rem 0.8rem;
+    }
+    .find .clear {
+      padding: 0.4rem 0.3rem;
+      margin: -0.4rem 0;
     }
   }
   @media (max-width: 42rem) {
