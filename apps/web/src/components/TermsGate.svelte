@@ -50,7 +50,7 @@
 </script>
 
 {#if !done}
-  <div class="backdrop" role="presentation">
+  <div class="backdrop backdrop-veil" role="presentation">
     <div
       class="gate"
       role="dialog"
@@ -97,13 +97,10 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    z-index: 60;
+    z-index: var(--z-notice, 60);
     display: grid;
     place-items: center;
     padding: 1rem;
-    background: color-mix(in srgb, var(--bg) 70%, transparent);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
   }
   .gate {
     width: min(34rem, 100%);
