@@ -1,0 +1,44 @@
+---
+// The one empty-and-error card. Five pages used to carry verbatim copies of the same
+// "API is unreachable" markup and none of them offered a way forward; this wraps the
+// global .card.empty / .is-error classes and adds the optional action - the retry (or
+// the way back) that a dead end never had.
+import { Icon } from 'astro-icon/components';
+
+interface Props {
+  kind?: 'empty' | 'error';
+  icon: string;
+  message: string;
+  hint?: string;
+  action?: { href: string; label: string };
+}
+
+const { kind = 'empty', icon, message, hint, action } = Astro.props;
+---
+
+<div class:list={['card', 'empty', { 'is-error': kind === 'error' }]}>
+  <Icon name={icon} aria-hidden="true" />
+  <p>
+    {message}
+    {hint && <span class="hint">{hint}</span>}
+  </p>
+  {
+    action && (
+      <a class="btn btn-ghost action" href={action.href}>
+        {action.label}
+      </a>
+    )
+  }
+</div>
+
+<style>
+  .hint {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: var(--text-xs);
+  }
+  .action {
+    margin-left: auto;
+    white-space: nowrap;
+  }
+</style>
