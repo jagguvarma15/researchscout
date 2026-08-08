@@ -147,7 +147,7 @@
     gap: 0.15rem;
     padding: 0.2rem 0.3rem 0.2rem 0.75rem;
     border-radius: 999px;
-    background: var(--surface-2, #f5f7fa);
+    background: var(--surface-2, #f4f0e8);
     color: var(--ink, #17191c);
     font-size: 0.85rem;
   }
@@ -165,7 +165,7 @@
     transition: background-color 0.15s ease;
   }
   .remove:hover:not(:disabled) {
-    background: var(--line, #e6eaef);
+    background: var(--line, #e6e1d5);
     color: var(--ink, #17191c);
   }
   .remove:focus-visible {
@@ -186,7 +186,7 @@
     flex: 1;
     min-width: 0;
     padding: 0.5rem 0.8rem;
-    border: 1px solid var(--line, #e4e7eb);
+    border: 1px solid var(--line, #e6e1d5);
     border-radius: 10px;
     background: var(--surface, #fff);
     color: var(--ink, #17191c);
