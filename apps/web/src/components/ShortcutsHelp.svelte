@@ -83,7 +83,7 @@
 
 {#if open}
   <div
-    class="backdrop"
+    class="backdrop backdrop-veil"
     role="presentation"
     onclick={(event) => {
       if (event.target === event.currentTarget) hide();
@@ -126,15 +126,12 @@
     position: fixed;
     inset: 0;
     /* The notices' level: the last thing opened, above the drawers. */
-    z-index: 60;
+    z-index: var(--z-notice, 60);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: var(--gutter, 1.5rem);
-    background: color-mix(in srgb, var(--bg, #faf7f1) 72%, transparent);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    animation: shortcuts-fade var(--dur-fast, 0.15s) var(--ease-out, ease);
+    animation: shortcuts-fade var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .shortcuts-card {
     width: min(26rem, 100%);
@@ -143,8 +140,8 @@
     padding: var(--space-5, 1.25rem);
     border-radius: var(--radius-md, 14px);
     background: var(--surface, #fff);
-    box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
-    animation: shortcuts-in var(--dur-slow, 0.25s) var(--ease-out, ease);
+    box-shadow: var(--shadow-lg, 0 2px 4px rgb(23 25 28 / 0.06), 0 16px 48px rgb(23 25 28 / 0.16));
+    animation: shortcuts-in var(--dur-slow, 0.25s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   @keyframes shortcuts-fade {
     from {
