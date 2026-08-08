@@ -1,5 +1,7 @@
-// Server-side client for the ResearchScout API. Helpers return null on any failure so pages
-// can render a degraded state instead of a 500 when the API is down.
+// Server-side client for the ResearchScout API. The list and catalogue readers return a
+// CatalogResult so pages can tell an unreachable API from an HTTP error from an empty
+// shelf and say so; the remaining helpers return null on any failure, which reads as a
+// quietly degraded page rather than a 500 when the API is down.
 
 export interface Author {
   name: string;
@@ -67,7 +69,7 @@ export function apiHeaders(token?: string | null): Record<string, string> {
   return headers;
 }
 
-export async function fetchPapers(params: FeedParams): Promise<PaperPage | null> {
+export async function fetchPapers(params: FeedParams): Promise<CatalogResult<PaperPage>> {
   const search = new URLSearchParams({ limit: String(PAGE_SIZE) });
   if (params.q) search.set('q', params.q);
   if (params.days) search.set('days', params.days);
@@ -83,36 +85,22 @@ export async function fetchPapers(params: FeedParams): Promise<PaperPage | null>
   if (!params.q && params.page && params.page > 1) {
     search.set('offset', String((params.page - 1) * PAGE_SIZE));
   }
-  try {
-    const response = await fetch(`${API_URL}/v1/papers?${search}`, { headers: apiHeaders() });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { items: PaperSummary[]; total: number | null };
-    return { items: body.items, total: body.total };
-  } catch {
-    return null;
-  }
+  const result = await readCatalog<{ items: PaperSummary[]; total: number | null }>(
+    `/v1/papers?${search}`,
+  );
+  return result.ok
+    ? { ok: true, data: { items: result.data.items, total: result.data.total } }
+    : result;
 }
 
-export async function fetchSaved(token?: string | null): Promise<PaperSummary[] | null> {
-  try {
-    const response = await fetch(`${API_URL}/v1/me/saved`, { headers: apiHeaders(token) });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { items: PaperSummary[] };
-    return body.items;
-  } catch {
-    return null;
-  }
+export async function fetchSaved(token?: string | null): Promise<CatalogResult<PaperSummary[]>> {
+  const result = await readCatalog<{ items: PaperSummary[] }>('/v1/me/saved', token);
+  return result.ok ? { ok: true, data: result.data.items } : result;
 }
 
-export async function fetchForYou(token?: string | null): Promise<PaperSummary[] | null> {
-  try {
-    const response = await fetch(`${API_URL}/v1/me/feed`, { headers: apiHeaders(token) });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { items: PaperSummary[] };
-    return body.items;
-  } catch {
-    return null;
-  }
+export async function fetchForYou(token?: string | null): Promise<CatalogResult<PaperSummary[]>> {
+  const result = await readCatalog<{ items: PaperSummary[] }>('/v1/me/feed', token);
+  return result.ok ? { ok: true, data: result.data.items } : result;
 }
 
 export async function fetchInterests(token?: string | null): Promise<string[] | null> {
@@ -128,7 +116,11 @@ export async function fetchInterests(token?: string | null): Promise<string[] | 
 
 export async function fetchPaper(id: string): Promise<PaperSummary | null> {
   try {
-    const response = await fetch(`${API_URL}/v1/papers/${id}`, { headers: apiHeaders() });
+    // Encoded because canonical ids carry scheme separators and slashes as a matter of
+    // course - doi:10.1145/3576915 is a normal id, not an edge case.
+    const response = await fetch(`${API_URL}/v1/papers/${encodeURIComponent(id)}`, {
+      headers: apiHeaders(),
+    });
     if (!response.ok) return null;
     return (await response.json()) as PaperSummary;
   } catch {
@@ -272,11 +264,11 @@ export const MODEL_SORTS = [
 export type ModelSort = (typeof MODEL_SORTS)[number];
 
 /**
- * Why a catalogue read came back with nothing.
+ * Why a list or catalogue read came back with nothing.
  *
  * These helpers used to return null for every failure alike, so "the API is unreachable" was
  * what a page said whether the backend was down, older than the page, or simply had an empty
- * catalogue. Those want four different things done about them, and the status is what tells
+ * shelf. Those want four different things done about them, and the status is what tells
  * them apart. `status` is null when the request never reached the API at all.
  */
 export interface CatalogFailure {
@@ -285,7 +277,7 @@ export interface CatalogFailure {
 
 export type CatalogResult<T> = { ok: true; data: T } | { ok: false; failure: CatalogFailure };
 
-/** What to tell a reader about a failed catalogue read, and what it means for whoever runs it. */
+/** What to tell a reader about a failed read, and what it means for whoever runs it. */
 export function catalogMessage(failure: CatalogFailure, what: string): string {
   if (failure.status === null) return 'The API is unreachable - try again in a moment.';
   if (failure.status === 404) {
@@ -294,9 +286,9 @@ export function catalogMessage(failure: CatalogFailure, what: string): string {
   return `The ${what} endpoint answered ${failure.status}. The API log will say why.`;
 }
 
-async function readCatalog<T>(path: string): Promise<CatalogResult<T>> {
+async function readCatalog<T>(path: string, token?: string | null): Promise<CatalogResult<T>> {
   try {
-    const response = await fetch(`${API_URL}${path}`, { headers: apiHeaders() });
+    const response = await fetch(`${API_URL}${path}`, { headers: apiHeaders(token) });
     if (!response.ok) return { ok: false, failure: { status: response.status } };
     return { ok: true, data: (await response.json()) as T };
   } catch {
@@ -391,17 +383,6 @@ export async function fetchHeadlineBenchmarks(): Promise<CatalogResult<HeadlineB
 
 // --- Per-account site state (signed in only; a cache, so failures cost a suggestion) ---
 
-export async function fetchSearchHistory(token?: string | null): Promise<string[] | null> {
-  try {
-    const response = await fetch(`${API_URL}/v1/me/history`, { headers: apiHeaders(token) });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { items: string[] };
-    return body.items;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The feed query string this account last applied, or null.
  *
@@ -432,15 +413,9 @@ export interface DigestDetail extends DigestSummary {
   items: { paper_id: string; title: string; score: number; citations: number }[];
 }
 
-export async function fetchDigests(): Promise<DigestSummary[] | null> {
-  try {
-    const response = await fetch(`${API_URL}/v1/digests`, { headers: apiHeaders() });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { items: DigestSummary[] };
-    return body.items;
-  } catch {
-    return null;
-  }
+export async function fetchDigests(): Promise<CatalogResult<DigestSummary[]>> {
+  const result = await readCatalog<{ items: DigestSummary[] }>('/v1/digests');
+  return result.ok ? { ok: true, data: result.data.items } : result;
 }
 
 export async function fetchDigest(slug: string): Promise<DigestDetail | null> {
@@ -469,15 +444,9 @@ export interface TopicDetail {
   papers: TopicPaper[];
 }
 
-export async function fetchTopics(): Promise<TopicDetail[] | null> {
-  try {
-    const response = await fetch(`${API_URL}/v1/topics`, { headers: apiHeaders() });
-    if (!response.ok) return null;
-    const body = (await response.json()) as { items: TopicDetail[] };
-    return body.items;
-  } catch {
-    return null;
-  }
+export async function fetchTopics(): Promise<CatalogResult<TopicDetail[]>> {
+  const result = await readCatalog<{ items: TopicDetail[] }>('/v1/topics');
+  return result.ok ? { ok: true, data: result.data.items } : result;
 }
 
 // Digest bodies are plain LLM text: escape everything, then turn [scheme:id] citations into
