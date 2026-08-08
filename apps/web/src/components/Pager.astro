@@ -1,0 +1,184 @@
+---
+// The one pager. The numbered variant is the feed's - endpoints plus a window, a
+// showing-X-of-Y line, and (when directional) the data-page-dir attributes that
+// lib/nav-direction reads to slide the page along the timeline. The prevnext variant
+// is the catalogue's compact Previous / Page N of M / Next row.
+import { Icon } from 'astro-icon/components';
+
+import { pageNumbers } from '../lib/paging';
+
+interface Props {
+  page: number;
+  pageCount: number;
+  /* Builds the href for a target page; the caller owns which params survive. */
+  link: (target: number) => string;
+  variant?: 'numbered' | 'prevnext';
+  /* The numbered variant's summary line; null or absent hides it. */
+  total?: number | null;
+  showingFrom?: number;
+  showingTo?: number;
+  /* Timeline semantics: Newer/Older labels and the data-page-dir slide attributes.
+     Only the feed reads time into its pages; everything else pages Previous/Next. */
+  directional?: boolean;
+}
+
+const {
+  page,
+  pageCount,
+  link,
+  variant = 'numbered',
+  total = null,
+  showingFrom,
+  showingTo,
+  directional = false,
+} = Astro.props;
+
+const backLabel = directional ? 'Newer' : 'Previous';
+const forwardLabel = directional ? 'Older' : 'Next';
+const showSummary =
+  total !== null &&
+  showingFrom !== undefined &&
+  showingTo !== undefined &&
+  showingTo >= showingFrom;
+---
+
+{
+  variant === 'numbered' ? (
+    <nav class="pager" aria-label="Pagination">
+      {showSummary && (
+        <span class="showing">
+          Showing {showingFrom}–{showingTo} of {total}
+        </span>
+      )}
+      <div class="pages">
+        {page > 1 && (
+          <a
+            class="btn btn-ghost"
+            href={link(page - 1)}
+            data-page-dir={directional ? 'newer' : undefined}
+          >
+            <Icon name="lucide:chevron-left" aria-hidden="true" />
+            {backLabel}
+          </a>
+        )}
+        {pageNumbers(page, pageCount).map((p) =>
+          p === null ? (
+            <span class="gap">…</span>
+          ) : p === page ? (
+            <span class="current" aria-current="page">
+              {p}
+            </span>
+          ) : (
+            <a
+              class="page-num"
+              href={link(p)}
+              data-page-dir={directional ? (p < page ? 'newer' : 'older') : undefined}
+            >
+              {p}
+            </a>
+          )
+        )}
+        {page < pageCount && (
+          <a
+            class="btn btn-ghost"
+            href={link(page + 1)}
+            data-page-dir={directional ? 'older' : undefined}
+          >
+            {forwardLabel}
+            <Icon name="lucide:chevron-right" aria-hidden="true" />
+          </a>
+        )}
+      </div>
+    </nav>
+  ) : (
+    <nav class="pager pager-line" aria-label="Pagination">
+      {page > 1 && <a href={link(page - 1)}>Previous</a>}
+      <span>
+        Page {page} of {pageCount}
+      </span>
+      {page < pageCount && <a href={link(page + 1)}>Next</a>}
+    </nav>
+  )
+}
+
+<style>
+  .pager {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding-top: var(--space-5);
+  }
+  .showing {
+    color: var(--muted);
+    font-size: 0.85rem;
+  }
+  .pages {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem;
+    margin-left: auto;
+  }
+  .page-num,
+  .current,
+  .gap {
+    min-width: 2rem;
+    padding: 0.35rem 0.5rem;
+    text-align: center;
+    font-size: 0.88rem;
+    border-radius: var(--radius-sm);
+  }
+  .page-num {
+    color: var(--ink);
+    text-decoration: none;
+    transition:
+      background-color var(--dur-fast) var(--ease-out),
+      color var(--dur-fast) var(--ease-out),
+      transform var(--dur-fast) var(--ease-out);
+  }
+  .page-num:hover {
+    background: var(--surface-2);
+  }
+  .page-num:active {
+    transform: scale(0.96);
+  }
+  .current {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-weight: 600;
+  }
+  .gap {
+    color: var(--muted);
+  }
+  /* The catalogue's row: centered and quiet, no numbered slots. */
+  .pager-line {
+    justify-content: center;
+    gap: 1rem;
+    padding-top: 0;
+    margin-top: var(--space-5);
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  @media (max-width: 40rem) {
+    .pages {
+      margin-left: 0;
+    }
+    /* Finger-sized prevnext links; the negative margins hand the space back to the row. */
+    .pager-line a {
+      padding: 0.55rem 0.5rem;
+      margin: -0.55rem 0;
+    }
+    /* Numbered slots need more width than a phone has - the row's rigid minimum is what
+       used to scroll the whole document sideways. Newer / current / Older says the same
+       thing, and the prevnext variant already proves the shape fits. */
+    .page-num,
+    .gap {
+      display: none;
+    }
+    .current {
+      padding: 0.5rem 0.75rem;
+    }
+  }
+</style>
