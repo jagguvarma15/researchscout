@@ -76,7 +76,7 @@
       {#each message.results as result, index}
         <!-- The whole block mounts at once; the capped per-card delay turns that into a
              short cascade. -->
-        <div class="card" style="--i: {Math.min(index, 5)}">
+        <div class="result-card" style="--i: {Math.min(index, 5)}">
           <div class="cardhead">
             <a class="cardtitle" href={`/papers/${result.id}`}>{result.title}</a>
             {#if result.relevance !== null}
@@ -176,7 +176,7 @@
     flex-direction: column;
     gap: 0.4rem;
     min-width: 0;
-    animation: msg-in var(--dur-fast, 0.15s) var(--ease-out, ease);
+    animation: msg-in var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   @keyframes msg-in {
     from {
@@ -191,7 +191,7 @@
   /* An inline box cannot be transformed; the phase label needs one for its entrance. */
   .phase {
     display: inline-block;
-    animation: phase-in var(--dur-fast, 0.15s) var(--ease-out, ease);
+    animation: phase-in var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   @keyframes phase-in {
     from {
@@ -245,7 +245,7 @@
     /* The streamed paragraph and this formatted block are different nodes; the fade turns
        the swap at completion into a settle instead of a flicker. Mounts once per answer -
        later renders reuse the node. */
-    animation: msg-in var(--dur-fast, 0.15s) var(--ease-out, ease);
+    animation: msg-in var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .prose :global(p) {
     margin: 0 0 0.75em;
@@ -306,7 +306,7 @@
     font-size: 0.9rem;
     color: var(--muted, #5d6570);
   }
-  .card {
+  .result-card {
     border: 1px solid var(--line, #e6e1d5);
     border-radius: var(--radius-sm, 10px);
     padding: 0.65rem 0.8rem;
@@ -314,7 +314,7 @@
     /* The both fill hides a card until its capped delay elapses, which is what turns the
        block mount into a cascade. Delayed fill-both needs the explicit reduced-motion
        opt-outs below - the universal guard shortens durations but leaves delays alone. */
-    animation: msg-in var(--dur-fast, 0.15s) var(--ease-out, ease) both;
+    animation: msg-in var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) both;
     animation-delay: calc(var(--i, 0) * 40ms);
   }
   /* Title and match share one row; the badge cannot wander under the date the way the
@@ -373,7 +373,7 @@
     padding: 0.1rem 0.6rem;
     text-decoration: none;
     color: var(--accent-ink, #78350f);
-    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
+    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .cardtags a:hover,
   .citations a:hover {
@@ -414,7 +414,7 @@
     padding: 0.35rem 0.85rem;
     text-decoration: none;
     cursor: pointer;
-    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
+    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   a.ghost:hover,
   .ghost:hover:not(:disabled) {
@@ -473,14 +473,14 @@
     .cursor,
     .dots span,
     .phase,
-    .card,
+    .result-card,
     .prose {
       animation: none;
     }
   }
   /* The site switch needs the card called out by name: its delayed both fill would
      otherwise blank each card for the length of its delay. */
-  :global(html[data-motion='reduced']) .card {
+  :global(html[data-motion='reduced']) .result-card {
     animation: none;
   }
   /* The app-wide phone tier, not the stray 480px the old layout used. */
