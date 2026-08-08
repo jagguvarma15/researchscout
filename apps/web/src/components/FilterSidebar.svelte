@@ -168,7 +168,7 @@
 
 {#if open}
   <div
-    class="backdrop"
+    class="backdrop backdrop-veil"
     role="presentation"
     onclick={(event) => {
       if (event.target === event.currentTarget) hide();
@@ -377,13 +377,10 @@
   .backdrop {
     position: fixed;
     inset: 0;
-    z-index: 35;
-    background: rgb(0 0 0 / 0.32);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    z-index: var(--z-filters, 35);
     /* The rail slides; this used to pop. Same vocabulary now - fade the veil, slide the
        sheet - and the global motion guard stills both under reduced motion. */
-    animation: sidebar-fade var(--dur-fast, 0.15s) var(--ease-out, ease);
+    animation: sidebar-fade var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .panel {
     position: absolute;
@@ -395,8 +392,8 @@
     flex-direction: column;
     background: var(--surface, #fff);
     border-right: 1px solid var(--line, #e6e1d5);
-    box-shadow: var(--shadow-md, 0 12px 32px rgb(23 25 28 / 0.12));
-    animation: sidebar-in var(--dur-slow, 0.25s) var(--ease-out, ease);
+    box-shadow: var(--shadow-md, 0 4px 12px rgb(23 25 28 / 0.08), 0 12px 32px rgb(23 25 28 / 0.1));
+    animation: sidebar-in var(--dur-slow, 0.25s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   @keyframes sidebar-fade {
     from {
