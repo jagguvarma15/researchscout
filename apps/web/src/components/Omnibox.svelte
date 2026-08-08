@@ -73,6 +73,9 @@
   let papers = $state<PaperHit[]>([]);
   let selected = $state(0);
   let searching = $state(false);
+  // A search that errored and a search with no hits used to both read "Nothing matches",
+  // which teaches a reader with a down API that the corpus is empty. This keeps them apart.
+  let searchFailed = $state(false);
   let dictionary = $state<KeywordCount[] | null>(null);
   // Phrases this account searched for before, and papers it opened. Signed-in only, and both
   // requests simply 401 otherwise, so nothing here needs to know whether anybody is signed in.
@@ -186,6 +189,12 @@
           ],
   );
 
+  function retrySearch() {
+    searchFailed = false;
+    searching = true;
+    search.run();
+  }
+
   const search = debounce(async () => {
     const q = trimmed;
     if (!q) {
@@ -196,16 +205,25 @@
     searching = true;
     try {
       const response = await fetch(`/api/papers?q=${encodeURIComponent(q)}&limit=6`);
-      if (!response.ok || !sequencer.isCurrent(seq)) return;
+      if (!sequencer.isCurrent(seq)) return;
+      if (!response.ok) {
+        papers = [];
+        searchFailed = true;
+        return;
+      }
       const payload = (await response.json()) as { items: PaperHit[] };
       if (!sequencer.isCurrent(seq)) return;
+      searchFailed = false;
       papers = payload.items.map(({ id, title, score }) => ({
         id,
         title: stripMath(title),
         score,
       }));
     } catch {
-      if (sequencer.isCurrent(seq)) papers = [];
+      if (sequencer.isCurrent(seq)) {
+        papers = [];
+        searchFailed = true;
+      }
     } finally {
       // Only the newest request may clear the flag; an older one finishing late would
       // otherwise report "done" while the current search is still running.
@@ -217,6 +235,7 @@
     // Track the query; a command is not a paper search, so it clears rather than fetches.
     const q = trimmed;
     selected = 0;
+    searchFailed = false;
     if (!q || intent === 'command') {
       search.cancel();
       sequencer.next(); // Retire any reply still in flight for an older query.
@@ -536,6 +555,15 @@
         {:else if trimmed && !searching}
           <p class="none">Nothing matches - keep typing.</p>
         {/if}
+        {#if trimmed && !searching && searchFailed && intent !== 'command'}
+          <!-- Beside the list, not in the chain above it: the search-all and ask rows are
+               still live when only the paper lookup failed, and the chain never fires
+               while they are present. -->
+          <p class="none is-fail" role="status">
+            Paper search failed - the API did not answer.
+            <button class="retry" type="button" onclick={retrySearch}>Try again</button>
+          </p>
+        {/if}
 
         {#if trimmed && searching && papers.length === 0 && intent !== 'command'}
           <!-- Only while there is nothing to show. Once results exist they stay put through
@@ -601,8 +629,8 @@
     background: var(--surface, #fff);
     color: var(--muted, #5d6570);
     transition:
-      border-color var(--dur-fast, 0.15s) var(--ease-out, ease),
-      box-shadow var(--dur-fast, 0.15s) var(--ease-out, ease);
+      border-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+      box-shadow var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .field:hover {
     border-color: var(--line-strong, #d1d6dc);
@@ -664,7 +692,7 @@
     position: absolute;
     top: calc(100% + 0.5rem);
     right: 0;
-    z-index: 5;
+    z-index: var(--z-omnibox, 5);
     width: min(45rem, calc(100vw - 2rem));
     max-height: 70dvh;
     display: flex;
@@ -672,9 +700,9 @@
     border: 1px solid var(--line, #e6e1d5);
     border-radius: var(--radius-md, 14px);
     background: var(--surface, #fff);
-    box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
+    box-shadow: var(--shadow-lg, 0 2px 4px rgb(23 25 28 / 0.06), 0 16px 48px rgb(23 25 28 / 0.16));
     overflow: hidden;
-    animation: panel-in var(--dur-fast, 0.15s) var(--ease-out, ease);
+    animation: panel-in var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   /* Phone: right-anchored to a field that sits mid-header, the dropdown ran off the left
      edge of the screen. Fixed instead - the header's backdrop-filter makes it the
@@ -684,11 +712,11 @@
   @media (max-width: 40rem) {
     .panel {
       position: fixed;
-      top: calc(var(--nav-height, 3.75rem) + 0.4rem);
+      top: calc(var(--nav-height, calc(3.75rem + env(safe-area-inset-top))) + 0.4rem);
       left: 0.4rem;
       right: 0.4rem;
       width: auto;
-      max-height: calc(100dvh - var(--nav-height, 3.75rem) - 1rem);
+      max-height: calc(100dvh - var(--nav-height, calc(3.75rem + env(safe-area-inset-top))) - 1rem);
     }
   }
   @keyframes panel-in {
@@ -698,7 +726,7 @@
     }
   }
   .panel.closing {
-    animation: panel-out var(--dur-fast, 0.15s) var(--ease-out, ease) forwards;
+    animation: panel-out var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)) forwards;
   }
   @keyframes panel-out {
     to {
@@ -738,7 +766,7 @@
     cursor: pointer;
     /* The highlight follows the pointer and the arrow keys; easing it makes the handoff
        between rows read as one moving light. */
-    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
+    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .entries li.active {
     background: var(--surface-2, #f4f0e8);
@@ -751,7 +779,7 @@
   .loading,
   .welcome,
   .mode {
-    animation: body-in var(--dur-fast, 0.15s) var(--ease-out, ease);
+    animation: body-in var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   @keyframes body-in {
     from {
@@ -784,6 +812,19 @@
     padding: 0.9rem 1rem;
     color: var(--muted, #5d6570);
     font-size: 0.88rem;
+  }
+  .none.is-fail {
+    color: var(--danger-ink, #7f1d1d);
+    background: var(--danger-soft, #fee2e2);
+  }
+  .none .retry {
+    border: none;
+    background: none;
+    padding: 0;
+    color: inherit;
+    font: inherit;
+    text-decoration: underline;
+    cursor: pointer;
   }
   .loading {
     display: flex;
@@ -821,7 +862,7 @@
     font-weight: 500;
     padding: 0.15rem 0.6rem;
     cursor: pointer;
-    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, ease);
+    transition: background-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .chip:hover {
     background: var(--surface-2, #f4f0e8);
@@ -868,7 +909,7 @@
     color: var(--muted, #5d6570);
     font: inherit;
     cursor: pointer;
-    transition: color var(--dur-fast, 0.15s) var(--ease-out, ease);
+    transition: color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .clear:hover {
     color: var(--ink, #17191c);
