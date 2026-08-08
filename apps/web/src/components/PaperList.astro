@@ -1,0 +1,151 @@
+---
+// The day-grouped paper list, extracted from the feed: fold a newest-first array into one
+// section per publication day, give each day a sticky heading with the pinned-shadow
+// affordance, and render every paper through PaperRow. The feed and the reading list both
+// render this; flat lists (For You, a topic's papers) use PaperRow directly.
+import PaperRow from './PaperRow.astro';
+import { formatDate, type PaperSummary } from '../lib/api';
+
+interface Props {
+  papers: PaperSummary[];
+  /* When given, every row gets a save button initialized from membership. */
+  savedIds?: Set<string>;
+  /* Feed position per paper id for impression telemetry. */
+  rankOf?: Map<string, number>;
+  dismissible?: boolean;
+  morph?: boolean;
+  density?: 'full' | 'compact';
+}
+
+const {
+  papers,
+  savedIds,
+  rankOf,
+  dismissible = false,
+  morph = true,
+  density = 'full',
+} = Astro.props;
+
+// The API returns papers newest-first; fold them into one group per publication
+// day so the list reads as a timeline.
+const groups: { date: string; papers: PaperSummary[] }[] = [];
+for (const paper of papers) {
+  const date = formatDate(paper.published_at);
+  const last = groups[groups.length - 1];
+  if (last && last.date === date) last.papers.push(paper);
+  else groups.push({ date, papers: [paper] });
+}
+
+function formatDayHeading(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`)
+    .toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'UTC',
+    })
+    .toUpperCase();
+}
+---
+
+{
+  groups.map((group) => (
+    <section class:list={['day', { compact: density === 'compact' }]}>
+      <h2 class="day-heading">{formatDayHeading(group.date)}</h2>
+      <ul class="feed">
+        {group.papers.map((paper) => (
+          <PaperRow
+            paper={paper}
+            saved={savedIds ? savedIds.has(paper.id) : undefined}
+            rank={rankOf?.get(paper.id)}
+            morph={morph}
+            dismissible={dismissible}
+            density={density}
+          />
+        ))}
+      </ul>
+    </section>
+  ))
+}
+
+<script>
+  // The pinned date's floating shadow. A heading reports intersectionRatio < 1 once the
+  // header offset clips it; the top check keeps the shadow off headings that are merely
+  // entering at the bottom edge. One observer, re-built per soft navigation because this
+  // module runs once ever - and pages without day headings get a cheap no-op.
+  function watchStuckHeadings(): () => void {
+    const headings = document.querySelectorAll<HTMLElement>('.day .day-heading');
+    if (headings.length === 0) return () => {};
+    // The pixel offset is measured, not parsed: --nav-height is a calc over
+    // env(safe-area-inset-top), which no script can evaluate.
+    const offset = (document.querySelector<HTMLElement>('.site-header')?.offsetHeight ?? 60) + 1;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          const stuck = entry.intersectionRatio < 1 && entry.boundingClientRect.top <= offset + 1;
+          entry.target.classList.toggle('stuck', stuck);
+        }
+      },
+      { threshold: [1], rootMargin: `-${offset}px 0px 0px 0px` }
+    );
+    for (const heading of headings) observer.observe(heading);
+    return () => observer.disconnect();
+  }
+
+  let stopWatching = watchStuckHeadings();
+  document.addEventListener('astro:page-load', () => {
+    stopWatching();
+    stopWatching = watchStuckHeadings();
+  });
+</script>
+
+<style>
+  .day {
+    margin-bottom: var(--space-6);
+  }
+  /* The date follows you down its own run of papers, so a long day never leaves you
+     wondering what you are looking at. Sticks under the header, not the top of the window,
+     and carries the same bleed as the rows so nothing scrolls through beside it. */
+  .day .day-heading {
+    position: sticky;
+    top: var(--nav-height);
+    z-index: var(--z-sticky);
+    margin: 0 -0.75rem;
+    padding: 0.35rem 0.75rem 0.5rem;
+    background: var(--bg);
+  }
+  /* While pinned, a soft falloff under the date says "floating over the rows" - toggled
+     by the script above, faded on opacity only. */
+  .day .day-heading::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 -7px 0;
+    height: 6px;
+    background: linear-gradient(to bottom, rgb(23 25 28 / 0.08), rgb(23 25 28 / 0));
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-out);
+    pointer-events: none;
+  }
+  .day .day-heading.stuck::after {
+    opacity: 1;
+  }
+  .day-heading {
+    margin: 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+  }
+  .feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  /* Tighter day rhythm to match the tighter rows, from either density path. */
+  :global(html[data-density='compact']) .day,
+  .day.compact {
+    margin-bottom: var(--space-4);
+  }
+</style>
