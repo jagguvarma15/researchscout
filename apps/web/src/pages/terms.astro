@@ -4,10 +4,10 @@ import { CONTACT_URL, MINIMUM_AGE, TERMS_EFFECTIVE, TERMS_VERSION } from '../lib
 ---
 
 <Base title="Terms of Use">
-  <div class="legal">
+  <div class="prose-page">
     <header class="hero">
       <h1 class="page-title">Terms of Use</h1>
-      <p class="version">Version {TERMS_VERSION}, effective {TERMS_EFFECTIVE}</p>
+      <p class="micro-label">Version {TERMS_VERSION}, effective {TERMS_EFFECTIVE}</p>
       <p class="lede">
         ResearchScout is a personal, non-commercial research radar run by one person. These
         terms were written from what the software actually does. They are not legal advice, and
@@ -143,57 +143,3 @@ import { CONTACT_URL, MINIMUM_AGE, TERMS_EFFECTIVE, TERMS_VERSION } from '../lib
   </div>
 </Base>
 
-<style>
-  .legal {
-    max-width: 58rem;
-    margin: 0 auto;
-  }
-  .hero {
-    text-align: center;
-    margin-bottom: var(--space-6);
-  }
-  .hero .page-title {
-    margin-bottom: 0.35rem;
-  }
-  .version {
-    margin: 0 0 0.9rem;
-    color: var(--muted);
-    font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-  .lede {
-    max-width: 60ch;
-    margin: 0 auto;
-    color: var(--muted);
-    font-size: var(--text-md);
-    line-height: 1.6;
-  }
-  .block {
-    margin-bottom: var(--space-6);
-    padding-top: var(--space-5);
-    border-top: 1px solid var(--line);
-  }
-  .block h2 {
-    margin: 0 0 0.9rem;
-    font-size: var(--text-lg);
-    letter-spacing: -0.01em;
-    text-align: center;
-  }
-  .block p,
-  .block ul {
-    max-width: 62ch;
-    margin: 0 auto 0.8rem;
-    line-height: 1.65;
-  }
-  .block ul {
-    padding-left: 1.2rem;
-  }
-  .block li {
-    margin-bottom: 0.45rem;
-  }
-  .block p:last-child,
-  .block ul:last-child {
-    margin-bottom: 0;
-  }
-</style>
