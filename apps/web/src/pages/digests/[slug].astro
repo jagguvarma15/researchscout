@@ -1,5 +1,7 @@
 ---
 import { Icon } from 'astro-icon/components';
+import EmptyState from '../../components/EmptyState.astro';
+import PageIntro from '../../components/PageIntro.astro';
 import Base from '../../layouts/Base.astro';
 import { fetchDigest, formatDate, renderDigestBody } from '../../lib/api';
 import { renderMathHTML } from '../../lib/math';
@@ -15,16 +17,14 @@ if (digest === null) {
 <Base title={digest?.title ?? 'Not found'}>
   {
     digest === null ? (
-      <div class="card empty">
-        <Icon name="lucide:file-question" aria-hidden="true" />
-        <div>
-          <h1 class="notfound-title">Digest not found</h1>
-          <p class="notfound-body">
-            Nothing published under <code>{slug}</code>.{' '}
-            <a href="/digests">Back to the archive</a>.
-          </p>
-        </div>
-      </div>
+      <Fragment>
+        <PageIntro title="Digest not found" />
+        <EmptyState
+          icon="lucide:file-question"
+          message={`Nothing published under ${slug}.`}
+          action={{ href: '/digests', label: 'Back to the archive' }}
+        />
+      </Fragment>
     ) : (
       <article>
         <header class="intro">
@@ -61,13 +61,6 @@ if (digest === null) {
 </Base>
 
 <style>
-  .notfound-title {
-    font-size: var(--text-lg);
-    margin: 0 0 0.25rem;
-  }
-  .notfound-body {
-    margin: 0;
-  }
   h1 {
     font-size: var(--text-xl);
     line-height: 1.3;
