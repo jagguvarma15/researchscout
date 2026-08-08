@@ -1,6 +1,8 @@
 ---
 import { Icon } from 'astro-icon/components';
 import CiteActions from '../../components/CiteActions.svelte';
+import EmptyState from '../../components/EmptyState.astro';
+import PageIntro from '../../components/PageIntro.astro';
 import PdfReader from '../../components/PdfReader.svelte';
 import SaveButton from '../../components/SaveButton.svelte';
 import Telemetry from '../../components/Telemetry.svelte';
@@ -27,7 +29,8 @@ if (paper === null) {
 
 let saved = false;
 if (paper !== null) {
-  saved = ((await fetchSaved(Astro.locals.accessToken)) ?? []).some((p) => p.id === paper.id);
+  const savedResult = await fetchSaved(Astro.locals.accessToken);
+  saved = savedResult.ok && savedResult.data.some((p) => p.id === paper.id);
 }
 
 // Related papers ride the hybrid search with the title as the query — no new backend.
@@ -40,7 +43,7 @@ if (paper !== null) {
     fetchPapers({ q: paper.title }),
     fetchModels({ paperId: paper.id }),
   ]);
-  related = (hits?.items ?? []).filter((hit) => hit.id !== paper.id).slice(0, 4);
+  related = (hits.ok ? hits.data.items : []).filter((hit) => hit.id !== paper.id).slice(0, 4);
   // A failed catalogue read costs this section, never the paper: the reason for the failure
   // belongs on /models, where somebody went looking for models.
   models = catalogue.ok ? catalogue.data.items : [];
@@ -75,15 +78,14 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
 <Base title={paper ? stripMath(paper.title) : 'Not found'}>
   {
     paper === null ? (
-      <div class="card empty">
-        <Icon name="lucide:file-question" aria-hidden="true" />
-        <div>
-          <h1 class="notfound-title">Paper not found</h1>
-          <p class="notfound-body">
-            Nothing stored under <code>{id}</code>. <a href="/">Back to the feed</a>.
-          </p>
-        </div>
-      </div>
+      <Fragment>
+        <PageIntro title="Paper not found" />
+        <EmptyState
+          icon="lucide:file-question"
+          message={`Nothing stored under ${id}.`}
+          action={{ href: '/', label: 'Back to the feed' }}
+        />
+      </Fragment>
     ) : (
       <article>
         <div class="head">
@@ -213,13 +215,6 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
 </Base>
 
 <style>
-  .notfound-title {
-    font-size: var(--text-lg);
-    margin: 0 0 0.25rem;
-  }
-  .notfound-body {
-    margin: 0;
-  }
   .head {
     display: flex;
     align-items: flex-start;
