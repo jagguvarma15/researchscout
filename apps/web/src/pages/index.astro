@@ -1,22 +1,18 @@
 ---
 import { Icon } from 'astro-icon/components';
 import DismissNotice from '../components/DismissNotice.svelte';
+import EmptyState from '../components/EmptyState.astro';
 import FilterSidebar from '../components/FilterSidebar.svelte';
+import Pager from '../components/Pager.astro';
+import PaperList from '../components/PaperList.astro';
 import SaveButton from '../components/SaveButton.svelte';
 import Telemetry from '../components/Telemetry.svelte';
 import Base from '../layouts/Base.astro';
-import {
-  fetchPapers,
-  fetchSaved,
-  fetchSavedFilters,
-  formatDate,
-  PAGE_SIZE,
-  type PaperSummary,
-} from '../lib/api';
+import { catalogMessage, fetchPapers, fetchSaved, fetchSavedFilters, PAGE_SIZE } from '../lib/api';
 import { renderMathHTML } from '../lib/math';
-import { morphName } from '../lib/morph';
+import { pageLink } from '../lib/paging';
 import { FEED_DEFAULTS_COOKIE, parseFeedDefaults } from '../lib/prefs';
-import { categoryName, subjectLabel, TOPICS, topicLabel } from '../lib/taxonomy';
+import { subjectLabel, TOPICS, topicLabel } from '../lib/taxonomy';
 
 const params = Astro.url.searchParams;
 const q = params.get('q') ?? '';
@@ -146,7 +142,7 @@ function describeSaved(query: string): string {
 // first byte of the page, which is two full API latencies spent waiting for answers that do
 // not depend on each other. Dismissals are the third: the feed endpoint applies them itself
 // now, so the page neither fetches nor reasons about them.
-const [result, savedPapers, savedFilters] = await Promise.all([
+const [result, savedResult, savedFilters] = await Promise.all([
   fetchPapers({
     q,
     days,
@@ -161,49 +157,21 @@ const [result, savedPapers, savedFilters] = await Promise.all([
     topic,
     page,
   }),
-  fetchSaved(Astro.locals.accessToken).then((saved) => saved ?? []),
+  fetchSaved(Astro.locals.accessToken),
   // Only worth asking on a bare feed: with filters already in the URL there is nothing to
   // resume to.
   Astro.url.search ? Promise.resolve(null) : fetchSavedFilters(Astro.locals.accessToken),
 ]);
-const items = result === null ? null : result.items;
-const total = result?.total ?? null;
-
-// The API returns papers newest-first; fold them into one group per publication
-// day so the feed reads as a timeline.
-const groups: { date: string; papers: PaperSummary[] }[] = [];
-for (const paper of items ?? []) {
-  const date = formatDate(paper.published_at);
-  const last = groups[groups.length - 1];
-  if (last && last.date === date) last.papers.push(paper);
-  else groups.push({ date, papers: [paper] });
-}
-
-function formatDayHeading(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`)
-    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-    .toUpperCase();
-}
+// The reading-list preview is auxiliary: when its read fails the preview simply stays off,
+// while the main list's failure below is reported in full.
+const savedPapers = savedResult.ok ? savedResult.data : [];
+const items = result.ok ? result.data.items : null;
+const total = result.ok ? result.data.total : null;
 
 const savedIds = new Set(savedPapers.map((p) => p.id));
 
 // Feed position per paper id for impression telemetry (stable across the day groups).
 const rankOf = new Map((items ?? []).map((paper, index) => [paper.id, index]));
-
-// Venue when known, otherwise the arXiv comment ("14 pages, accepted at ...").
-function sourceNote(paper: PaperSummary): string | null {
-  return paper.venue ?? paper.comment;
-}
-
-function truncate(text: string, max = 60): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
-function badgesFor(paper: PaperSummary): { primary: string | null; rest: string[]; more: number } {
-  const primary = paper.primary_category;
-  const rest = paper.categories.filter((cat) => cat !== primary);
-  return { primary, rest: rest.slice(0, 3), more: Math.max(0, rest.length - 3) };
-}
 
 const pageCount =
   total !== null
@@ -213,26 +181,6 @@ const pageCount =
       : page;
 const showingFrom = (page - 1) * PAGE_SIZE + 1;
 const showingTo = showingFrom + (items?.length ?? 0) - 1;
-
-// Endpoints plus a window around the current page; null marks a gap.
-function pageNumbers(current: number, count: number): (number | null)[] {
-  const wanted = new Set([1, count, current - 1, current, current + 1]);
-  const pages = [...wanted].filter((p) => p >= 1 && p <= count).sort((a, b) => a - b);
-  const out: (number | null)[] = [];
-  let prev = 0;
-  for (const p of pages) {
-    if (p - prev > 1) out.push(null);
-    out.push(p);
-    prev = p;
-  }
-  return out;
-}
-
-function pageLink(target: number): string {
-  const next = new URLSearchParams(Astro.url.searchParams);
-  next.set('page', String(target));
-  return `/?${next}`;
-}
 ---
 
 <Base>
@@ -260,13 +208,18 @@ function pageLink(target: number): string {
         ))
       }
     </div>
-    {
-      q && (
-        <p class="toolbar-summary">
+    {/* The page's one h1 is the summary line the toolbar already carried: it names what
+        the list below is, for everyone, and for a screen reader it replaces landing on a
+        bare date. */}
+    <h1 class="toolbar-summary">
+      {q ? (
+        <Fragment>
           Results for <strong>“{q}”</strong>
-        </p>
-      )
-    }
+        </Fragment>
+      ) : (
+        'Latest papers'
+      )}
+    </h1>
     {
       items !== null && (
         <span class="toolbar-total">
@@ -302,12 +255,14 @@ function pageLink(target: number): string {
     savedPapers.length > 0 && (
       <section class="reading">
         <div class="reading-head">
-          <h2 class="day-heading">Reading list</h2>
+          <h2 class="reading-heading">Reading list</h2>
           <a class="reading-all" href="/saved">View all</a>
         </div>
         <ul class="reading-items">
           {savedPapers.slice(0, 5).map((paper) => (
             <li>
+              {/* No morph name here on purpose: a saved paper can also be in today's
+                  feed, and duplicate names on one page cancel the morph. */}
               <a
                 class="reading-title"
                 href={`/papers/${paper.id}`}
@@ -322,136 +277,41 @@ function pageLink(target: number): string {
   }
 
   {
-    items === null && (
-      <div class="card empty is-error">
-        <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>The API is unreachable — try again in a moment.</p>
-      </div>
+    !result.ok && (
+      <EmptyState
+        kind="error"
+        icon="lucide:cloud-off"
+        message={catalogMessage(result.failure, 'papers')}
+        action={{ href: Astro.url.pathname + Astro.url.search, label: 'Retry' }}
+      />
     )
   }
   {
-    items !== null && items.length === 0 && (
-      <div class="card empty">
-        <Icon name="lucide:search-x" aria-hidden="true" />
-        <p>No papers match that search — widen the filters and scan again.</p>
-      </div>
+    result.ok && result.data.items.length === 0 && (
+      <EmptyState
+        icon="lucide:search-x"
+        message="No papers match that search - widen the filters and scan again."
+      />
     )
   }
 
   {
-    items !== null &&
-      groups.map((group) => (
-        <section class="day">
-          <h2 class="day-heading">{formatDayHeading(group.date)}</h2>
-          <ul class="feed">
-            {group.papers.map((paper) => {
-              const note = sourceNote(paper);
-              const badges = badgesFor(paper);
-              return (
-                <li class="row" data-paper-id={paper.id} data-rank={rankOf.get(paper.id)}>
-                  <div class="row-head">
-                    {/* The name is what lets this title morph into the paper page's heading
-                        during navigation. The reading-list preview above deliberately has
-                        none: a saved paper can also be in today's feed, and duplicate names
-                        on one page cancel the morph. */}
-                    <a
-                      class="title"
-                      href={`/papers/${paper.id}`}
-                      transition:name={morphName('paper-title', paper.id)}
-                      set:html={renderMathHTML(paper.title)}
-                    />
-                    <SaveButton client:visible paperId={paper.id} saved={savedIds.has(paper.id)} />
-                  </div>
-                  <p class="meta">
-                    {paper.authors
-                      .slice(0, 3)
-                      .map((author) => author.name)
-                      .join(', ')}
-                    {paper.authors.length > 3 && ' et al.'}
-                    {note && (
-                      <span class="note" title={note}>
-                        {' · '}
-                        {truncate(note)}
-                      </span>
-                    )}
-                    {paper.citation_count > 0 && (
-                      <span class="badge badge-cite">
-                        {paper.citation_count} citation{paper.citation_count === 1 ? '' : 's'}
-                      </span>
-                    )}
-                  </p>
-                  <p class="tags">
-                    {badges.primary && (
-                      <span class="badge badge-primary" title={categoryName(badges.primary)}>
-                        {badges.primary}
-                      </span>
-                    )}
-                    {badges.rest.map((cat) => (
-                      <span class="badge" title={categoryName(cat)}>
-                        {cat}
-                      </span>
-                    ))}
-                    {badges.more > 0 && <span class="badge">+{badges.more}</span>}
-                    {paper.score !== null && (
-                      <span class="badge badge-score">{paper.score.toFixed(3)}</span>
-                    )}
-                    {paper.pdf_url && (
-                      <a class="quick" href={`/papers/${paper.id}?read=1`}>
-                        <Icon name="lucide:book-open" aria-hidden="true" />
-                        Read
-                      </a>
-                    )}
-                    <button class="dismiss" type="button" data-dismiss aria-label="Dismiss">
-                      Dismiss
-                    </button>
-                  </p>
-                  <p class="abstract" set:html={renderMathHTML(paper.abstract)} />
-                </li>
-              );
-            })}
-          </ul>
-        </section>
-      ))
+    items !== null && items.length > 0 && (
+      <PaperList papers={items} savedIds={savedIds} rankOf={rankOf} dismissible={true} />
+    )
   }
 
   {
     items !== null && !q && pageCount > 1 && (
-      <nav class="pager" aria-label="Pagination">
-        {total !== null && items.length > 0 && (
-          <span class="showing">
-            Showing {showingFrom}–{showingTo} of {total}
-          </span>
-        )}
-        {/* data-page-dir tells lib/nav-direction which way the timeline moves, so the
-            transition slides the feed accordingly. */}
-        <div class="pages">
-          {page > 1 && (
-            <a class="btn btn-ghost" href={pageLink(page - 1)} data-page-dir="newer">
-              <Icon name="lucide:chevron-left" aria-hidden="true" />
-              Newer
-            </a>
-          )}
-          {pageNumbers(page, pageCount).map((p) =>
-            p === null ? (
-              <span class="gap">…</span>
-            ) : p === page ? (
-              <span class="current" aria-current="page">
-                {p}
-              </span>
-            ) : (
-              <a class="page-num" href={pageLink(p)} data-page-dir={p < page ? 'newer' : 'older'}>
-                {p}
-              </a>
-            ),
-          )}
-          {page < pageCount && (
-            <a class="btn btn-ghost" href={pageLink(page + 1)} data-page-dir="older">
-              Older
-              <Icon name="lucide:chevron-right" aria-hidden="true" />
-            </a>
-          )}
-        </div>
-      </nav>
+      <Pager
+        page={page}
+        pageCount={pageCount}
+        link={(target) => pageLink(Astro.url.searchParams, target)}
+        total={total}
+        showingFrom={showingFrom}
+        showingTo={showingTo}
+        directional={true}
+      />
     )
   }
 
@@ -472,37 +332,6 @@ function pageLink(target: number): string {
       venue,
     }}
   />
-  <script>
-    // The pinned date's floating shadow. A heading reports intersectionRatio < 1 once the
-    // header offset clips it; the top check keeps the shadow off headings that are merely
-    // entering at the bottom edge. One observer, re-built per soft navigation because this
-    // module runs once ever - and pages without day headings get a cheap no-op.
-    function watchStuckHeadings(): () => void {
-      const headings = document.querySelectorAll<HTMLElement>('.day .day-heading');
-      if (headings.length === 0) return () => {};
-      // The pixel offset is measured, not parsed: --nav-height is a calc over
-      // env(safe-area-inset-top), which no script can evaluate.
-      const offset = (document.querySelector<HTMLElement>('.site-header')?.offsetHeight ?? 60) + 1;
-      const observer = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            const stuck =
-              entry.intersectionRatio < 1 && entry.boundingClientRect.top <= offset + 1;
-            entry.target.classList.toggle('stuck', stuck);
-          }
-        },
-        { threshold: [1], rootMargin: `-${offset}px 0px 0px 0px` },
-      );
-      for (const heading of headings) observer.observe(heading);
-      return () => observer.disconnect();
-    }
-
-    let stopWatching = watchStuckHeadings();
-    document.addEventListener('astro:page-load', () => {
-      stopWatching();
-      stopWatching = watchStuckHeadings();
-    });
-  </script>
 </Base>
 
 <style>
@@ -555,9 +384,12 @@ function pageLink(target: number): string {
     font-size: 0.72rem;
     font-weight: 650;
   }
+  /* An h1 in a toolbar's clothing: the size and weight of the summary line it replaced,
+     because the heading's job here is naming the list, not dominating it. */
   .toolbar-summary {
     margin: 0;
     font-size: var(--text-md);
+    font-weight: 500;
   }
   .toolbar-total {
     margin-left: auto;
@@ -622,9 +454,14 @@ function pageLink(target: number): string {
     padding-bottom: 0.5rem;
     border-bottom: 1px solid var(--line);
   }
-  .reading-head .day-heading {
-    border-bottom: none;
-    padding-bottom: 0;
+  /* The day headings' register (their styles live with PaperList now), uppercased, minus
+     the border the .reading-head already draws. */
+  .reading-heading {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
   }
   .reading-all {
@@ -663,317 +500,11 @@ function pageLink(target: number): string {
   .reading-title:hover {
     color: var(--accent);
   }
-  .day {
-    margin-bottom: var(--space-6);
-  }
-  /* The date follows you down its own run of papers, so a long day never leaves you
-     wondering what you are looking at. Sticks under the header, not the top of the window,
-     and carries the same bleed as the rows so nothing scrolls through beside it. */
-  .day .day-heading {
-    position: sticky;
-    top: var(--nav-height);
-    z-index: 1;
-    margin: 0 -0.75rem;
-    padding: 0.35rem 0.75rem 0.5rem;
-    background: var(--bg);
-  }
-  /* While pinned, a soft falloff under the date says "floating over the rows" - toggled
-     by the page script below, faded on opacity only. */
-  .day .day-heading::after {
-    content: '';
-    position: absolute;
-    inset: auto 0 -7px 0;
-    height: 6px;
-    background: linear-gradient(to bottom, rgb(23 25 28 / 0.08), rgb(23 25 28 / 0));
-    opacity: 0;
-    transition: opacity var(--dur-fast) var(--ease-out);
-    pointer-events: none;
-  }
-  .day .day-heading.stuck::after {
-    opacity: 1;
-  }
-  .day-heading {
-    margin: 0;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--line);
-    color: var(--muted);
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-  }
-  .feed {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  /* Bled slightly into the gutter so the hover fill reads as the row, not as a box drawn
-     inside it. The separator is a pseudo-element rather than a border because a border
-     would follow the rounded corners of that fill. */
-  .row {
-    position: relative;
-    padding: 0.85rem 0.75rem;
-    margin: 0 -0.75rem;
-    border-radius: var(--radius-sm);
-    transition: background-color var(--dur-fast) var(--ease-out);
-  }
-  .row:hover {
-    background: var(--surface-2);
-  }
-  .row::after {
-    content: '';
-    position: absolute;
-    left: 0.75rem;
-    right: 0.75rem;
-    bottom: 0;
-    height: 1px;
-    background: var(--line);
-  }
-  .row:last-child::after {
-    display: none;
-  }
-  /* Rows rise into place as they scroll into view - scroll-driven, so the browser owns
-     every frame and there is no script. Progressive: browsers without the timeline render
-     the list static. Rows already past their range at load hold the settled values via
-     the both fill. */
-  @media (prefers-reduced-motion: no-preference) {
-    @supports (animation-timeline: view()) {
-      .feed .row {
-        animation: row-reveal var(--ease-out) both;
-        /* After the shorthand on purpose: the shorthand resets the timeline. */
-        animation-timeline: view();
-        animation-range: entry 0% entry 35%;
-      }
-      @keyframes row-reveal {
-        from {
-          opacity: 0.2;
-          transform: translateY(8px);
-        }
-      }
-    }
-  }
-  /* The reveal must never outrank the dismiss collapse: a timeline animation stays
-     active, and animations beat transitions for opacity and transform - so it goes off by
-     name when a row is leaving. */
-  .feed .row.going {
-    animation: none;
-  }
-  /* The universal .01ms guard cannot still a scroll-driven animation - duration does not
-     drive it - so the site switch turns it off explicitly; the media wrap above covers
-     the OS switch. */
-  :global(html[data-motion='reduced']) .feed .row {
-    animation: none;
-  }
-  /* Leaving slides and collapses, so the list closes over the gap instead of jumping.
-     Telemetry fixes the row's height inline before this class lands - which is what lets
-     height transition to zero - and detaches the node only once the collapse has run.
-     Under reduced motion the removal is synchronous and none of this plays. */
-  .row.going {
-    opacity: 0;
-    transform: translateX(1.5rem);
-    padding-top: 0;
-    padding-bottom: 0;
-    overflow: hidden;
-    transition:
-      opacity var(--dur-slow) var(--ease-out),
-      transform var(--dur-slow) var(--ease-out),
-      height var(--dur-slow) var(--ease-out),
-      padding var(--dur-slow) var(--ease-out);
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .row.going {
-      transition: none;
-    }
-  }
-  .row-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-  }
-  .title {
-    flex: 1;
-    font-weight: 600;
-    font-size: 1.05rem;
-    line-height: 1.4;
-    color: var(--ink);
-    text-decoration: none;
-  }
-  .title:hover {
-    color: var(--accent);
-  }
-  /* During a directional page slide the per-title morph names would pin every title in
-     place while the root moves; lib/nav-direction holds the attribute across both
-     snapshots so the titles ride the slide instead. */
-  :global(html[data-paging]) .title {
-    view-transition-name: none;
-  }
-  .meta {
-    color: var(--muted);
-    font-size: 0.85rem;
-    margin: 0.4rem 0 0;
-  }
-  .note {
-    color: var(--muted);
-  }
-  .meta .badge {
-    margin-left: 0.5rem;
-    vertical-align: 0.1em;
-  }
-  .badge-cite {
-    background: var(--surface-2);
-  }
-  .tags {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem;
-    margin: 0.45rem 0 0;
-  }
-  .badge-primary {
-    background: var(--accent-soft);
-    color: var(--accent-ink);
-  }
-  /* Pushed to the far end of the tag row, away from the category badges, with the two
-     actions spaced enough not to read as one control. */
-  .quick {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    margin-left: auto;
-    padding-right: 0.4rem;
-    color: var(--muted);
-    font-size: 0.8rem;
-    white-space: nowrap;
-    text-decoration: none;
-  }
-  .quick:hover {
-    color: var(--accent);
-  }
-  .quick :global(svg) {
-    width: 0.85rem;
-    height: 0.85rem;
-  }
-  .dismiss {
-    border: none;
-    background: none;
-    padding: 0;
-    color: var(--muted);
-    font: inherit;
-    font-size: 0.8rem;
-    cursor: pointer;
-  }
-  .dismiss:hover {
-    color: var(--ink);
-    text-decoration: underline;
-  }
-  /* Capped measure, per the layout rule that long-form text caps its own: at a wide window
-     the column runs past 1100px, and a two-line abstract that wide is a scan, not a read. */
-  .abstract {
-    margin: 0.4rem 0 0;
-    max-width: 105ch;
-    color: var(--muted);
-    font-size: 0.92rem;
-    line-height: 1.6;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-  /* Compact density (html[data-density], chosen in the settings drawer): tighter rows and
-     a one-line abstract, so a screen holds more of the day. The ancestor is :global because
-     the attribute lives on <html>, outside this page's scope - the scoped form would
-     silently never match. */
-  :global(html[data-density='compact']) .row {
-    padding: 0.5rem 0.75rem;
-  }
-  :global(html[data-density='compact']) .title {
-    font-size: 0.98rem;
-  }
-  :global(html[data-density='compact']) .meta,
-  :global(html[data-density='compact']) .tags,
-  :global(html[data-density='compact']) .abstract {
-    margin-top: 0.25rem;
-  }
-  :global(html[data-density='compact']) .abstract {
-    -webkit-line-clamp: 1;
-    line-clamp: 1;
-  }
-  :global(html[data-density='compact']) .day {
-    margin-bottom: var(--space-4);
-  }
-  .pager {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-    padding-top: var(--space-5);
-  }
-  .showing {
-    color: var(--muted);
-    font-size: 0.85rem;
-  }
-  .pages {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.35rem;
-    margin-left: auto;
-  }
-  .page-num,
-  .current,
-  .gap {
-    min-width: 2rem;
-    padding: 0.35rem 0.5rem;
-    text-align: center;
-    font-size: 0.88rem;
-    border-radius: var(--radius-sm);
-  }
-  .page-num {
-    color: var(--ink);
-    text-decoration: none;
-  }
-  .page-num:hover {
-    background: var(--surface-2);
-  }
-  .current {
-    background: var(--accent-soft);
-    color: var(--accent-ink);
-    font-weight: 600;
-  }
-  .gap {
-    color: var(--muted);
-  }
   @media (max-width: 40rem) {
-    .pages {
-      margin-left: 0;
-    }
-    /* Numbered slots need more width than a phone has - the row's rigid minimum is what
-       used to scroll the whole document sideways. Newer / current / Older says the same
-       thing, and the models pager already proves the shape fits. */
-    .page-num,
-    .gap {
-      display: none;
-    }
-    .current {
-      padding: 0.5rem 0.75rem;
-    }
     /* At this width the toolbar wraps; the count reads better under it than squeezed
        against the right edge of a wrapped row. */
     .toolbar-total {
       margin-left: 0;
-    }
-    /* The quick link would otherwise be pushed onto a line of its own by the badges. */
-    .quick {
-      margin-left: 0;
-    }
-    /* Finger-sized targets without moving the type: padding grows the hit area and the
-       negative margins hand the space back to the row. */
-    .quick,
-    .dismiss {
-      padding: 0.55rem 0.45rem;
-      margin-top: -0.55rem;
-      margin-bottom: -0.55rem;
     }
     .chip {
       padding: 0.4rem 0.8rem;
@@ -981,19 +512,12 @@ function pageLink(target: number): string {
     .kind-quick .kt {
       padding: 0.5rem 0.9rem;
     }
-    /* A smaller slide: the transform extends the root's scrollable overflow while it
-       plays, and a phone has no slack to absorb it. */
-    .row.going {
-      transform: translateX(0.75rem);
-    }
   }
   /* Pointer polish: the pills and links above declare hover colors that used to snap, and
      nothing on the page acknowledged a press. One block, so the feed's controls share the
      buttons' timing. */
   .chip,
-  .kt,
-  .page-num,
-  .quick {
+  .kt {
     transition:
       background-color var(--dur-fast) var(--ease-out),
       border-color var(--dur-fast) var(--ease-out),
@@ -1001,15 +525,11 @@ function pageLink(target: number): string {
       transform var(--dur-fast) var(--ease-out);
   }
   .chip:active,
-  .kt:active,
-  .page-num:active,
-  .quick:active {
+  .kt:active {
     transform: scale(0.96);
   }
-  .title,
   .reading-title,
-  .reading-all,
-  .dismiss {
+  .reading-all {
     transition: color var(--dur-fast) var(--ease-out);
   }
 </style>
