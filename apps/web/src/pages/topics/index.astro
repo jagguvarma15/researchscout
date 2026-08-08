@@ -1,49 +1,48 @@
 ---
-import { Icon } from 'astro-icon/components';
+import EmptyState from '../../components/EmptyState.astro';
+import PageIntro from '../../components/PageIntro.astro';
 import Base from '../../layouts/Base.astro';
-import { fetchTopics } from '../../lib/api';
+import { catalogMessage, fetchTopics } from '../../lib/api';
 import { renderMathHTML } from '../../lib/math';
 
-const topics = await fetchTopics();
+const result = await fetchTopics();
 ---
 
 <Base title="Trends">
-  <h1 class="page-title">Emerging topics</h1>
-  <p class="lede">Clusters of recent papers, ranked by how fast their signals are climbing.</p>
+  <PageIntro
+    title="Emerging topics"
+    lede="Clusters of recent papers, ranked by how fast their signals are climbing."
+  />
 
   {
-    topics === null && (
-      <div class="card empty is-error">
-        <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>The API is unreachable — try again in a moment.</p>
-      </div>
-    )
-  }
-  {
-    topics !== null && topics.length === 0 && (
-      <div class="card empty">
-        <Icon name="lucide:hourglass" aria-hidden="true" />
-        <p>
-          No topics yet — they appear after the next clustering sweep, or run{' '}
-          <code>scout topics build</code>.
-        </p>
-      </div>
-    )
-  }
-
-  {
-    topics !== null && topics.length > 0 && (
+    !result.ok ? (
+      <EmptyState
+        kind="error"
+        icon="lucide:cloud-off"
+        message={catalogMessage(result.failure, 'topics')}
+        action={{ href: '/topics', label: 'Retry' }}
+      />
+    ) : result.data.length === 0 ? (
+      <EmptyState
+        icon="lucide:hourglass"
+        message="No topics yet."
+        hint="They appear after the next clustering sweep, or run: scout topics build"
+      />
+    ) : (
       <ul class="topics">
-        {topics.map((topic) => (
+        {result.data.map((topic) => (
           <li class="card topic">
             <div class="topic-head">
               <h2 class="topic-label">{topic.label}</h2>
               {topic.trend && (
-                <span class={`badge trend trend-${topic.trend}`} title="Size trend across builds">
+                <span
+                  class={`badge trend-${topic.trend}`}
+                  title="Size trend across builds"
+                >
                   {topic.trend}
                 </span>
               )}
-              <span class="badge" title="Breakthrough momentum">
+              <span class="badge badge-score" title="Breakthrough momentum">
                 {topic.score.toFixed(1)}
               </span>
             </div>
@@ -55,6 +54,9 @@ const topics = await fetchTopics();
               {topic.papers.map((paper) => (
                 <li>
                   <a href={`/papers/${paper.paper_id}`} set:html={renderMathHTML(paper.title)} />
+                  <span class="badge badge-score" title="Breakthrough momentum">
+                    {paper.score.toFixed(1)}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -88,14 +90,10 @@ const topics = await fetchTopics();
     font-size: 1.1rem;
     line-height: 1.3;
   }
-  .badge {
+  /* Variants over the global .badge - the local re-declaration of the badge shape itself
+     used to shadow the shared class. */
+  .topic-head .badge {
     flex: none;
-    padding: 0.1rem 0.55rem;
-    border-radius: var(--radius-full);
-    background: var(--surface-2);
-    color: var(--muted);
-    font-size: 0.8rem;
-    font-variant-numeric: tabular-nums;
   }
   .trend-rising,
   .trend-new {
@@ -121,10 +119,17 @@ const topics = await fetchTopics();
     display: grid;
     gap: 0.3rem;
   }
+  .papers li {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
   .papers a {
     color: var(--ink);
     text-decoration: none;
     line-height: 1.4;
+    transition: color var(--dur-fast) var(--ease-out);
   }
   .papers a:hover {
     color: var(--accent);
