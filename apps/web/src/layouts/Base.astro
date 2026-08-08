@@ -14,7 +14,7 @@ import SideRail from '../components/SideRail.svelte';
 import StaleBanner from '../components/StaleBanner.svelte';
 import TermsGate from '../components/TermsGate.svelte';
 import ThemeToggle from '../components/ThemeToggle.svelte';
-import { fetchAccount } from '../lib/api';
+import { fetchAccount, type Account } from '../lib/api';
 import { THEME_SCRIPT } from '../lib/theme-script.js';
 
 // CSS anchors. Astro's client build deletes the styles of Svelte components that never
@@ -47,15 +47,24 @@ const noop = () => {};
 
 interface Props {
   title?: string;
+  /* A page that already fetched the account for its own content (the profile) passes it
+     down so the shell does not ask the API a second time. undefined means "not fetched",
+     so a page can also hand over an explicit null. */
+  account?: Account | null;
 }
 
-const { title } = Astro.props;
+const { title, account: accountFromPage } = Astro.props;
 const pageTitle = title ? `${title} — ResearchScout` : 'ResearchScout';
 
 const user = Astro.locals.user;
 // Only signed-in people can owe an acceptance, and asking the API here (rather than from the
 // browser) means the dialog is either in the first paint or absent - never a flash.
-const account = user ? await fetchAccount(Astro.locals.accessToken) : null;
+const account =
+  accountFromPage !== undefined
+    ? accountFromPage
+    : user
+      ? await fetchAccount(Astro.locals.accessToken)
+      : null;
 const termsOutstanding = account !== null && !account.terms_accepted;
 // When this page was built. A public page can be served from the edge cache long after, and
 // the banner below is how the reader finds out.
@@ -93,13 +102,20 @@ const renderedAt = new Date().toISOString();
     </script>
   </head>
   <body>
+    {/* The first focusable element on every page: a keyboard visitor otherwise tabs
+        through the header, the omnibox, the theme toggle, the account menu and the whole
+        rail before reaching content. Hidden by transform rather than display so it never
+        leaves the tab order. */}
+    <a class="skip-link" href="#main">Skip to content</a>
     <StaleBanner client:idle renderedAt={renderedAt} />
     {/* Named and unanimated: the frame is identical on both sides of a navigation, and
         holding it still is what makes the content's cross-fade read as a page change
         rather than the whole window blinking. The rail and footer get the same. */}
     <header class="site-header" transition:name="site-header" transition:animate="none">
       <div class="site-header-inner container">
-        <a class="brand" href="/">
+        {/* The label matters at phone widths, where the word is display:none and the icon
+            is aria-hidden - without it this link has no name at all. */}
+        <a class="brand" href="/" aria-label="ResearchScout">
           <span class="brand-mark">
             <Icon name="lucide:radar" aria-hidden="true" />
           </span>
@@ -135,7 +151,10 @@ const renderedAt = new Date().toISOString();
     <div class="rail-anchor" transition:name="side-rail" transition:animate="none">
       <SideRail client:load current={Astro.url.pathname} showSignIn={!user} />
     </div>
-    <main class="container">
+    {/* tabindex lets the skip link land real focus here, not just the sequential
+        starting point; main draws no ring (the global :focus-visible rule targets
+        controls, not landmarks). */}
+    <main class="container" id="main" tabindex="-1">
       <slot />
     </main>
     <footer class="site-footer" transition:name="site-footer" transition:animate="none">
@@ -163,7 +182,12 @@ const renderedAt = new Date().toISOString();
     {/* The CSS anchors from the frontmatter: server-rendered, hidden, never hydrated.
         AvatarArt joins them because it renders inside AvatarMenu only for signed-in
         accounts that picked one - exactly the sometimes-never-SSR'd shape the pruning
-        bug eats, and its styles must live in this shared chunk for every page's header. */}
+        bug eats, and its styles must live in this shared chunk for every page's header.
+        The other five verify-styles sentinels (Omnibox, SideRail, SettingsDrawer,
+        ShortcutsHelp here; AvatarPicker on the profile page) need no anchor: each is
+        unconditionally invoked on every render of its page, which is the same guarantee.
+        Anchoring an always-rendered island would only double its markup and its ARIA
+        ids. If one of them ever moves behind a condition, add it here that day. */}
     <div hidden aria-hidden="true">
       <ScoutPanel onactivity={noop} />
       <ChatMessage
@@ -181,13 +205,33 @@ const renderedAt = new Date().toISOString();
 </html>
 
 <style>
+  /* Parked above the viewport until focused; fixed at the nav bar's level so nothing
+     paints over it when it appears. */
+  .skip-link {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 0.5rem);
+    left: 0.5rem;
+    z-index: var(--z-nav);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-full);
+    background: var(--surface);
+    color: var(--accent);
+    font-size: var(--text-sm);
+    font-weight: 550;
+    text-decoration: none;
+    box-shadow: var(--shadow-md);
+    transform: translateY(calc(-100% - 2rem));
+  }
+  .skip-link:focus-visible {
+    transform: none;
+  }
   .site-header {
     position: sticky;
     top: 0;
     /* Above the rail's anchor (10 on wide screens), so the avatar menu - trapped in this
        stacking context (backdrop-filter creates it; the omnibox panel cannot escape it
        either) - paints over the rail band it opens into. */
-    z-index: 20;
+    z-index: var(--z-header);
     background: var(--bg-translucent);
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
@@ -266,11 +310,11 @@ const renderedAt = new Date().toISOString();
      the original "half mixed with the page" bug. */
   .rail-anchor {
     position: relative;
-    z-index: 10;
+    z-index: var(--z-rail-anchor);
   }
   @media (max-width: 64rem) {
     .rail-anchor {
-      z-index: 38;
+      z-index: var(--z-drawer);
     }
   }
   main {
