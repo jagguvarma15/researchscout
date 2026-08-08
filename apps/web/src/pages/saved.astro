@@ -1,136 +1,37 @@
 ---
-import { Icon } from 'astro-icon/components';
-import SaveButton from '../components/SaveButton.svelte';
+import EmptyState from '../components/EmptyState.astro';
+import PageIntro from '../components/PageIntro.astro';
+import PaperList from '../components/PaperList.astro';
 import Base from '../layouts/Base.astro';
-import { fetchSaved, formatDate, type PaperSummary } from '../lib/api';
-import { renderMathHTML } from '../lib/math';
-import { morphName } from '../lib/morph';
+import { catalogMessage, fetchSaved } from '../lib/api';
 
-const items = await fetchSaved(Astro.locals.accessToken);
-
-// Same timeline grouping as the feed: one group per publication day, newest first.
-const groups: { date: string; papers: PaperSummary[] }[] = [];
-for (const paper of items ?? []) {
-  const date = formatDate(paper.published_at);
-  const last = groups[groups.length - 1];
-  if (last && last.date === date) last.papers.push(paper);
-  else groups.push({ date, papers: [paper] });
-}
-
-function formatDayHeading(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`)
-    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
-    .toUpperCase();
-}
+const result = await fetchSaved(Astro.locals.accessToken);
 ---
 
 <Base title="Saved papers">
-  <h1 class="page-title">Saved papers</h1>
+  <PageIntro title="Saved papers" />
 
   {
-    items === null && (
-      <div class="card empty is-error">
-        <Icon name="lucide:cloud-off" aria-hidden="true" />
-        <p>The API is unreachable — try again in a moment.</p>
-      </div>
+    !result.ok ? (
+      <EmptyState
+        kind="error"
+        icon="lucide:cloud-off"
+        message={catalogMessage(result.failure, 'reading list')}
+        action={{ href: '/saved', label: 'Retry' }}
+      />
+    ) : result.data.length === 0 ? (
+      <EmptyState
+        icon="lucide:bookmark-plus"
+        message="Nothing saved yet."
+        hint="Bookmark a paper anywhere and it lands here."
+        action={{ href: '/', label: 'Browse the feed' }}
+      />
+    ) : (
+      <PaperList
+        papers={result.data}
+        savedIds={new Set(result.data.map((paper) => paper.id))}
+        density="compact"
+      />
     )
-  }
-  {
-    items !== null && items.length === 0 && (
-      <div class="card empty">
-        <Icon name="lucide:bookmark-plus" aria-hidden="true" />
-        <p>
-          Nothing saved yet — bookmark papers in the <a href="/">feed</a>.
-        </p>
-      </div>
-    )
-  }
-
-  {
-    items !== null &&
-      groups.map((group) => (
-        <section class="day">
-          <h2 class="day-heading">{formatDayHeading(group.date)}</h2>
-          <ul class="feed">
-            {group.papers.map((paper) => (
-              <li class="row">
-                <div class="row-head">
-                  <a
-                    class="title"
-                    href={`/papers/${paper.id}`}
-                    transition:name={morphName('paper-title', paper.id)}
-                    set:html={renderMathHTML(paper.title)}
-                  />
-                  <SaveButton client:visible paperId={paper.id} saved={true} />
-                </div>
-                <p class="meta">
-                  {paper.authors
-                    .slice(0, 3)
-                    .map((author) => author.name)
-                    .join(', ')}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))
   }
 </Base>
-
-<style>
-  .day {
-    margin-bottom: var(--space-6);
-  }
-  .day-heading {
-    margin: 0;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--line);
-    color: var(--muted);
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-  }
-  .feed {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-  .row {
-    padding: 1.1rem 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .row:last-child {
-    border-bottom: none;
-  }
-  .row-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.5rem;
-  }
-  .title {
-    flex: 1;
-    font-weight: 600;
-    line-height: 1.4;
-    color: var(--ink);
-    text-decoration: none;
-  }
-  .title:hover {
-    color: var(--accent);
-  }
-  .meta {
-    color: var(--muted);
-    font-size: 0.85rem;
-    margin: 0.35rem 0 0;
-  }
-  /* Compact density, same idea as the feed's: the attribute lives on <html>, so the
-     ancestor must be :global or the rule silently never matches. */
-  :global(html[data-density='compact']) .row {
-    padding: 0.6rem 0;
-  }
-  :global(html[data-density='compact']) .meta {
-    margin-top: 0.2rem;
-  }
-  :global(html[data-density='compact']) .day {
-    margin-bottom: var(--space-4);
-  }
-</style>
