@@ -1,8 +1,11 @@
 <script lang="ts">
   // Header account menu: the account's chosen crew avatar (initials until one is picked, or
   // if a stored slug stops existing) opening a small dropdown with the profile link and the
-  // settings drawer trigger. Closes on click-outside and Escape.
+  // settings drawer trigger. Closes on the shared outside-click judgement (composedPath,
+  // not contains - lib/overlay.ts records the re-render bug that distinction fixed) and a
+  // guarded Escape that hands focus back to the button; Tab cycles inside while open.
 
+  import { clickedOutside, trapFocus } from '../lib/overlay';
   import { isAvatarSlug } from '../lib/avatars';
   import AvatarArt from './AvatarArt.svelte';
 
@@ -10,6 +13,7 @@
 
   let open = $state(false);
   let root: HTMLElement | undefined = $state();
+  let button: HTMLButtonElement | undefined = $state();
 
   const art = $derived(avatar !== null && isAvatarSlug(avatar) ? avatar : null);
 
@@ -23,11 +27,17 @@
       .toUpperCase() || '?';
 
   function onDocumentClick(event: MouseEvent) {
-    if (open && root && !root.contains(event.target as Node)) open = false;
+    if (open && clickedOutside(event, root)) open = false;
   }
 
   function onDocumentKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') open = false;
+    if (!open) return;
+    if (event.key === 'Escape') {
+      open = false;
+      button?.focus();
+    } else if (event.key === 'Tab' && root) {
+      trapFocus(root, event);
+    }
   }
 </script>
 
@@ -37,6 +47,7 @@
   <button
     class="avatar"
     class:pictured={art !== null}
+    bind:this={button}
     onclick={() => (open = !open)}
     aria-expanded={open}
     aria-haspopup="menu"
@@ -86,8 +97,8 @@
     letter-spacing: 0.02em;
     cursor: pointer;
     transition:
-      background-color var(--dur-fast, 0.15s) var(--ease-out, ease),
-      border-color var(--dur-fast, 0.15s) var(--ease-out, ease);
+      background-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+      border-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .avatar:hover {
     background: var(--chip-hover, #fde68a);
@@ -107,7 +118,7 @@
     position: absolute;
     top: calc(100% + 0.5rem);
     right: 0;
-    z-index: 20;
+    z-index: var(--z-header, 20);
     min-width: 11rem;
     display: flex;
     flex-direction: column;
@@ -115,7 +126,7 @@
     border: 1px solid var(--line, #e6e1d5);
     border-radius: var(--radius-md, 14px);
     background: var(--surface, #fff);
-    box-shadow: var(--shadow-lg, 0 16px 48px rgb(23 25 28 / 0.16));
+    box-shadow: var(--shadow-lg, 0 2px 4px rgb(23 25 28 / 0.06), 0 16px 48px rgb(23 25 28 / 0.16));
   }
   .menu-user {
     padding: 0.35rem 0.65rem 0.45rem;
