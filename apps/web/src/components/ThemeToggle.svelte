@@ -66,9 +66,9 @@
     color: var(--muted, #5d6570);
     cursor: pointer;
     transition:
-      background-color var(--dur-fast, 0.15s) var(--ease-out, ease),
-      border-color var(--dur-fast, 0.15s) var(--ease-out, ease),
-      color var(--dur-fast, 0.15s) var(--ease-out, ease);
+      background-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+      border-color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1)),
+      color var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .toggle:hover {
     background: var(--surface-2, #f4f0e8);
@@ -84,7 +84,7 @@
      rs:themechange). */
   .icon {
     display: inline-flex;
-    animation: icon-swap var(--dur-fast, 0.15s) var(--ease-out, ease);
+    animation: icon-swap var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   @keyframes icon-swap {
     from {
