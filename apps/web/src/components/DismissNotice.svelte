@@ -74,7 +74,7 @@
 
 {#if open}
   <div
-    class="backdrop"
+    class="backdrop backdrop-veil"
     role="presentation"
     onclick={(event) => {
       if (event.target === event.currentTarget) hide();
@@ -110,14 +110,11 @@
     position: fixed;
     inset: 0;
     /* Above the filter sidebar (35) and the rail (38): this is the last thing opened. */
-    z-index: 60;
+    z-index: var(--z-notice, 60);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: var(--gutter);
-    background: rgb(0 0 0 / 0.32);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
     /* The dialog arrives right after a row animated away; a hard cut here would undo that
        care. The global motion guard stills both under reduced motion. */
     animation: notice-fade var(--dur-fast) var(--ease-out);
