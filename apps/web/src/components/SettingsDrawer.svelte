@@ -181,7 +181,7 @@
 
 {#if open}
   <div
-    class="backdrop"
+    class="backdrop backdrop-veil"
     role="presentation"
     onclick={(event) => {
       if (event.target === event.currentTarget) hide();
@@ -325,11 +325,8 @@
     inset: 0;
     /* Above the rail drawer (38): settings can be reached from inside it, and the last
        surface opened sits on top. The notices at 60 still outrank everything. */
-    z-index: 39;
-    background: color-mix(in srgb, var(--bg, #faf7f1) 72%, transparent);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    animation: prefs-fade var(--dur-fast, 0.15s) var(--ease-out, ease);
+    z-index: var(--z-settings, 39);
+    animation: prefs-fade var(--dur-fast, 0.15s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   .prefs-panel {
     position: absolute;
@@ -341,8 +338,8 @@
     flex-direction: column;
     background: var(--surface, #fff);
     border-left: 1px solid var(--line, #e6e1d5);
-    box-shadow: var(--shadow-md, 0 12px 32px rgb(23 25 28 / 0.12));
-    animation: prefs-in var(--dur-slow, 0.25s) var(--ease-out, ease);
+    box-shadow: var(--shadow-md, 0 4px 12px rgb(23 25 28 / 0.08), 0 12px 32px rgb(23 25 28 / 0.1));
+    animation: prefs-in var(--dur-slow, 0.25s) var(--ease-out, cubic-bezier(0.2, 0, 0, 1));
   }
   @keyframes prefs-fade {
     from {
