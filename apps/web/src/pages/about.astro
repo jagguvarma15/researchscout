@@ -1,5 +1,5 @@
 ---
-import { Icon } from 'astro-icon/components';
+import EmptyState from '../components/EmptyState.astro';
 import Base from '../layouts/Base.astro';
 import { fetchSources } from '../lib/api';
 
@@ -10,7 +10,7 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
 ---
 
 <Base title="About">
-  <div class="about">
+  <div class="prose-page about">
     <header class="hero">
       <h1 class="page-title">About ResearchScout</h1>
       <p class="lede">
@@ -58,10 +58,12 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
 
       {
         sources === null && (
-          <div class="card empty">
-            <Icon name="lucide:cloud-off" aria-hidden="true" />
-            <p>The source list is unavailable while the API is unreachable.</p>
-          </div>
+          <EmptyState
+            kind="error"
+            icon="lucide:cloud-off"
+            message="The source list is unavailable while the API is unreachable."
+            action={{ href: '/about#data', label: 'Retry' }}
+          />
         )
       }
 
@@ -257,26 +259,11 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
 </Base>
 
 <style>
-  /* One centered column: the page is prose, so it reads as a document rather than a
-     left-hugging column against empty space. Headings and the intro center with it;
-     paragraph text stays left-aligned inside, which is what keeps long lines readable. */
-  .about {
-    max-width: 58rem;
-    margin: 0 auto;
-  }
-  .hero {
-    text-align: center;
-    margin-bottom: var(--space-6);
-  }
-  .hero .page-title {
+  /* The shared .prose-page column carries the hero, the rule-separated blocks and the
+     capped prose measure; this page keeps only what is its own. The title override is
+     element-qualified so it outranks the shared rule on specificity, not bundle order. */
+  .about header.hero .page-title {
     margin-bottom: 0.75rem;
-  }
-  .lede {
-    max-width: 60ch;
-    margin: 0 auto;
-    color: var(--muted);
-    font-size: var(--text-md);
-    line-height: 1.6;
   }
   /* Inline text links rather than chips: hairline separators are drawn in CSS so no
      punctuation characters sit between them. */
@@ -308,25 +295,6 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
     color: var(--ink);
     text-decoration: underline;
   }
-  .block {
-    margin-bottom: var(--space-6);
-    padding-top: var(--space-5);
-    border-top: 1px solid var(--line);
-  }
-  .block h2 {
-    margin: 0 0 1rem;
-    font-size: var(--text-lg);
-    letter-spacing: -0.01em;
-    text-align: center;
-  }
-  .block p {
-    max-width: 62ch;
-    margin: 0 auto 0.8rem;
-    line-height: 1.65;
-  }
-  .block p:last-child {
-    margin-bottom: 0;
-  }
   .note {
     color: var(--muted);
     font-size: var(--text-sm);
@@ -335,8 +303,9 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
   .after-list {
     margin-top: 0.9rem;
   }
-  .steps,
-  .facts {
+  /* Element-qualified so the list margins beat the shared .block ul rule. */
+  .about ol.steps,
+  .about ul.facts {
     max-width: 62ch;
     margin: 0 auto;
     padding-left: 1.2rem;
@@ -414,7 +383,9 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
     background: var(--accent-soft);
     color: var(--accent-ink);
   }
-  @media (max-width: 640px) {
+  /* The table tier the data tables already use - and rem, so it stays in step with the
+     reader's type-size preference instead of drifting as the one pixel breakpoint. */
+  @media (max-width: 42rem) {
     .sources {
       min-width: 34rem;
     }
