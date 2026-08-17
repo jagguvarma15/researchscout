@@ -73,7 +73,7 @@ def _wire(monkeypatch: pytest.MonkeyPatch, store: _Store, sources: list[object])
 def test_the_primary_pass_stamps_known_and_unknown_alike(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """"Semantic Scholar does not know it yet" is an observation: stamping sends the paper
+    """ "Semantic Scholar does not know it yet" is an observation: stamping sends the paper
     to the back of the queue instead of starving the tail on it every day."""
     store = _Store(["arxiv:1", "arxiv:2", "arxiv:3"])
     _wire(monkeypatch, store, [_S2(known={"arxiv:1", "arxiv:3"})])
