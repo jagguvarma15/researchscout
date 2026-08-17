@@ -65,6 +65,8 @@ def test_status_reports_corpus_and_runs(
     assert body["build_sha"] == "abc1234"
     assert body["papers"] == 1
     assert body["newest_paper_at"].startswith("2026-08-01")
+    # created_at is stamped by the database at insert, so pin presence and recency shape.
+    assert body["newest_paper_created_at"] is not None
     assert body["migration"]  # whatever head the test database is migrated to
     assert body["runs"][0]["task"] == "ingest"
     assert body["runs"][0]["ok"] is True
@@ -72,6 +74,34 @@ def test_status_reports_corpus_and_runs(
     # the test runs, so pin presence rather than a value.
     assert body["pipeline_due_at"] is not None
     assert body["scheduler_started_at"].startswith("2026-08-05")
+    # The self-checks travel with the payload; the network-only funnel check must not.
+    names = [check["name"] for check in body["health"]]
+    assert "pipeline_runs" in names
+    assert "corpus_freshness" in names
+    assert "funnel_dns" not in names
+    groups = {group["group"]: group for group in body["schedule"]}
+    assert groups["pipeline"]["at"] == ["05:00", "10:00", "14:00", "17:00"]
+    assert groups["pipeline"]["next_run"] is not None
+
+
+def test_status_carries_running_rows_and_the_last_health_run(session: Session) -> None:
+    from researchscout.store.runs import record_task_started
+
+    record_run(
+        session,
+        "health",
+        started_at=datetime(2026, 8, 5, 9, 0, tzinfo=UTC),
+        finished_at=datetime(2026, 8, 5, 9, 0, tzinfo=UTC),
+        ok=True,
+        note="freshness=ok",
+    )
+    record_task_started(session, "fulltext", started_at=datetime(2026, 8, 5, 10, 0, tzinfo=UTC))
+    session.commit()
+
+    body = _client(session).get("/v1/system/status").json()
+    assert body["runs"][0]["task"] == "fulltext"
+    assert body["runs"][0]["finished_at"] is None
+    assert body["last_health_run"]["note"] == "freshness=ok"
 
 
 def test_status_on_an_empty_corpus(session: Session) -> None:
