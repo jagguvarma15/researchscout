@@ -42,24 +42,33 @@ x-backend-env: &backend-env
   # stayed off, and the stack ran for weeks without fetching a paper. deploy/.env now only
   # has to override, and an old one is right by default.
   RS_SCHEDULER_BATCH_PIPELINE: ${RS_SCHEDULER_BATCH_PIPELINE:-true}
-  # arXiv submits nothing over a weekend, so two days reaches back only to Saturday on a
-  # Monday. Four covers that and a weekend outage.
+  # The overlap under the per-source watermark, not a fixed window: each run reaches back to
+  # its last completed walk minus this many days, so downtime widens the window by itself.
+  # Four days covers arXiv's announcement lag and a weekend either side of an outage.
   RS_SCHEDULER_INGEST_WINDOW_DAYS: ${RS_SCHEDULER_INGEST_WINDOW_DAYS:-4}
   # Walk out of the window after two pages of nothing-new instead of re-fetching all of it.
-  # arXiv pages newest-first, so this is sound - and it is what keeps four runs a day inside
-  # the request budget arXiv tolerates from one address.
+  # arXiv pages newest-first, so this is sound.
   RS_SCHEDULER_INGEST_EARLY_STOP_PAGES: ${RS_SCHEDULER_INGEST_EARLY_STOP_PAGES:-2}
-  # Wall-clock schedule: the fetch-and-enrich tasks run at each of these times and the
-  # once-a-day products at the daily one. The 20:30 slot is the one that matters most:
-  # arXiv announces the day's papers at 20:00 ET, so without it the evening always shows
-  # yesterday. The report runs after that fetch so it describes the day's actual
-  # announcement. Set any to an empty string to go back to intervals (report: to the daily
-  # set). The zone is named rather than an offset so the runs stay put across daylight
-  # saving; the image has tzdata, so nothing else is needed.
-  RS_SCHEDULER_PIPELINE_AT: "${RS_SCHEDULER_PIPELINE_AT-05:00,10:00,14:00,17:00,20:30}"
+  # Wall-clock schedule, shaped around the day arXiv actually has: announcements land
+  # Sun-Thu 20:00 ET and the search API refreshes once around midnight ET, so ONE early
+  # slot sees everything a day brings (Sat/Sun mornings legitimately find nothing). The
+  # citation walker runs before the 07:00 report so the morning read carries fresh counts;
+  # the fast signal proxies poll morning and evening. Set any to an empty string to go
+  # back to intervals (report: to the daily set). The zone is named rather than an offset
+  # so the runs stay put across daylight saving; the image has tzdata.
+  RS_SCHEDULER_PIPELINE_AT: "${RS_SCHEDULER_PIPELINE_AT-00:30}"
+  RS_SCHEDULER_CITATIONS_AT: "${RS_SCHEDULER_CITATIONS_AT-06:00}"
+  RS_SCHEDULER_REPORT_AT: "${RS_SCHEDULER_REPORT_AT-07:00}"
+  RS_SCHEDULER_SIGNALS_AT: "${RS_SCHEDULER_SIGNALS_AT-08:00,18:00}"
   RS_SCHEDULER_DAILY_AT: "${RS_SCHEDULER_DAILY_AT-17:00}"
-  RS_SCHEDULER_REPORT_AT: "${RS_SCHEDULER_REPORT_AT-21:00}"
   RS_SCHEDULER_TIMEZONE: ${RS_SCHEDULER_TIMEZONE:-America/New_York}
+  # One daily slot wants a bigger text batch than the old five did.
+  RS_SCHEDULER_FULLTEXT_BATCH: ${RS_SCHEDULER_FULLTEXT_BATCH:-100}
+  # Touched by the scheduler between ticks and long items; the healthcheck reads its age.
+  RS_SCHEDULER_HEARTBEAT_PATH: ${RS_SCHEDULER_HEARTBEAT_PATH:-/tmp/scheduler-heartbeat}
+  # The funnel hostname, checked through public DNS by the health task - the record can
+  # vanish on a reboot while every on-tailnet probe still passes. Set in deploy/.env.
+  RS_PUBLIC_HOSTNAME: ${RS_PUBLIC_HOSTNAME:-}
   RS_OIDC_ISSUER: ${RS_OIDC_ISSUER:-}
   RS_OIDC_AUDIENCE: ${RS_OIDC_AUDIENCE:-api}
   RS_TERMS_VERSION: ${RS_TERMS_VERSION:-2026-08-01}
@@ -74,6 +83,7 @@ x-backend-env: &backend-env
   RS_CHAT_RATE_LIMIT_ANONYMOUS: ${RS_CHAT_RATE_LIMIT_ANONYMOUS:-5}
   RS_LLM_MAX_CONCURRENCY: ${RS_LLM_MAX_CONCURRENCY:-2}
   S2_API_KEY: ${S2_API_KEY:-}
+  OPENALEX_API_KEY: ${OPENALEX_API_KEY:-}
   GITHUB_TOKEN: ${GITHUB_TOKEN:-}
 
 x-backend: &backend
@@ -146,9 +156,9 @@ services:
       start_period: 300s
       retries: 3
 
-  # Digests, topics and the daily report on their intervals - plus ingest, embedding, full
-  # text and signals when RS_SCHEDULER_BATCH_PIPELINE is on, which is what keeps a
-  # stream-less deployment supplied with new papers.
+  # Digests, topics and the daily report on their clocks - plus ingest, embedding, full
+  # text, signals and the citation walker when RS_SCHEDULER_BATCH_PIPELINE is on, which is
+  # what keeps a stream-less deployment supplied with new papers.
   scheduler:
     <<: *backend
     command: ["scout", "serve", "scheduler"]
@@ -157,6 +167,22 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    healthcheck:
+      # The loop touches the heartbeat file every tick and between long-running items; a
+      # stale file means the loop is wedged, not merely busy. Docker does not restart on
+      # unhealthy - deliberately, a restart loop over a slow embed run would be worse - but
+      # `docker compose ps` and the host watchdog read the status.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os,sys,time; p='/tmp/scheduler-heartbeat'; sys.exit(0 if os.path.exists(p) and time.time()-os.path.getmtime(p) < 1800 else 1)",
+        ]
+      interval: 5m
+      timeout: 5s
+      start_period: 300s
+      retries: 3
 
   # The streaming pipeline, opt-in. Kafka plus the worker is roughly a gigabyte that the
   # scheduler path does not need.
