@@ -1,34 +1,31 @@
-"""In-process refresh loop for the derived products the stream does not build.
+"""In-process refresh loop: fetch, enrich, and publish on the publisher's clock.
 
-Three tasks always run: the weekly digest, the topic rebuild, and the daily report. Ingestion,
-embedding, full text and signal refresh normally come from the streaming pipeline
-(``scout stream serve``).
-
-``RS_SCHEDULER_BATCH_PIPELINE`` adds those four here instead, driving the same batch functions
-``scout ingest`` / ``index`` / ``fulltext`` use. That is for an install that does not run the
-stream - a deployment where Kafka is not worth its memory, say - which would otherwise never
-see another paper. Running both at once means two processes fetching from the same upstreams
-on one address, which is what the three-second arXiv floor is not designed for; pick one.
+The task groups follow the day arXiv actually has. Announcements land Sunday through Thursday
+at 20:00 ET and the search API refreshes once around midnight ET, so the pipeline set
+(ingest, index, full text) runs once in the early morning; the citation walker runs before
+the daily report so the morning read carries fresh counts; the fast signal proxies (HF
+trending, HN, Bluesky) poll on their own times; the daily set (catalogue, digest, topics)
+keeps the afternoon; and a health task self-checks on a short interval throughout.
 
 A task runs either on an interval or at named times of day. Intervals are the default and are
 what a local checkout wants; wall-clock times are for a deployment that should follow a
-publisher's day rather than an arbitrary phase set by whenever the process last restarted. Set
-``RS_SCHEDULER_PIPELINE_AT`` and the fetch-and-enrich tasks move onto the clock;
-``RS_SCHEDULER_DAILY_AT`` does the same for the once-a-day products. There is deliberately no
-catch-up for a slot missed while the process was down: the ingest window is several days wide,
-so the next run covers whatever a restart stepped over, and firing immediately on start-up
-would instead mean a restart loop hammering arXiv.
+publisher's day rather than an arbitrary phase set by whenever the process last restarted.
+There is deliberately no catch-up for a slot missed while the process was down: the ingest
+window derives from the source's own watermark, so the next run covers whatever a restart
+stepped over, and firing immediately on start-up would instead mean a restart loop hammering
+arXiv.
 
-A slot missed while the process was *suspended* is different, and wall-clock deadlines are held
-as datetimes rather than monotonic offsets because of it. On a Mac that sleeps, the container's
-monotonic clock stops with the host, so "so many awake-seconds from now" drifts by however long
-the lid was down - a 05:00 run scheduled the evening before would quietly move to the
-afternoon. Judged against the wall clock instead, a slept-over deadline is simply due on wake:
-the task runs once, covering the backlog, and reschedules onto the next future slot.
+A slot missed while the process was *suspended* is different, and wall-clock deadlines are
+held as datetimes rather than monotonic offsets because of it. On a Mac that sleeps, the
+container's monotonic clock stops with the host, so "so many awake-seconds from now" drifts
+by however long the lid was down. Judged against the wall clock instead, a slept-over
+deadline is simply due on wake: the task runs once, covering the backlog, and reschedules
+onto the next future slot.
 
 The same task set backs both ``scout serve scheduler`` (a long-lived loop) and ``--once`` (a
-single pass), so a host cron can drive it too. A task that raises is logged and skipped, so one
-failure never stops the loop.
+single pass), so a host cron can drive it too. A task that raises is logged and skipped, so
+one failure never stops the loop; every run opens a ledger row before it starts and completes
+it after, so even a task that hangs leaves evidence.
 """
 
 from __future__ import annotations
@@ -54,6 +51,11 @@ logger = logging.getLogger(__name__)
 Clock = Callable[[], float]
 Sleep = Callable[[float], None]
 Wall = Callable[[], datetime]
+Heartbeat = Callable[[], None]
+TaskFn = Callable[[], str | None]
+
+# Citation sources belong to the walker (the ``citations`` task), not the fast-signal poll.
+_CITATION_SOURCES = frozenset({"semantic_scholar", "openalex"})
 
 
 @dataclass
@@ -97,12 +99,14 @@ class Scheduler:
         clock: Clock = time.monotonic,
         sleep: Sleep = time.sleep,
         wall: Wall = lambda: datetime.now(UTC),
+        heartbeat: Heartbeat | None = None,
     ) -> None:
         self._tasks = tasks
         self._tick_sec = tick_sec
         self._clock = clock
         self._sleep = sleep
         self._wall = wall
+        self._heartbeat = heartbeat or (lambda: None)
         for task in tasks:
             if task.at:
                 # An interval task starts due, so a fresh process does its work at once. A
@@ -143,6 +147,7 @@ class Scheduler:
         except Exception:  # noqa: BLE001 - a failing task must not stop the loop
             logger.warning("scheduled task %s failed", task.name, exc_info=True)
         self._reschedule(task)
+        self._heartbeat()
 
     def run_pass(self) -> list[str]:
         """Run every task once regardless of interval; return the names run (backs ``--once``)."""
@@ -158,6 +163,7 @@ class Scheduler:
             if task.due(now, wall):
                 self._run(task)
                 ran.append(task.name)
+        self._heartbeat()
         return ran
 
     def run_forever(self, stop: Callable[[], bool]) -> None:
@@ -176,66 +182,93 @@ def _embedder() -> Embedder:
     return default_embedder()
 
 
-def _ingest(settings: Settings) -> None:
-    """Fetch every enabled content source over the recent window, resuming its cursor."""
-    from datetime import UTC, datetime, timedelta
+def _run_sources(settings: Settings, kind: str, names: frozenset[str] | None) -> str:
+    """Fetch a set of sources, isolating each one's failure; the note names every outcome.
 
-    import httpx
-
-    from researchscout.ingest.pipeline import run_ingest
+    Any exception in one source — HTTP, parse, database — must not cost the sources after
+    it. The healthy sources' work stands either way; if anything failed, the aggregate
+    raises so the ledger row reads failed while still carrying who succeeded.
+    """
+    from researchscout.ingest.pipeline import run_ingest, window_start
     from researchscout.sources import enabled_sources
     from researchscout.store.db import session_scope
 
-    since = datetime.now(UTC) - timedelta(days=settings.scheduler_ingest_window_days)
-    for source in enabled_sources("content"):
+    parts: list[str] = []
+    failed = False
+    for source in enabled_sources(kind):
+        if names is not None and source.name not in names:
+            continue
         try:
             with session_scope() as session:
+                since = window_start(
+                    session,
+                    source.name,
+                    overlap_days=settings.scheduler_ingest_window_days,
+                    max_window_days=settings.scheduler_ingest_max_window_days,
+                )
                 summary = run_ingest(
                     session,
                     source,
                     since,
                     resume=True,
-                    stop_after_known_pages=settings.scheduler_ingest_early_stop_pages or None,
+                    stop_after_known_pages=(
+                        (settings.scheduler_ingest_early_stop_pages or None)
+                        if kind == "content"
+                        else None
+                    ),
                 )
-        except httpx.HTTPError as exc:
-            # One upstream being rate limited or down must not stop the others.
-            logger.warning("ingest %s failed: %s", source.name, exc)
+        except Exception as exc:  # noqa: BLE001 - one source must not stop the others
+            logger.warning("%s %s failed", kind, source.name, exc_info=True)
+            parts.append(f"{source.name}: failed ({str(exc) or exc.__class__.__name__})")
+            failed = True
             continue
         suffix = f", stopped early: {summary.stopped_early}" if summary.stopped_early else ""
-        logger.info(
-            "ingest %s: fetched=%d new=%d signals=%d%s",
-            summary.source,
-            summary.fetched,
-            summary.new_papers,
-            summary.signals,
-            suffix,
-        )
+        if kind == "content":
+            part = (
+                f"{summary.source}: fetched={summary.fetched} new={summary.new_papers}{suffix}"
+            )
+        else:
+            part = f"{summary.source}: {summary.signals} observation(s){suffix}"
+        logger.info("%s %s", kind, part)
+        parts.append(part)
+    note = "; ".join(parts) if parts else "no sources enabled"
+    if failed:
+        raise RuntimeError(note)
+    return note
 
 
-def _signals(settings: Settings) -> None:
-    """Refresh every enabled signal source: citations, upvotes, discussion, engagement."""
-    from datetime import UTC, datetime, timedelta
+def _ingest(settings: Settings) -> str:
+    """Fetch every enabled content source from its watermark-derived window."""
+    return _run_sources(settings, "content", None)
 
-    import httpx
 
-    from researchscout.ingest.pipeline import run_ingest
+def _signals(settings: Settings) -> str:
+    """Refresh the fast signal proxies: trending rank, upvotes, discussion, engagement."""
     from researchscout.sources import enabled_sources
-    from researchscout.store.db import session_scope
 
-    since = datetime.now(UTC) - timedelta(days=settings.scheduler_ingest_window_days)
-    for source in enabled_sources("signal"):
-        try:
-            with session_scope() as session:
-                summary = run_ingest(session, source, since, resume=True)
-        except httpx.HTTPError as exc:
-            logger.warning("signals %s failed: %s", source.name, exc)
-            continue
-        suffix = f", stopped early: {summary.stopped_early}" if summary.stopped_early else ""
-        logger.info("signals %s: %d observation(s)%s", summary.source, summary.signals, suffix)
+    fast = frozenset(
+        source.name
+        for source in enabled_sources("signal")
+        if source.name not in _CITATION_SOURCES
+    )
+    return _run_sources(settings, "signal", fast)
 
 
-def _index(settings: Settings) -> None:
-    """Embed whatever is not embedded yet, and chunk full text when chunk retrieval is on."""
+def _citations(settings: Settings) -> str:
+    """Walk citation coverage stalest-first: Semantic Scholar leads, OpenAlex takes the rest."""
+    from researchscout.ingest.citations import run_citation_refresh
+
+    note = run_citation_refresh(settings)
+    logger.info("citations: %s", note)
+    return note
+
+
+def _index(settings: Settings) -> str:
+    """Embed whatever is not embedded yet, and chunk full text when chunk retrieval is on.
+
+    Papers and chunks take separate sessions so a chunking failure cannot roll back the
+    paper embeddings that already committed.
+    """
     from researchscout.store.chunks import index_chunks
     from researchscout.store.db import session_scope
     from researchscout.store.vectors import index_papers
@@ -243,16 +276,22 @@ def _index(settings: Settings) -> None:
     embedder = _embedder()
     with session_scope() as session:
         papers = index_papers(session, embedder)
-        chunks = index_chunks(session, embedder) if settings.chunk_retrieval else 0
+    chunks = 0
+    if settings.chunk_retrieval:
+        with session_scope() as session:
+            chunks = index_chunks(session, embedder)
     if papers or chunks:
         logger.info("index: %d paper(s), %d chunk(s)", papers, chunks)
+    return f"{papers} paper(s), {chunks} chunk(s)"
 
 
-def _fulltext(settings: Settings) -> None:
+def _fulltext(settings: Settings, heartbeat: Heartbeat | None = None) -> str:
     """Fetch article text for a modest batch, saved and read papers first.
 
     Full-content harvesting is not permitted, so this stays small and paced exactly like the
-    ingest path - the batch size is the politeness, not an optimisation.
+    ingest path - the batch size is the politeness, not an optimisation. Each paper commits
+    on its own, so an interruption keeps everything already fetched; the heartbeat ticks
+    between items because this is the one task long enough to look like a hang from outside.
     """
     import time
 
@@ -263,6 +302,7 @@ def _fulltext(settings: Settings) -> None:
     from researchscout.store.models import EventRow, SavedPaperRow
     from researchscout.store.papers import papers_missing_full_text, set_full_text
 
+    beat = heartbeat or (lambda: None)
     delay = settings.arxiv_page_delay_sec
     fetched = 0
     with session_scope() as session:
@@ -277,29 +317,40 @@ def _fulltext(settings: Settings) -> None:
                 time.sleep(delay)
             text = fetch_full_text(arxiv_id)
             set_full_text(session, paper_id, text or "")
+            session.commit()
             fetched += 1 if text else 0
+            beat()
     if pending:
         logger.info("full text: %d of %d attempted", fetched, len(pending))
+    return f"{fetched} of {len(pending)} attempted"
 
 
-def _digest(settings: Settings) -> None:
-    from researchscout.digest import build_digest
+def _digest(settings: Settings) -> str:
+    """Rank in one session, compose with no transaction open, publish in another.
+
+    The LLM round-trip is the slowest and least reliable step here; it must not hold a
+    database connection while it thinks.
+    """
+    from researchscout.digest import compose_digest, rank_digest
     from researchscout.llm.openai_compat import OpenAICompatLLM
     from researchscout.store.db import session_scope
     from researchscout.store.digests import upsert_digest
 
     with session_scope() as session:
-        result = build_digest(
-            session, OpenAICompatLLM(), days=settings.digest_days, k=settings.digest_top_k
+        items, start, end = rank_digest(
+            session, days=settings.digest_days, k=settings.digest_top_k
         )
-        if result is None:
-            logger.info("digest: window empty, nothing to publish")
-            return
+    if not items:
+        logger.info("digest: window empty, nothing to publish")
+        return "window empty"
+    result = compose_digest(OpenAICompatLLM(), items, start=start, end=end)
+    with session_scope() as session:
         upsert_digest(session, result)
     logger.info("digest %s: %d papers, %d cited", result.slug, len(result.items), len(result.cited))
+    return f"{result.slug}: {len(result.items)} papers, {len(result.cited)} cited"
 
 
-def _topics(settings: Settings) -> None:
+def _topics(settings: Settings) -> str:
     from researchscout.cluster import build_topics
     from researchscout.llm.openai_compat import OpenAICompatLLM
     from researchscout.store.db import session_scope
@@ -316,27 +367,43 @@ def _topics(settings: Settings) -> None:
         )
         replace_topics(session, topics)
     logger.info("built %d topic(s)", len(topics))
+    return f"{len(topics)} topic(s)"
 
 
-def _report(settings: Settings) -> None:
+def _report(settings: Settings) -> str:
+    """Publish the morning report, then run the prunes — each in its own session.
+
+    The prunes ride this daily slot for cadence only; a prune failure must not roll back a
+    published report, so nothing shares a transaction here.
+    """
     from researchscout.report import build_daily_report
     from researchscout.store.db import session_scope
     from researchscout.store.digests import upsert_digest
     from researchscout.store.lineage import prune_lineage
+    from researchscout.store.raw import prune_raw_items
 
+    zone = ZoneInfo(settings.scheduler_timezone)
     with session_scope() as session:
-        result = build_daily_report(session)
+        result = build_daily_report(session, zone=zone)
         if result is None:
             logger.info("daily report: window empty, nothing to publish")
+            note = "window empty"
         else:
             upsert_digest(session, result)
             logger.info("daily report %s: %d must-read", result.slug, len(result.items))
+            note = f"{result.slug}: {len(result.items)} must-read"
+    with session_scope() as session:
         pruned = prune_lineage(session)
     if pruned:
         logger.info("pruned %d lineage rows", pruned)
+    with session_scope() as session:
+        raw_pruned = prune_raw_items(session, keep_days=settings.raw_items_keep_days)
+    if raw_pruned:
+        logger.info("pruned %d raw item(s)", raw_pruned)
+    return note
 
 
-def _catalog(settings: Settings) -> None:
+def _catalog(settings: Settings) -> str:
     """Refresh the model and benchmark catalogue from its upstreams."""
     from researchscout.catalog import refresh_catalog
     from researchscout.store.db import session_scope
@@ -350,10 +417,32 @@ def _catalog(settings: Settings) -> None:
         summary.results,
         summary.linked,
     )
+    note = (
+        f"{summary.models} model(s), {summary.benchmarks} benchmark(s), "
+        f"{summary.results} result(s)"
+    )
+    if summary.failed:
+        # Yesterday's rows still stand — partial data is the module's contract — but the
+        # ledger must not read ok when an upstream silently contributed nothing.
+        raise RuntimeError(f"upstreams failed: {', '.join(summary.failed)}; kept {note}")
+    return note
+
+
+def _health(settings: Settings) -> str:
+    """Self-check the pipeline, corpus, and public reachability; fail loudly on any fail."""
+    from researchscout.health import overall_ok, run_health_checks, summarize
+    from researchscout.store.db import session_scope
+
+    with session_scope() as session:
+        checks = run_health_checks(session, settings, include_network=True)
+    note = summarize(checks)
+    if not overall_ok(checks):
+        raise RuntimeError(note)
+    return note
 
 
 def _record_safely(name: str, started: datetime, *, ok: bool, note: str = "") -> None:
-    """Write one ledger row, and never let the write take the task's outcome down with it."""
+    """Write one completed ledger row, never letting the write take the outcome down."""
     from researchscout.store.db import session_scope
     from researchscout.store.runs import record_run
 
@@ -371,33 +460,56 @@ def record_started(count: int) -> None:
 
     ``deploy/verify.sh`` keys on this row: a slot that passed after the newest start with no
     task run after it means the loop is stalled or dead, not merely young - the distinction
-    between "the ledger fills as tasks run" and "the 05:00 slot went missing".
+    between "the ledger fills as tasks run" and "the morning slot went missing".
     """
     now = datetime.now(UTC)
     _record_safely("scheduler", now, ok=True, note=f"started: {count} task(s)")
 
 
-def _recorded(name: str, run: Callable[[], None]) -> Callable[[], None]:
-    """Wrap a task so every run lands in the ledger, success or failure.
+def _recorded(name: str, run: TaskFn) -> Callable[[], None]:
+    """Wrap a task so every run lands in the ledger — opened at start, completed at finish.
 
-    Failures re-raise so the loop's own logging stays the one place a traceback appears; the
-    ledger keeps the fact, the timing, and the first line of the reason — which is what
-    /v1/system/status and ``make deploy-verify`` answer "did the 05:00 slot run" from.
+    The open row is what makes a hang visible: a task that never comes back leaves
+    ``finished_at`` NULL instead of leaving nothing. Failures re-raise so the loop's own
+    logging stays the one place a traceback appears; the ledger keeps the fact, the timing,
+    and the task's own note.
     """
+    from researchscout.store.db import session_scope
+    from researchscout.store.runs import record_task_finished
+
+    def finish(run_id: int | None, started: datetime, *, ok: bool, note: str) -> None:
+        if run_id is None:
+            _record_safely(name, started, ok=ok, note=note)
+            return
+        try:
+            with session_scope() as session:
+                record_task_finished(
+                    session, run_id, finished_at=datetime.now(UTC), ok=ok, note=note
+                )
+        except Exception:  # noqa: BLE001
+            logger.warning("could not record the %s run", name, exc_info=True)
 
     def wrapped() -> None:
+        from researchscout.store.runs import record_task_started
+
         started = datetime.now(UTC)
+        run_id: int | None = None
         try:
-            run()
+            with session_scope() as session:
+                run_id = record_task_started(session, name, started_at=started)
+        except Exception:  # noqa: BLE001 - bookkeeping must not stop the task itself
+            logger.warning("could not open the %s ledger row", name, exc_info=True)
+        try:
+            note = run() or ""
         except Exception as exc:
-            _record_safely(name, started, ok=False, note=str(exc) or exc.__class__.__name__)
+            finish(run_id, started, ok=False, note=str(exc) or exc.__class__.__name__)
             raise
-        _record_safely(name, started, ok=True)
+        finish(run_id, started, ok=True, note=note)
 
     return wrapped
 
 
-def build_tasks(settings: Settings) -> list[Task]:
+def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> list[Task]:
     """Construct the scheduler's tasks from ``settings``.
 
     Each task carries both an interval and, when the corresponding ``_at`` setting is present,
@@ -406,20 +518,20 @@ def build_tasks(settings: Settings) -> list[Task]:
     """
     zone = ZoneInfo(settings.scheduler_timezone)
     pipeline_at = parse_times(settings.scheduler_pipeline_at)
+    signals_at = parse_times(settings.scheduler_signals_at) or pipeline_at
+    citations_at = parse_times(settings.scheduler_citations_at) or pipeline_at
     daily_at = parse_times(settings.scheduler_daily_at)
-    # The report reads best after the evening announcement lands, so it can run on its own
-    # clock; unset, it stays with the daily set.
+    # The report describes the overnight arrivals, so it takes its own morning time; unset,
+    # it stays with the daily set.
     report_at = parse_times(settings.scheduler_report_at) or daily_at
 
-    def task(
-        name: str, interval: float, run: Callable[[], None], at: tuple[clock_time, ...]
-    ) -> Task:
+    def task(name: str, interval: float, run: TaskFn, at: tuple[clock_time, ...]) -> Task:
         return Task(name, interval, _recorded(name, run), at=at, zone=zone)
 
     tasks: list[Task] = []
     if settings.scheduler_batch_pipeline:
-        # Ordered so a cycle flows the way a paper does: arrive, get embedded, get its text,
-        # then collect the signals that rank it.
+        # Ordered so a cycle flows the way a paper does: arrive, get embedded, get its text —
+        # then the signal groups follow their own clocks.
         tasks += [
             task(
                 "ingest",
@@ -436,14 +548,20 @@ def build_tasks(settings: Settings) -> list[Task]:
             task(
                 "fulltext",
                 settings.scheduler_fulltext_interval_sec,
-                partial(_fulltext, settings),
+                partial(_fulltext, settings, heartbeat),
                 pipeline_at,
             ),
             task(
                 "signals",
                 settings.scheduler_signals_interval_sec,
                 partial(_signals, settings),
-                pipeline_at,
+                signals_at,
+            ),
+            task(
+                "citations",
+                settings.scheduler_citations_interval_sec,
+                partial(_citations, settings),
+                citations_at,
             ),
         ]
     else:
@@ -471,5 +589,6 @@ def build_tasks(settings: Settings) -> list[Task]:
         task(
             "report", settings.scheduler_report_interval_sec, partial(_report, settings), report_at
         ),
+        task("health", settings.scheduler_health_interval_sec, partial(_health, settings), ()),
     ]
     return tasks
