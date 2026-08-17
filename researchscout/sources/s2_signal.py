@@ -110,12 +110,10 @@ class SemanticScholarSource(Source):
             self._sleep(retry_wait(resp.headers.get("Retry-After"), attempt, cap=_RETRY_WAIT_CAP))
         raise AssertionError("unreachable")
 
-    def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
-        offset = int(cursor) if cursor else 0
-        targets = self._target_papers(offset, self.page_size)
-        if not targets:
-            return [], None
-        fetched_at = datetime.now(UTC)
+    def _match_batch(
+        self, targets: list[tuple[str, str]]
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """One batch call, matched back to (paper_id, entry) pairs by arXiv external id."""
         entries = self._fetch_batch([arxiv_id for _, arxiv_id in targets])
         by_arxiv: dict[str, dict[str, Any]] = {}
         for entry in entries:
@@ -124,16 +122,47 @@ class SemanticScholarSource(Source):
             arxiv_id = (entry.get("externalIds") or {}).get("ArXiv")
             if arxiv_id:
                 by_arxiv[arxiv_id] = entry
-        items: list[RawItem] = []
+        matched: list[tuple[str, dict[str, Any]]] = []
         for paper_id, arxiv_id in targets:
             entry = by_arxiv.get(arxiv_id)
-            if entry is None:
-                continue  # paper unknown to Semantic Scholar
-            items.append(
+            if entry is not None:
+                matched.append((paper_id, entry))
+        return matched
+
+    def citations_for(self, pairs: list[tuple[str, str]]) -> list[Signal]:
+        """Citation signals for explicit (paper_id, arxiv_id) pairs — the walker's entry point.
+
+        Papers Semantic Scholar does not know are simply absent from the result; the caller
+        decides what that observation means. Raises ``httpx.HTTPError`` when the pool stays
+        throttled, for the caller to treat as stop-here-keep-progress.
+        """
+        fetched_at = datetime.now(UTC)
+        return [
+            self.normalize(
                 RawItem(
                     source=self.name, fetched_at=fetched_at, payload={"paper_id": paper_id, **entry}
                 )
             )
+            for paper_id, entry in self._match_batch(pairs)
+        ]
+
+    def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
+        """Offset-paged walk over the stored corpus — the manual ``scout ingest`` path.
+
+        The scheduler drives the watermark walker (``ingest/citations.py``) instead, which
+        calls ``citations_for`` with its own targets.
+        """
+        offset = int(cursor) if cursor else 0
+        targets = self._target_papers(offset, self.page_size)
+        if not targets:
+            return [], None
+        fetched_at = datetime.now(UTC)
+        items = [
+            RawItem(
+                source=self.name, fetched_at=fetched_at, payload={"paper_id": paper_id, **entry}
+            )
+            for paper_id, entry in self._match_batch(targets)
+        ]
         next_cursor = str(offset + self.page_size) if len(targets) == self.page_size else None
         return items, next_cursor
 
