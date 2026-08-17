@@ -82,52 +82,75 @@ class ArxivSource(Source):
                     now = self._clock()
             _last_request_at = now
 
-    def _search_query(self, since: datetime) -> str:
+    def _search_query(self, since: datetime, hi: str) -> str:
         cats = " OR ".join(f"cat:{c}" for c in self.categories)
         lo = _to_utc(since).strftime("%Y%m%d%H%M")
-        hi = datetime.now(UTC).strftime("%Y%m%d%H%M")
         return f"({cats}) AND submittedDate:[{lo} TO {hi}]"
 
-    def _get(self, params: dict[str, str]) -> httpx.Response:
-        """One paced GET, with brief bounded retries when arXiv sheds load.
+    def _get_feed(self, params: dict[str, str], start: int) -> Any:
+        """One paced GET returning the parsed feed, with bounded retries for the three ways
+        arXiv fails transiently.
 
-        429 and 503 usually carry a Retry-After; honor it up to a cap and fall back to a short
-        doubling wait without one. After the bounded attempts the error surfaces — the pipeline
-        treats it as stop-here-keep-progress, so holding the run open longer buys nothing.
+        Load-shed statuses (429/503) usually carry a Retry-After; honor it up to a cap and
+        fall back to a short doubling wait without one. Transport drops (timeouts, resets)
+        get the same doubling wait — a single 30s read timeout used to end a whole ingest
+        slot. And the API sporadically returns a valid-but-empty 200 while totalResults says
+        entries exist past ``start``; that anomaly is retried too, and accepted as-is only
+        after the attempts run out. Everything else raises immediately — a 400 will not get
+        better, and retrying it just spends the pacing budget.
         """
         for attempt in range(_RETRY_MAX + 1):
             self._pace()
-            resp = httpx.get(
-                _API_URL,
-                params=params,
-                headers=default_headers(),
-                timeout=_REQUEST_TIMEOUT,
-                follow_redirects=True,
-            )
-            if resp.status_code not in _RETRY_STATUSES or attempt == _RETRY_MAX:
-                resp.raise_for_status()
-                return resp
-            self._sleep(retry_wait(resp.headers.get("Retry-After"), attempt, cap=_RETRY_WAIT_CAP))
+            try:
+                resp = httpx.get(
+                    _API_URL,
+                    params=params,
+                    headers=default_headers(),
+                    timeout=_REQUEST_TIMEOUT,
+                    follow_redirects=True,
+                )
+            except httpx.TransportError:
+                if attempt == _RETRY_MAX:
+                    raise
+                self._sleep(retry_wait(None, attempt, cap=_RETRY_WAIT_CAP))
+                continue
+            if resp.status_code in _RETRY_STATUSES and attempt < _RETRY_MAX:
+                self._sleep(
+                    retry_wait(resp.headers.get("Retry-After"), attempt, cap=_RETRY_WAIT_CAP)
+                )
+                continue
+            resp.raise_for_status()
+            feed = feedparser.parse(resp.text)
+            if not feed.entries and _total_results(feed) > start and attempt < _RETRY_MAX:
+                self._sleep(retry_wait(None, attempt, cap=_RETRY_WAIT_CAP))
+                continue
+            return feed
         raise AssertionError("unreachable")
 
     def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
-        start = int(cursor) if cursor else 0
-        resp = self._get(
+        # The cursor carries the query's upper bound alongside the offset: recomputing "now"
+        # per page shifts the result set under offset pagination (papers submitted during the
+        # walk move entries across page boundaries), and a resumed walk must page the exact
+        # query it left. A legacy bare-offset cursor parses as offset-with-fresh-bound.
+        start, hi = _parse_cursor(cursor)
+        if hi is None:
+            hi = datetime.now(UTC).strftime("%Y%m%d%H%M")
+        feed = self._get_feed(
             {
-                "search_query": self._search_query(since),
+                "search_query": self._search_query(since, hi),
                 "start": str(start),
                 "max_results": str(self.page_size),
                 "sortBy": "submittedDate",
                 "sortOrder": "descending",
-            }
+            },
+            start,
         )
-        feed = feedparser.parse(resp.text)
         fetched_at = datetime.now(UTC)
         items = [
             RawItem(source=self.name, fetched_at=fetched_at, payload=_entry_payload(entry))
             for entry in feed.entries
         ]
-        next_cursor = str(start + self.page_size) if len(items) == self.page_size else None
+        next_cursor = f"{start + self.page_size}|{hi}" if len(items) == self.page_size else None
         return items, next_cursor
 
     def normalize(self, raw: RawItem) -> Paper:
@@ -148,6 +171,22 @@ class ArxivSource(Source):
         if resp.status_code == 429:
             return "rate_limited"
         return "ok" if resp.is_success else "error"
+
+
+def _parse_cursor(cursor: str | None) -> tuple[int, str | None]:
+    """(offset, pinned upper bound) from a cursor; a legacy bare offset has no bound."""
+    if not cursor:
+        return 0, None
+    offset, _, hi = cursor.partition("|")
+    return int(offset), hi or None
+
+
+def _total_results(feed: Any) -> int:
+    """The feed's opensearch totalResults, 0 when absent or malformed."""
+    try:
+        return int(feed.feed.get("opensearch_totalresults", 0))
+    except (AttributeError, TypeError, ValueError):
+        return 0
 
 
 def _entry_payload(entry: Any) -> dict[str, Any]:
