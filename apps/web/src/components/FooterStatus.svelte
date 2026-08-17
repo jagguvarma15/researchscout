@@ -26,7 +26,10 @@
         return res.json();
       })
       .then((status) => {
-        if (!cancelled && status?.newest_paper_at) line = describe(status.newest_paper_at);
+        // Arrival time is the pipeline truth; published_at is submission time, a day or
+        // more behind the announcement. Older API images only report the latter.
+        const newest = status?.newest_paper_created_at ?? status?.newest_paper_at;
+        if (!cancelled && newest) line = describe(newest);
       })
       .catch(() => {
         if (!cancelled) failed = true;
