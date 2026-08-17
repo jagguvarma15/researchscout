@@ -15,7 +15,7 @@ window publishes nothing rather than a hollow page.
 from __future__ import annotations
 
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
 from sqlalchemy.orm import Session
 
@@ -32,12 +32,18 @@ _MOVEMENTS_SHOWN = 8
 _MOVING_TRENDS = ("new", "rising", "fading")
 
 
-def day_slug(moment: datetime) -> str:
-    """Daily slug, e.g. ``2026-07-30`` — one report per day, re-runs replace it."""
-    return f"{moment:%Y-%m-%d}"
+def day_slug(moment: datetime, zone: tzinfo = UTC) -> str:
+    """Daily slug, e.g. ``2026-07-30`` — one report per day, re-runs replace it.
+
+    Sluged in the scheduler's zone, not UTC: an evening-ET run is already tomorrow in UTC,
+    and a report describing Monday's arrivals must not be titled Tuesday.
+    """
+    return f"{moment.astimezone(zone):%Y-%m-%d}"
 
 
-def build_daily_report(session: Session, *, now: datetime | None = None) -> Digest | None:
+def build_daily_report(
+    session: Session, *, now: datetime | None = None, zone: tzinfo = UTC
+) -> Digest | None:
     """The day's report, or None when nothing arrived in the window."""
     now = now or datetime.now(UTC)
     since = now - timedelta(hours=_WINDOW_HOURS)
@@ -84,8 +90,8 @@ def build_daily_report(session: Session, *, now: datetime | None = None) -> Dige
     )
 
     return Digest(
-        slug=day_slug(now),
-        title=f"Daily report {day_slug(now)}",
+        slug=day_slug(now, zone),
+        title=f"Daily report {day_slug(now, zone)}",
         period_start=now - timedelta(hours=_WINDOW_HOURS),
         period_end=now,
         body="\n".join(lines),
