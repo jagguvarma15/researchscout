@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The ten-minute watchdog: stack containers, API health, the funnel's public DNS record, and
+  a daily read of the server's own health block - with a macOS notification when something
+  needed fixing. Rendered from this template by `make watchdog-schedule`, which fills in
+  @AGENT_DIR@ and drops the service token into watchdog.env beside the script.
+
+  launchd starts jobs with almost no environment, which is why PATH is spelled out: docker,
+  tailscale, and dig are not on the default one.
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.researchscout.watchdog</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>@AGENT_DIR@/watchdog.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>@AGENT_DIR@</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <key>StartInterval</key>
+    <integer>600</integer>
+
+    <key>StandardOutPath</key>
+    <string>@AGENT_DIR@/watchdog.log</string>
+    <key>StandardErrorPath</key>
+    <string>@AGENT_DIR@/watchdog.log</string>
+  </dict>
+</plist>
