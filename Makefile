@@ -25,7 +25,8 @@ AGENT_DIR := $(HOME)/Library/Application Support/researchscout
 .DEFAULT_GOAL := help
 .PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop \
         deploy-build deploy-up deploy-up-stream deploy-down deploy-verify \
-        deploy-ps deploy-logs backup backup-schedule backup-unschedule grafana-db-role \
+        deploy-ps deploy-logs backup backup-schedule backup-unschedule \
+        stack-schedule stack-unschedule watchdog-schedule watchdog-unschedule \
         check clean
 
 help: ## list targets
@@ -163,7 +164,7 @@ deploy-up-stream: ## the same, plus kafka and the streaming worker
 	RS_SCHEDULER_BATCH_PIPELINE=false docker compose -f $(COMPOSE) --profile stream up -d
 
 deploy-down: ## stop the deployed backend, keeping the data volume
-	docker compose -f $(COMPOSE) --profile stream --profile monitoring down
+	docker compose -f $(COMPOSE) --profile stream down
 
 deploy-ps: ## what the deployment stack is running
 	docker compose -f $(COMPOSE) ps
@@ -173,23 +174,6 @@ deploy-logs: ## follow the deployment logs
 
 backup: ## dump the deployed database, keep a week, verify the file
 	./deploy/backup.sh
-
-grafana-db-role: ## create the read-only database login the hosted dashboards use
-	@grep -q '^GRAFANA_DB_PASSWORD=.\+' deploy/.env || { \
-	  pw=$$(openssl rand -hex 20); \
-	  if grep -q '^GRAFANA_DB_PASSWORD=' deploy/.env; then \
-	    sed -i '' "s|^GRAFANA_DB_PASSWORD=.*|GRAFANA_DB_PASSWORD=$$pw|" deploy/.env; \
-	  else printf 'GRAFANA_DB_PASSWORD=%s\n' "$$pw" >> deploy/.env; fi; \
-	  echo "generated a password into deploy/.env"; }
-	@pw=$$(grep '^GRAFANA_DB_PASSWORD=' deploy/.env | cut -d= -f2-); \
-	docker compose -f $(COMPOSE) exec -T postgres psql -U researchscout -d researchscout -q \
-	  -c "DO \$$\$$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='grafana') THEN CREATE ROLE grafana LOGIN; END IF; END \$$\$$;" \
-	  -c "ALTER ROLE grafana LOGIN PASSWORD '$$pw'" \
-	  -c "GRANT CONNECT ON DATABASE researchscout TO grafana" \
-	  -c "GRANT USAGE ON SCHEMA public TO grafana" \
-	  -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana" \
-	  -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana"
-	@echo "role 'grafana' can read this database and nothing else; password is in deploy/.env"
 
 backup-schedule: ## run the backup nightly at 03:30 (launchd)
 	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
@@ -205,6 +189,42 @@ backup-unschedule: ## stop the nightly backup
 	-@launchctl bootout gui/$$(id -u)/com.researchscout.backup 2>/dev/null
 	-@rm -f $(AGENT_PLIST) "$(AGENT_DIR)/backup.sh"
 	@echo "nightly backup removed"
+
+stack-schedule: ## bring the deployed stack and funnel up at login (launchd)
+	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
+	@cp deploy/stack-up.sh "$(AGENT_DIR)/stack-up.sh" && chmod +x "$(AGENT_DIR)/stack-up.sh"
+	@sed "s|@AGENT_DIR@|$(AGENT_DIR)|g" deploy/launchd/com.researchscout.stack.plist.template \
+	  > $(HOME)/Library/LaunchAgents/com.researchscout.stack.plist
+	-@launchctl bootout gui/$$(id -u)/com.researchscout.stack 2>/dev/null
+	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.researchscout.stack.plist
+	@echo "stack start-up scheduled at login (needs auto-login for unattended reboots)"
+	@echo "  script: $(AGENT_DIR)/stack-up.sh   (a copy - rerun this target after changing it)"
+	@echo "  log:    $(AGENT_DIR)/stack.log"
+
+stack-unschedule: ## stop bringing the stack up at login
+	-@launchctl bootout gui/$$(id -u)/com.researchscout.stack 2>/dev/null
+	-@rm -f $(HOME)/Library/LaunchAgents/com.researchscout.stack.plist "$(AGENT_DIR)/stack-up.sh"
+	@echo "stack start-up removed"
+
+watchdog-schedule: ## check the stack, funnel, and health every 10 minutes (launchd)
+	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
+	@cp deploy/watchdog.sh "$(AGENT_DIR)/watchdog.sh" && chmod +x "$(AGENT_DIR)/watchdog.sh"
+	@grep '^RS_SERVICE_TOKEN=' deploy/.env > "$(AGENT_DIR)/watchdog.env" 2>/dev/null || \
+	  : > "$(AGENT_DIR)/watchdog.env"
+	@chmod 600 "$(AGENT_DIR)/watchdog.env"
+	@sed "s|@AGENT_DIR@|$(AGENT_DIR)|g" deploy/launchd/com.researchscout.watchdog.plist.template \
+	  > $(HOME)/Library/LaunchAgents/com.researchscout.watchdog.plist
+	-@launchctl bootout gui/$$(id -u)/com.researchscout.watchdog 2>/dev/null
+	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.researchscout.watchdog.plist
+	@echo "watchdog scheduled every 10 minutes"
+	@echo "  script: $(AGENT_DIR)/watchdog.sh   (a copy - rerun this target after changing it)"
+	@echo "  log:    $(AGENT_DIR)/watchdog.log"
+
+watchdog-unschedule: ## stop the watchdog
+	-@launchctl bootout gui/$$(id -u)/com.researchscout.watchdog 2>/dev/null
+	-@rm -f $(HOME)/Library/LaunchAgents/com.researchscout.watchdog.plist \
+	  "$(AGENT_DIR)/watchdog.sh" "$(AGENT_DIR)/watchdog.env"
+	@echo "watchdog removed"
 
 check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run ruff check researchscout tests
