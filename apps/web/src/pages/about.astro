@@ -1,12 +1,41 @@
 ---
 import EmptyState from '../components/EmptyState.astro';
 import Base from '../layouts/Base.astro';
-import { fetchSources } from '../lib/api';
+import { fetchSources, fetchSystemStatus } from '../lib/api';
 
 // The table is served from the live source registry, so this page states what is actually
-// running rather than what was true when the copy was written.
+// running rather than what was true when the copy was written. The status section reads the
+// same self-reporting endpoint deploy-verify does.
 const sources = await fetchSources();
+const status = await fetchSystemStatus();
 const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
+
+function hoursAgo(iso: string | null): string {
+  if (!iso) return 'unknown';
+  const hours = (Date.now() - new Date(iso).getTime()) / 3_600_000;
+  if (!Number.isFinite(hours) || hours < 0) return 'unknown';
+  if (hours < 1) return 'under an hour ago';
+  if (hours < 48) {
+    const whole = Math.floor(hours);
+    return `${whole} hour${whole === 1 ? '' : 's'} ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+const recentRuns = status?.runs.slice(0, 6) ?? [];
+const healthChecks = [
+  ...(status?.health ?? []),
+  ...(status?.last_health_run
+    ? [
+        {
+          name: 'scheduled checks',
+          status: status.last_health_run.ok ? 'ok' : 'fail',
+          detail: status.last_health_run.note || 'no detail recorded',
+        },
+      ]
+    : []),
+];
 ---
 
 <Base title="About">
@@ -24,6 +53,7 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
         <a href="#licensing">Copyright</a>
         <a href="#apis">API use</a>
         <a href="#local">What stays local</a>
+        <a href="#status">Status</a>
       </nav>
     </header>
 
@@ -235,6 +265,87 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
       </p>
     </section>
 
+    <section class="block" id="status">
+      <h2>Status</h2>
+      <p>
+        The pipeline reports on itself: when papers last arrived, what its scheduled tasks did,
+        and what its self-checks make of it. This is the same payload the deployment's own
+        verification reads.
+      </p>
+
+      {
+        status === null && (
+          <EmptyState
+            kind="error"
+            icon="lucide:cloud-off"
+            message="Status is unavailable while the API is unreachable."
+            action={{ href: '/about#status', label: 'Retry' }}
+          />
+        )
+      }
+
+      {
+        status !== null && (
+          <div class="status">
+            <ul class="facts">
+              <li>
+                <strong>{status.papers.toLocaleString('en-US')} papers</strong> in the index; the
+                newest arrived {hoursAgo(status.newest_paper_created_at ?? status.newest_paper_at)}.
+              </li>
+              {status.schedule.length > 0 && (
+                <li>
+                  <strong>Daily schedule</strong> ({status.schedule[0].timezone}):{' '}
+                  {status.schedule
+                    .map((group) => `${group.group} at ${group.at.join(', ')}`)
+                    .join('; ')}
+                  .
+                </li>
+              )}
+            </ul>
+            {healthChecks.length > 0 && (
+              <ul class="checks">
+                {healthChecks.map((check) => (
+                  <li>
+                    <span class={`badge ${check.status === 'ok' ? 'on' : ''}`}>{check.status}</span>
+                    <strong>{check.name.replaceAll('_', ' ')}</strong>
+                    <span class="check-detail">{check.detail}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {recentRuns.length > 0 && (
+              <div class="table-scroll">
+                <table class="sources runs">
+                  <thead>
+                    <tr>
+                      <th scope="col">Task</th>
+                      <th scope="col">Outcome</th>
+                      <th scope="col">When</th>
+                      <th scope="col">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recentRuns.map((run) => (
+                      <tr>
+                        <th scope="row">{run.task}</th>
+                        <td>
+                          <span class={`badge ${run.finished_at && run.ok ? 'on' : ''}`}>
+                            {run.finished_at ? (run.ok ? 'ok' : 'failed') : 'running'}
+                          </span>
+                        </td>
+                        <td>{hoursAgo(run.finished_at ?? run.started_at)}</td>
+                        <td class="run-note">{run.note || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )
+      }
+    </section>
+
     <section class="block">
       <h2>Scout can be wrong</h2>
       <p>
@@ -382,6 +493,31 @@ const REPO_URL = 'https://github.com/jagguvarma15/researchscout';
   .badge.on {
     background: var(--accent-soft);
     color: var(--accent-ink);
+  }
+  /* Self-check rows: badge, name, then the reason in the muted voice. */
+  .about ul.checks {
+    max-width: 62ch;
+    margin: 1.2rem auto 0;
+    padding: 0;
+    list-style: none;
+    line-height: 1.65;
+  }
+  .checks li {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.4rem;
+  }
+  .check-detail {
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  /* The runs table narrows the source proportions: notes carry the width. */
+  .runs .run-note {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    text-align: left;
+    overflow-wrap: anywhere;
   }
   /* The table tier the data tables already use - and rem, so it stays in step with the
      reader's type-size preference instead of drifting as the one pixel breakpoint. */
