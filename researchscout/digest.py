@@ -79,22 +79,24 @@ def rank_window(session: Session, *, days: int = 7, k: int = 10) -> list[RankedP
     return ranked[:k]
 
 
-def build_digest(
-    session: Session,
-    llm: LLM,
-    *,
-    days: int = 7,
-    k: int = 10,
-) -> Digest | None:
-    """Rank the window and synthesize the digest; None when the window is empty."""
+def rank_digest(
+    session: Session, *, days: int = 7, k: int = 10
+) -> tuple[list[RankedPaper], datetime, datetime]:
+    """The DB half: rank the window and return (items, start, end).
+
+    Split from composition so the caller can close its session before the LLM call — an
+    Ollama round-trip must not hold a database transaction open.
+    """
     end = datetime.now(UTC)
     start = end - timedelta(days=days)
-    with trace_span("digest", days=days, k=k) as span:
-        items = rank_window(session, days=days, k=k)
-        span["ranked"] = len(items)
-        if not items:
-            return None
+    return rank_window(session, days=days, k=k), start, end
 
+
+def compose_digest(
+    llm: LLM, items: list[RankedPaper], *, start: datetime, end: datetime
+) -> Digest:
+    """The LLM half: synthesize the digest body from already-ranked papers (no session)."""
+    with trace_span("digest", k=len(items)) as span:
         context = "\n\n".join(
             f"[{item.paper.id}] {item.paper.title}\n{item.paper.abstract}" for item in items
         )
@@ -117,3 +119,17 @@ def build_digest(
             cited=cited,
             items=items,
         )
+
+
+def build_digest(
+    session: Session,
+    llm: LLM,
+    *,
+    days: int = 7,
+    k: int = 10,
+) -> Digest | None:
+    """Rank the window and synthesize the digest; None when the window is empty."""
+    items, start, end = rank_digest(session, days=days, k=k)
+    if not items:
+        return None
+    return compose_digest(llm, items, start=start, end=end)
