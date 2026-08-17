@@ -50,6 +50,10 @@ class OpenAlexSource(Source):
         self._mailto = cfg.get("mailto")
         self._warned_keyless = False
 
+    @property
+    def has_key(self) -> bool:
+        return self._api_key is not None
+
     def _require_key(self) -> bool:
         """True when a key is present; log the refusal once per instance otherwise."""
         if self._api_key:
