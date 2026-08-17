@@ -82,17 +82,25 @@ class Settings(BaseSettings):
     scheduler_batch_pipeline: bool = False
     # Wall-clock scheduling, as comma-separated HH:MM times in scheduler_timezone. Empty (the
     # default) leaves every task on its interval below, which is what a local checkout wants.
-    # Set them and the named tasks run at those times instead: the pipeline set (ingest, index,
-    # full text, signals) on the first, and the daily set (model catalogue, digest, topics,
-    # report) on the second. The report can take its own times: it describes the day's
-    # announcement, so the deployment runs it after the evening fetch rather than with the
-    # 17:00 set; empty keeps it on the daily times. A named zone rather than a fixed offset,
-    # so the runs stay put on the local clock across daylight saving.
+    # Set them and the named tasks run at those times instead: ingest/index/fulltext on the
+    # pipeline times (arXiv's search index refreshes once a day around midnight ET, so one
+    # early-morning slot sees everything a day can bring), the fast signal proxies (HF
+    # trending, HN, Bluesky) on their own times, the citation walker on its own, the daily
+    # set (model catalogue, digest, topics) on the daily times, and the report on its own so
+    # the morning read covers the overnight arrivals. A named zone rather than a fixed
+    # offset, so the runs stay put on the local clock across daylight saving.
     scheduler_pipeline_at: str = ""
+    scheduler_signals_at: str = ""
+    scheduler_citations_at: str = ""
     scheduler_daily_at: str = ""
     scheduler_report_at: str = ""
     scheduler_timezone: str = "America/New_York"
+    # The minimum look-back under the per-source watermark: each ingest run starts from its
+    # last completed walk minus this overlap (never less), so downtime widens the window by
+    # itself and the overlap absorbs announcement lag. The max caps that widening - anything
+    # longer gone is a deliberate backfill, not a catch-up.
     scheduler_ingest_window_days: int = 2
+    scheduler_ingest_max_window_days: int = 30
     scheduler_ingest_interval_sec: int = 3600
     # Stop an ingest run after this many consecutive pages on which every entry was already
     # stored (0 = walk the whole window). Sound because arXiv pages newest-first, so nothing
@@ -101,12 +109,29 @@ class Settings(BaseSettings):
     scheduler_ingest_early_stop_pages: int = 0
     scheduler_index_interval_sec: int = 900
     scheduler_signals_interval_sec: int = 21600
+    scheduler_citations_interval_sec: int = 86400
     scheduler_fulltext_interval_sec: int = 3600
     scheduler_fulltext_batch: int = 25
     scheduler_digest_interval_sec: int = 86400
     scheduler_report_interval_sec: int = 86400
     scheduler_catalog_interval_sec: int = 86400
+    scheduler_health_interval_sec: int = 1800
     scheduler_tick_sec: int = 30
+    # Touched by the scheduler on every tick and between long-running items; a container
+    # healthcheck reads the file's age to tell a live loop from a wedged one. Empty = off.
+    scheduler_heartbeat_path: str = ""
+    # The citation walker's daily budgets: how many papers the Semantic Scholar pass may
+    # refresh per run (batches of 500), how stale a paper's citation watermark must be before
+    # the OpenAlex fallback takes it, and how many the fallback may take per run.
+    citations_daily_papers: int = 5000
+    citations_fallback_days: int = 7
+    citations_fallback_papers: int = 2000
+    # Raw fetched payloads are kept this many days for replay/debugging, then pruned.
+    raw_items_keep_days: int = 30
+    # The site's public hostname (the Tailscale Funnel name). The health task resolves it
+    # through a public DNS-over-HTTPS resolver to catch the record vanishing while every
+    # on-tailnet check still passes. Empty skips the check.
+    public_hostname: str = ""
     # Breakthrough scoring: how the signal series becomes a ranking boost. The window bounds how
     # far back momentum is measured; the weights set how much velocity and acceleration count
     # relative to the raw level.
