@@ -152,6 +152,54 @@ export async function fetchSources(): Promise<SourceInfo[] | null> {
   }
 }
 
+// The deployment's own account of itself: freshness, recent runs, self-checks, schedule.
+// The about page renders it and the footer reads the freshness line.
+export interface SchedulerRun {
+  task: string;
+  started_at: string;
+  finished_at: string | null;
+  ok: boolean;
+  note: string;
+}
+
+export interface HealthCheckInfo {
+  name: string;
+  status: string;
+  detail: string;
+}
+
+export interface ScheduleGroup {
+  group: string;
+  at: string[];
+  timezone: string;
+  next_run: string | null;
+}
+
+export interface SystemStatus {
+  version: string;
+  build_sha: string | null;
+  migration: string | null;
+  papers: number;
+  newest_paper_at: string | null;
+  newest_paper_created_at: string | null;
+  runs: SchedulerRun[];
+  pipeline_due_at: string | null;
+  scheduler_started_at: string | null;
+  health: HealthCheckInfo[];
+  last_health_run: SchedulerRun | null;
+  schedule: ScheduleGroup[];
+}
+
+export async function fetchSystemStatus(): Promise<SystemStatus | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/system/status`, { headers: apiHeaders() });
+    if (!response.ok) return null;
+    return (await response.json()) as SystemStatus;
+  } catch {
+    return null;
+  }
+}
+
 // The signed-in account and whether it still owes a terms acceptance. The server decides
 // which version is current; the site just reports it back when the visitor accepts.
 export interface Account {
