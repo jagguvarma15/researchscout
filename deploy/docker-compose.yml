@@ -158,31 +158,6 @@ services:
       migrate:
         condition: service_completed_successfully
 
-  # Lets Grafana Cloud query this Postgres over an outbound tunnel, so the dashboards work
-  # without the database being reachable from anywhere else. The agent takes flags rather than
-  # environment variables - it ignores the environment entirely, so passing them that way
-  # produces an agent that starts, connects to nothing, and says little about why.
-  #
-  # The three values are plain substitutions rather than required ones: compose interpolates
-  # the whole file whatever profile you asked for, so demanding them here would break
-  # `make deploy-up` for anyone not using Grafana Cloud.
-  pdc-agent:
-    # Pinned: this one reaches the database, and a floating tag means the version doing that
-    # can change under a restart with nothing in the repository recording which one it is.
-    image: grafana/pdc-agent:0.0.63
-    restart: unless-stopped
-    profiles: ["monitoring"]
-    command:
-      - "-token"
-      - "${GCLOUD_PDC_SIGNING_TOKEN:-}"
-      - "-cluster"
-      - "${GCLOUD_PDC_CLUSTER:-}"
-      - "-gcloud-hosted-grafana-id"
-      - "${GCLOUD_HOSTED_GRAFANA_ID:-}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   # The streaming pipeline, opt-in. Kafka plus the worker is roughly a gigabyte that the
   # scheduler path does not need.
   kafka:
