@@ -27,6 +27,40 @@ status=$(curl -sf -m 10 "${auth[@]}" "$BASE/v1/system/status") || {
   exit 1
 }
 
+# The API being up on 127.0.0.1 says nothing about the world reaching it: this machine
+# resolves the funnel hostname through the tailnet, so a local curl of the public URL lies.
+# Ask a public resolver instead - the record only exists while the control plane holds a
+# live funnel registration, and a reboot can drop it while the client still says Funnel on.
+if command -v tailscale > /dev/null 2>&1 && command -v dig > /dev/null 2>&1 \
+  && tailscale serve status --json 2> /dev/null | grep -q '"AllowFunnel"'; then
+  host=$(tailscale status --json 2> /dev/null | python3 -c '
+import json, sys
+print(((json.load(sys.stdin).get("Self") or {}).get("DNSName") or "").rstrip("."))
+')
+  if [ -n "$host" ]; then
+    ip=$(dig +short +time=3 +tries=1 @8.8.8.8 "$host" A 2> /dev/null | head -1)
+    if [ -z "$ip" ]; then
+      ip=$(dig +short +time=3 +tries=1 @1.1.1.1 "$host" A 2> /dev/null | head -1)
+    fi
+    if [ -z "$ip" ]; then
+      echo "FAIL: $host has no public DNS record - the funnel is not published, so the"
+      echo "      site's proxy cannot reach the API even though local checks pass."
+      echo "      Re-register with: tailscale funnel reset && tailscale funnel --bg 8001"
+      echo "      and check https://status.tailscale.com before deeper surgery."
+      exit 1
+    fi
+    public=$(curl -s -o /dev/null -w '%{http_code}' -m 10 \
+      --resolve "$host:443:$ip" "https://$host/healthz") || public="unreachable"
+    if [ "$public" != "200" ]; then
+      echo "FAIL: https://$host/healthz through the funnel edge ($ip) returned $public."
+      exit 1
+    fi
+    echo "public:    $host resolves ($ip); /healthz answers 200 through the funnel edge"
+  fi
+else
+  echo "public:    no funnel configured on this host - skipping the public-path check"
+fi
+
 local_sha=$(git rev-parse --short HEAD)
 
 printf '%s' "$status" | LOCAL_SHA="$local_sha" python3 -c '
