@@ -379,6 +379,25 @@ class CitationFetchRow(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class CitationRefreshRow(Base):
+    """When a paper's citation counts were last refreshed, and by which source.
+
+    The citation walker orders papers by this watermark (never-fetched first), so an
+    interrupted walk resumes wherever coverage is thinnest with no cursor to keep. The
+    source names who wrote the current count; the fallback source only takes papers whose
+    watermark has gone stale.
+    """
+
+    __tablename__ = "citation_refreshes"
+    __table_args__ = (Index("ix_citation_refreshes_fetched", "fetched_at"),)
+
+    paper_id: Mapped[str] = mapped_column(
+        ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    source: Mapped[str] = mapped_column(String(40))
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class PipelineLineageRow(Base):
     __tablename__ = "pipeline_lineage"
     __table_args__ = (
@@ -404,7 +423,12 @@ class PipelineLineageRow(Base):
 
 
 class SchedulerRunRow(Base):
-    """One completed scheduler task run — the ledger behind /v1/system/status."""
+    """One scheduler task run — the ledger behind /v1/system/status.
+
+    A row is written when the task starts (finished_at NULL, note "running") and completed
+    when it finishes, so a task that hangs or dies mid-run leaves visible evidence instead
+    of nothing.
+    """
 
     __tablename__ = "scheduler_runs"
     __table_args__ = (
@@ -415,7 +439,7 @@ class SchedulerRunRow(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     task: Mapped[str] = mapped_column(String(40))
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ok: Mapped[bool] = mapped_column(Boolean)
     note: Mapped[str] = mapped_column(String(400), server_default="")
 
