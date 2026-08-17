@@ -27,3 +27,17 @@ def get_state(session: Session, source: str) -> tuple[str | None, datetime | Non
     if row is None:
         return None, None
     return row.cursor, row.last_since
+
+
+def read_state(
+    session: Session, source: str
+) -> tuple[str | None, datetime | None, datetime | None]:
+    """The full state row: ``(cursor, last_since, updated_at)``, all ``None`` when absent.
+
+    ``updated_at`` is the per-source watermark: it stops moving the moment the source stops
+    completing pages, which is what lets the ingest window widen by itself over downtime.
+    """
+    row = session.get(IngestStateRow, source)
+    if row is None:
+        return None, None, None
+    return row.cursor, row.last_since, row.updated_at
