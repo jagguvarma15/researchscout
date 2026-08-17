@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.orm import Session
@@ -13,7 +13,11 @@ from researchscout.store.papers import get_paper, upsert_paper
 pytestmark = pytest.mark.integration
 
 
-def _paper(arxiv: str, title: str = "T") -> Paper:
+def _paper(
+    arxiv: str,
+    title: str = "T",
+    published: datetime = datetime(2024, 1, 1, tzinfo=UTC),
+) -> Paper:
     return Paper(
         id=f"arxiv:{arxiv}",
         external_ids={"arxiv": arxiv},
@@ -21,7 +25,7 @@ def _paper(arxiv: str, title: str = "T") -> Paper:
         abstract="a",
         authors=[Author(name="A")],
         categories=["cs.LG"],
-        published_at=datetime(2024, 1, 1, tzinfo=UTC),
+        published_at=published,
         source="arxiv",
     )
 
@@ -81,3 +85,62 @@ def test_failed_fetch_is_not_cached(session: Session, monkeypatch: pytest.Monkey
     monkeypatch.setattr(agentic_mod, "_reference_arxiv_ids", lambda a, *, limit: None)
     assert follow_references(session, [_scored(session, "2401.00001")]) == []
     assert references_cached(session, "arxiv:2401.00001") is None
+
+
+def test_stalest_targets_walk_null_watermarks_first(session: Session) -> None:
+    """Never-fetched papers lead, newest published first; stamped ones go to the back."""
+    from researchscout.store.citations import mark_citations_refreshed, stalest_citation_targets
+
+    for arxiv_id, day in (("2401.00001", 1), ("2401.00002", 2), ("2401.00003", 3)):
+        upsert_paper(session, _paper(arxiv_id, published=datetime(2024, 1, day, tzinfo=UTC)))
+    session.flush()
+
+    targets = stalest_citation_targets(session, limit=10)
+    assert [pid for pid, _ in targets] == ["arxiv:2401.00003", "arxiv:2401.00002", "arxiv:2401.00001"]
+
+    mark_citations_refreshed(
+        session,
+        ["arxiv:2401.00003"],
+        source="semantic_scholar",
+        fetched_at=datetime(2024, 6, 1, tzinfo=UTC),
+    )
+    targets = stalest_citation_targets(session, limit=10)
+    assert [pid for pid, _ in targets] == ["arxiv:2401.00002", "arxiv:2401.00001", "arxiv:2401.00003"]
+
+
+def test_fallback_targets_exclude_freshly_stamped_papers(session: Session) -> None:
+    from researchscout.store.citations import mark_citations_refreshed, stale_fallback_targets
+
+    for arxiv_id in ("2401.00001", "2401.00002"):
+        upsert_paper(session, _paper(arxiv_id, published=datetime(2024, 1, 1, tzinfo=UTC)))
+    session.flush()
+    now = datetime(2024, 6, 15, tzinfo=UTC)
+    mark_citations_refreshed(
+        session, ["arxiv:2401.00001"], source="semantic_scholar", fetched_at=now
+    )
+    mark_citations_refreshed(
+        session,
+        ["arxiv:2401.00002"],
+        source="semantic_scholar",
+        fetched_at=now - timedelta(days=30),
+    )
+
+    stale = stale_fallback_targets(session, older_than=now - timedelta(days=7), limit=10)
+    assert [pid for pid, _ in stale] == ["arxiv:2401.00002"]
+
+
+def test_marking_again_replaces_the_watermark(session: Session) -> None:
+    from researchscout.store.citations import mark_citations_refreshed
+    from researchscout.store.models import CitationRefreshRow
+
+    upsert_paper(session, _paper("2401.00001", published=datetime(2024, 1, 1, tzinfo=UTC)))
+    session.flush()
+    first = datetime(2024, 6, 1, tzinfo=UTC)
+    mark_citations_refreshed(session, ["arxiv:2401.00001"], source="semantic_scholar", fetched_at=first)
+    later = datetime(2024, 7, 1, tzinfo=UTC)
+    mark_citations_refreshed(session, ["arxiv:2401.00001"], source="openalex", fetched_at=later)
+
+    row = session.get(CitationRefreshRow, "arxiv:2401.00001")
+    assert row is not None
+    assert row.source == "openalex"
+    assert row.fetched_at == later
