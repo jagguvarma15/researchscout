@@ -39,7 +39,8 @@ def prune_raw_items(session: Session, *, keep_days: int) -> int:
     total = 0
     while True:
         ids = select(RawItemRow.id).where(RawItemRow.fetched_at < cutoff).limit(_PRUNE_BATCH)
-        deleted = session.execute(delete(RawItemRow).where(RawItemRow.id.in_(ids))).rowcount
+        result = session.execute(delete(RawItemRow).where(RawItemRow.id.in_(ids)))
+        deleted = int(result.rowcount or 0)  # type: ignore[attr-defined]
         session.commit()
         total += deleted
         if deleted < _PRUNE_BATCH:
