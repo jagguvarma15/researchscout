@@ -1,4 +1,4 @@
-# Publishing: Funnel, Auth0, Vercel, Grafana Cloud
+# Publishing: Funnel, Auth0, Vercel
 
 The compose stack in this directory runs the backend. This is everything outside it - the three
 accounts that make the site public, in the order they need to happen. Each step ends with
@@ -177,92 +177,11 @@ donation links and advertising.
 Check: sign in on the deployed site, accept the terms once, save a paper, sign out and back in.
 The terms dialog must not appear the second time.
 
-## 4. Grafana Cloud
+## Monitoring
 
-The dashboards in `config/grafana/dashboards/` are SQL against Postgres, so Grafana Cloud needs
-a route to a database that is not exposed. Private Data Source Connect is that route: an agent
-in this compose stack opens an outbound tunnel, and no inbound rule is needed.
-
-The dashboards are stored in the portable export shape: each one declares a `DS_POSTGRES`
-input rather than naming a data source, so importing prompts for one and rewires every panel.
-They used to name the uid the deleted local Grafana provisioned, which exists nowhere on Cloud -
-so every panel failed to resolve its data source and the dashboard rendered empty.
-
-1. Create a free Grafana Cloud stack.
-2. **Connections -> Private data source connections -> Configure**. Note the three values from
-   the Configuration Details tab and put them in `deploy/.env`:
-
-   ```
-   GCLOUD_PDC_SIGNING_TOKEN=
-   GCLOUD_PDC_CLUSTER=
-   GCLOUD_HOSTED_GRAFANA_ID=
-   ```
-
-   The token needs the `pdc-signing:write` scope. The agent takes these as command-line flags,
-   not environment variables - passed the wrong way it starts, connects to nothing, and says
-   little about why. The compose service already passes them correctly.
-
-3. Give the dashboards their own read-only login rather than the application's:
-
-   ```bash
-   make grafana-db-role
-   ```
-
-   It creates a `grafana` role that can `SELECT` and nothing else, generates a password into
-   `deploy/.env`, and covers future tables through default privileges. Rerun it any time - it
-   resets the password to whatever is in the file, which is the cure if the two drift apart.
-
-   Verify it from another container rather than from inside the database one: the image trusts
-   loopback, so `psql` inside `postgres` succeeds with no password at all and proves nothing
-   about what the tunnel will face. From `api`, the connection crosses the network and is
-   asked for a password, which is the path Grafana Cloud takes.
-
-4. Start the agent:
-
-   ```bash
-   docker compose -f deploy/docker-compose.yml --profile monitoring up -d
-   docker compose -f deploy/docker-compose.yml logs pdc-agent   # should report a connection
-   ```
-
-5. In Grafana Cloud, add a **PostgreSQL** data source:
-
-   | Field | Value |
-   | --- | --- |
-   | Host | `postgres:5432` |
-   | Database | `researchscout` |
-   | User | `grafana` |
-   | Password | `GRAFANA_DB_PASSWORD` from `deploy/.env` |
-   | TLS/SSL Mode | `disable` (the tunnel is the encryption) |
-   | Private data source connect | your PDC network |
-
-   `postgres` resolves inside the compose network, which is where the agent runs.
-
-6. Import each file in `config/grafana/dashboards/` through **Dashboards -> New -> Import**.
-   Each one asks which PostgreSQL data source to use; pick the one from step 5.
-
-   The imports are copies, not links: a panel added to the JSON in the repo does not appear
-   on Cloud until the file is imported again (same flow; importing over an existing dashboard
-   replaces it). This is how the Ingest health dashboard's "Scheduler runs" panel went
-   missing for a wave - re-import `ingest.json` after any dashboard change.
-
-   | Dashboard | Answers |
-   | --- | --- |
-   | Ingest health | Is anything still arriving, and how enriched is it once it does |
-   | Corpus | How much is here |
-   | Answers | What people ask Scout, how long it takes, how often it has nothing |
-   | Engagement | What readers see, open, dismiss and dwell on |
-   | Signals and sources | Where the momentum numbers come from, and whether each upstream is still answering |
-   | Catalogue | Models, benchmarks, and the join between them |
-
-7. Import `config/grafana/alerting/corpus-stale.yaml` through **Alerting -> Alert rules ->
-   Import**, and point it at the same data source.
-
-   This is the alarm worth having. Nothing else notices that ingestion has stopped: the API
-   stays up, the pages render, and every panel keeps showing yesterday's number. That is not
-   hypothetical - this deployment ran for weeks without fetching a paper, because `deploy/.env`
-   predated the scheduling settings and the scheduler had no fetch tasks at all.
-
-Check: **Ingest health** renders, and "Hours since the newest paper" reads in single or low
-double digits. If it reads in the hundreds, the pipeline is not running - `make deploy-logs`
-now prints every scheduled task and its next run on start-up, and says so outright when nothing
-is scheduled to fetch.
+There is no external monitoring stack. The scheduler's health task self-checks every half
+hour (ingest cadence, failing streaks, weekend-aware corpus freshness, hung runs, the
+funnel's public DNS record, retention), `GET /v1/system/status` reports the verdict, the
+about page renders it, and `make watchdog-schedule` turns failures into macOS notifications.
+`make deploy-verify` reads the same payload after every deploy. See the Monitoring section
+of the top-level README.
