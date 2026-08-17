@@ -68,10 +68,10 @@ def test_normalize_strips_version() -> None:
 
 def test_search_query_format() -> None:
     src = ArxivSource(categories=["cs.LG", "cs.AI"])
-    query = src._search_query(datetime(2024, 1, 1, tzinfo=UTC))
+    query = src._search_query(datetime(2024, 1, 1, tzinfo=UTC), "202406150000")
     assert "cat:cs.LG" in query
     assert "cat:cs.AI" in query
-    assert "submittedDate:[202401010000 TO" in query
+    assert "submittedDate:[202401010000 TO 202406150000]" in query
 
 
 def test_get_source_returns_arxiv() -> None:
@@ -112,10 +112,45 @@ def test_fetch_paginates(monkeypatch: pytest.MonkeyPatch) -> None:
 
     items, cursor = ArxivSource(page_size=1).fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
     assert len(items) == 1
-    assert cursor == "1"  # full page → more may exist
+    assert cursor is not None and cursor.startswith("1|")  # full page → more may exist
 
     _, exhausted = ArxivSource(page_size=10).fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
     assert exhausted is None  # partial page → done
+
+
+def test_the_cursor_pins_the_query_bound_across_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Recomputing "now" per page shifts the result set under offset pagination; the bound
+    the first page used must ride the cursor so every later page walks the same query."""
+    queries: list[str] = []
+
+    def capture(*args: object, **kwargs: object) -> _Resp:
+        params = kwargs["params"]
+        queries.append(params["search_query"])
+        return _Resp()
+
+    monkeypatch.setattr(httpx, "get", capture)
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+
+    src = ArxivSource(page_size=1)
+    _, cursor = src.fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
+    assert cursor is not None
+    _, cursor2 = src.fetch(datetime(2024, 1, 1, tzinfo=UTC), cursor)
+    assert queries[0] == queries[1]  # identical query, later offset
+    assert cursor2 is not None
+    assert cursor.split("|")[1] == cursor2.split("|")[1]
+
+
+def test_a_legacy_bare_offset_cursor_still_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    starts: list[str] = []
+
+    def capture(*args: object, **kwargs: object) -> _Resp:
+        starts.append(kwargs["params"]["start"])
+        return _Resp()
+
+    monkeypatch.setattr(httpx, "get", capture)
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+    ArxivSource(page_size=10).fetch(datetime(2024, 1, 1, tzinfo=UTC), "5")
+    assert starts == ["5"]
 
 
 def test_fetch_paces_every_request(
@@ -193,6 +228,116 @@ def test_fetch_gives_up_after_bounded_retries(monkeypatch: pytest.MonkeyPatch) -
         ArxivSource(page_size=1, sleep=sleeps.append).fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
     assert calls["n"] == 3  # the first attempt plus two retries, then the error surfaces
     assert sleeps == [15.0, 30.0]  # the doubling fallback when no Retry-After arrives
+
+
+_EMPTY_FEED_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">
+  <opensearch:totalResults>{total}</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+</feed>
+"""
+
+
+class _EmptyResp:
+    status_code = 200
+    is_success = True
+    headers: dict[str, str] = {}
+
+    def __init__(self, total: int) -> None:
+        self.text = _EMPTY_FEED_TEMPLATE.format(total=total)
+
+    def raise_for_status(self) -> None:
+        return None
+
+
+def test_fetch_retries_a_transport_drop_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One 30-second read timeout used to end the whole ingest slot with zero retries."""
+    responses: list[object] = [httpx.ReadTimeout("The read operation timed out"), _Resp()]
+
+    def flaky(*args: object, **kwargs: object) -> _Resp:
+        item = responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    monkeypatch.setattr(httpx, "get", flaky)
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+    sleeps: list[float] = []
+
+    items, _cursor = ArxivSource(page_size=10, sleep=sleeps.append).fetch(
+        datetime(2024, 1, 1, tzinfo=UTC), None
+    )
+    assert len(items) == 1
+    assert sleeps == [15.0]  # the doubling fallback: transport errors carry no Retry-After
+
+
+def test_fetch_gives_up_on_persistent_transport_drops(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"n": 0}
+
+    def dead(*args: object, **kwargs: object) -> None:
+        calls["n"] += 1
+        raise httpx.ConnectError("no route")
+
+    monkeypatch.setattr(httpx, "get", dead)
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+
+    with pytest.raises(httpx.ConnectError):
+        ArxivSource(page_size=1, sleep=lambda _: None).fetch(datetime(2024, 1, 1, tzinfo=UTC), None)
+    assert calls["n"] == 3  # the first attempt plus two retries, then the error surfaces
+
+
+def test_an_anomalous_empty_page_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    """arXiv sporadically returns a valid-but-empty 200 while totalResults says otherwise."""
+    responses: list[object] = [_EmptyResp(total=250), _Resp()]
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: responses.pop(0))
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+    sleeps: list[float] = []
+
+    items, _cursor = ArxivSource(page_size=10, sleep=sleeps.append).fetch(
+        datetime(2024, 1, 1, tzinfo=UTC), None
+    )
+    assert len(items) == 1
+    assert sleeps == [15.0]
+
+
+def test_a_genuinely_empty_window_is_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A weekend morning legitimately finds nothing; that must not burn retries."""
+    calls = {"n": 0}
+
+    def empty(*args: object, **kwargs: object) -> _EmptyResp:
+        calls["n"] += 1
+        return _EmptyResp(total=0)
+
+    monkeypatch.setattr(httpx, "get", empty)
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+
+    items, cursor = ArxivSource(page_size=10, sleep=lambda _: None).fetch(
+        datetime(2024, 1, 1, tzinfo=UTC), None
+    )
+    assert items == []
+    assert cursor is None
+    assert calls["n"] == 1
+
+
+def test_a_persistently_anomalous_page_is_accepted_after_retries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = {"n": 0}
+
+    def anomalous(*args: object, **kwargs: object) -> _EmptyResp:
+        calls["n"] += 1
+        return _EmptyResp(total=250)
+
+    monkeypatch.setattr(httpx, "get", anomalous)
+    monkeypatch.setenv("RS_ARXIV_PAGE_DELAY_SEC", "0")
+
+    items, cursor = ArxivSource(page_size=10, sleep=lambda _: None).fetch(
+        datetime(2024, 1, 1, tzinfo=UTC), None
+    )
+    assert items == []  # accepted as-is once the attempts run out, not an exception
+    assert cursor is None
+    assert calls["n"] == 3
 
 
 def test_retry_wait_honors_and_caps_the_header() -> None:
