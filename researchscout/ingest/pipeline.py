@@ -12,8 +12,9 @@ rule holds at the one point every paper passes through.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 from sqlalchemy.orm import Session
@@ -27,9 +28,11 @@ from researchscout.store.papers import (
     upsert_paper,
 )
 from researchscout.store.raw import append_raw
-from researchscout.store.signals import append_signal
-from researchscout.store.state import get_state, save_state
+from researchscout.store.signals import append_signal_idempotent
+from researchscout.store.state import get_state, read_state, save_state
 from researchscout.taxonomy import in_scope
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -42,9 +45,46 @@ class IngestSummary:
     raw_stored: int = 0
     #: Fetched, normalized, and then rejected for being outside this radar's subject.
     out_of_scope: int = 0
+    #: Fetched but unparseable (a malformed entry): logged and passed over, never fatal.
+    skipped: int = 0
     #: Why the run ended before pagination was exhausted (rate limit, nothing-new stop), or
     #: None for a full walk. Everything counted above is stored either way.
     stopped_early: str | None = None
+
+
+def _trunc_hour(dt: datetime) -> datetime:
+    return dt.replace(minute=0, second=0, microsecond=0)
+
+
+def window_start(
+    session: Session,
+    source_name: str,
+    now: datetime | None = None,
+    *,
+    overlap_days: int,
+    max_window_days: int,
+) -> datetime:
+    """Where this run's ingest window should begin, derived from the source's own watermark.
+
+    Three cases, all producing a value that a same-window re-run reproduces exactly — which
+    is what lets ``run_ingest(resume=True)`` actually adopt a saved cursor:
+
+    - no state yet: hour-truncated now minus the overlap (a fresh install's plain window);
+    - a cursor is saved (interrupted walk): the exact ``last_since`` that walk used, so the
+      cursor resumes the very query it indexes — unless that window has aged past the max,
+      in which case it is stale and treated like a completed walk;
+    - last walk completed: the hour-truncated watermark (``updated_at``, frozen since the
+      last completed page) minus the overlap. Downtime widens the window by itself; the max
+      caps it — anything longer gone is a deliberate backfill, not a catch-up.
+    """
+    now = now or datetime.now(UTC)
+    floor = now - timedelta(days=max_window_days)
+    cursor, last_since, updated_at = read_state(session, source_name)
+    if cursor is not None and last_since is not None and last_since >= floor:
+        return last_since
+    watermark = updated_at or now
+    start = _trunc_hour(min(watermark, now)) - timedelta(days=overlap_days)
+    return max(start, floor)
 
 
 def resolve_existing(session: Session, paper: Paper) -> str | None:
@@ -104,9 +144,17 @@ def run_ingest(
             append_raw(session, source=raw.source, fetched_at=raw.fetched_at, payload=raw.payload)
             summary.raw_stored += 1
 
-            obj = source.normalize(raw)
+            try:
+                obj = source.normalize(raw)
+            except ValueError as exc:
+                # One malformed entry must not kill the page — and with a deterministic
+                # window it would come back and kill the same run every day until it aged
+                # out. The raw payload is already stored for whoever wants to look.
+                logger.warning("%s: skipping malformed entry: %s", source.name, exc)
+                summary.skipped += 1
+                continue
             if isinstance(obj, Signal):
-                append_signal(session, obj)
+                append_signal_idempotent(session, obj)
                 if obj.type is SignalType.citation:
                     set_citation_count(session, obj.paper_id, int(obj.value))
                 summary.signals += 1
