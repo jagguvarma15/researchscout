@@ -678,3 +678,28 @@ def test_headline_benchmarks_take_the_best_curated_score(session: Session) -> No
     assert items[0].best_score == 0.93
     assert items[0].scale == "fraction"
     assert items[0].result_count == 3
+
+
+def test_any_upstream_failure_shape_is_caught_per_source(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A corrupt zip (BadZipFile) is not a ValueError; it must still cost only its upstream."""
+    import zipfile
+
+    from researchscout.catalog import refresh_catalog
+
+    monkeypatch.setattr(
+        "researchscout.catalog._enabled", lambda name: name in ("epoch_ai", "huggingface_models")
+    )
+
+    def bad_zip(session_arg: object) -> object:
+        raise zipfile.BadZipFile("truncated download")
+
+    monkeypatch.setattr("researchscout.catalog._epoch_models", bad_zip)
+    monkeypatch.setattr("researchscout.catalog._refresh_benchmarks", bad_zip)
+    monkeypatch.setattr("researchscout.catalog._hub_models", lambda s: ([], {}))
+
+    summary = refresh_catalog(session)
+    assert "epoch_ai" in summary.failed
+    assert "epoch_ai:benchmarks" in summary.failed
+    assert "huggingface_models" not in summary.failed
