@@ -81,7 +81,15 @@ def test_fetch_batches_the_page_into_one_call(monkeypatch: pytest.MonkeyPatch) -
 
     def capture(url: str, **kwargs: Any) -> object:
         posted.append(kwargs["json"])
-        return _resp_class(200, [{"citationCount": 3, "influentialCitationCount": 1}, None])()
+        body = [
+            {
+                "citationCount": 3,
+                "influentialCitationCount": 1,
+                "externalIds": {"ArXiv": "2401.00001"},
+            },
+            None,
+        ]
+        return _resp_class(200, body)()
 
     monkeypatch.setattr(httpx, "post", capture)
 
@@ -90,6 +98,48 @@ def test_fetch_batches_the_page_into_one_call(monkeypatch: pytest.MonkeyPatch) -
     assert [item.payload["paper_id"] for item in items] == ["arxiv:2401.00001"]
     assert items[0].payload["citationCount"] == 3
     assert cursor is None  # a short page ends pagination
+
+
+def test_fetch_survives_entries_dropped_from_the_batch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A paper unknown to Semantic Scholar can vanish from the response instead of being null.
+
+    The response is then shorter than the request and every later position is shifted, so
+    counts must land on the papers whose arXiv id they carry — never on whoever happens to
+    sit at the same index.
+    """
+    src = SemanticScholarSource(api_key="k")
+    monkeypatch.setattr(
+        src,
+        "_target_papers",
+        lambda offset, limit: [
+            ("arxiv:2401.00001", "2401.00001"),
+            ("arxiv:2401.00002", "2401.00002"),
+            ("arxiv:2401.00003", "2401.00003"),
+        ],
+    )
+    body = [
+        {"citationCount": 3, "externalIds": {"ArXiv": "2401.00001"}},
+        {"citationCount": 7, "externalIds": {"ArXiv": "2401.00003"}},
+    ]
+    monkeypatch.setattr(httpx, "post", lambda *a, **k: _resp_class(200, body)())
+
+    items, _ = src.fetch(SINCE, None)
+    assert [(i.payload["paper_id"], i.payload["citationCount"]) for i in items] == [
+        ("arxiv:2401.00001", 3),
+        ("arxiv:2401.00003", 7),
+    ]
+
+
+def test_fetch_skips_entries_without_an_arxiv_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    src = SemanticScholarSource(api_key="k")
+    monkeypatch.setattr(
+        src, "_target_papers", lambda offset, limit: [("arxiv:2401.00001", "2401.00001")]
+    )
+    monkeypatch.setattr(
+        httpx, "post", lambda *a, **k: _resp_class(200, [{"citationCount": 3, "externalIds": {}}])()
+    )
+
+    assert src.fetch(SINCE, None) == ([], None)
 
 
 def test_batch_retries_the_rate_limit_then_raises(monkeypatch: pytest.MonkeyPatch) -> None:
