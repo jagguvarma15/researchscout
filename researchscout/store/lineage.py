@@ -1,8 +1,8 @@
 """Per-packet lineage rows and the hourly rollups behind the stream stats endpoint.
 
 Every envelope's lineage stamps land here, one row per (event_id, stage), transactional with
-the stage's data writes and upserted so at-least-once redelivery converges. Grafana can point
-at the table (or the pipeline_rollups_hourly view from migration 0016) directly.
+the stage's data writes and upserted so at-least-once redelivery converges. Any SQL client
+can read the table (or the pipeline_rollups_hourly view from migration 0016) directly.
 """
 
 from __future__ import annotations
