@@ -110,9 +110,7 @@ class SemanticScholarSource(Source):
             self._sleep(retry_wait(resp.headers.get("Retry-After"), attempt, cap=_RETRY_WAIT_CAP))
         raise AssertionError("unreachable")
 
-    def _match_batch(
-        self, targets: list[tuple[str, str]]
-    ) -> list[tuple[str, dict[str, Any]]]:
+    def _match_batch(self, targets: list[tuple[str, str]]) -> list[tuple[str, dict[str, Any]]]:
         """One batch call, matched back to (paper_id, entry) pairs by arXiv external id."""
         entries = self._fetch_batch([arxiv_id for _, arxiv_id in targets])
         by_arxiv: dict[str, dict[str, Any]] = {}
