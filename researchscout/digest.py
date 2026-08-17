@@ -92,9 +92,7 @@ def rank_digest(
     return rank_window(session, days=days, k=k), start, end
 
 
-def compose_digest(
-    llm: LLM, items: list[RankedPaper], *, start: datetime, end: datetime
-) -> Digest:
+def compose_digest(llm: LLM, items: list[RankedPaper], *, start: datetime, end: datetime) -> Digest:
     """The LLM half: synthesize the digest body from already-ranked papers (no session)."""
     with trace_span("digest", k=len(items)) as span:
         context = "\n\n".join(
