@@ -118,29 +118,25 @@ One warning worth repeating: never run two fetchers against arXiv from one addre
 
 ## Monitoring
 
-Six dashboards live in `config/grafana/dashboards/` as JSON, hosted on Grafana Cloud rather
-than by a local Grafana - the free tier costs nothing, and the machine at home has better uses
-for the memory. **Ingest health** answers whether anything is still arriving and how enriched it
-is once it does; **Corpus** how much is here; **Answers** what people ask Scout and how long it
-takes; **Engagement** what readers open and dismiss; **Signals and sources** where the momentum
-numbers come from and whether each upstream is still replying; **Catalogue** the models and
-benchmarks beside the papers.
+The pipeline checks itself; there is no external monitoring stack. A `health` task runs in
+the scheduler every half hour: is ingest completing on cadence, are any tasks failing
+repeatedly, is the corpus arriving on the mornings arXiv actually announces (weekends are
+quiet by design), did any run hang, does the funnel hostname still resolve on public DNS,
+and is retention holding. The verdict lands in the `scheduler_runs` ledger like any other
+run, and a failing check fails the task so it is impossible to miss in the recent-runs list.
 
-They read the tables in Postgres directly - no exporters and no metrics agent, and the numbers
-accrue whether anything is watching or not. Grafana Cloud reaches that database through Private
-Data Source Connect: an agent in the deployment stack opens an outbound tunnel, so the database
-needs no inbound rule and no public address. Each dashboard declares a `DS_POSTGRES` input
-rather than naming a data source, so importing prompts for one and rewires every panel.
+`GET /v1/system/status` carries all of it: version and build SHA, the migration stamp, both
+freshness truths (newest paper by submission time and by arrival time), the recent runs with
+their notes, the database-side health checks, the last health task's verdict (which includes
+the network checks the endpoint itself never performs), and the wall-clock schedule with
+each group's next occurrence. The about page renders the human version; the footer's
+freshness line reads the same payload; `make deploy-verify` fails loudly on any of it being
+wrong.
 
-`config/grafana/alerting/corpus-stale.yaml` is the one alert worth having: no new paper for
-thirty hours. Nothing else notices that ingestion has stopped, because the API stays up and
-every panel keeps showing yesterday's number.
-
-Setting all of it up, including the read-only login the dashboards use, is section 4 of
-`deploy/PUBLISHING.md`.
-
-To read them against a development database instead, run a Grafana yourself and point it at
-`.local/pgdata`; the files are portable.
+On the host, `make watchdog-schedule` installs a ten-minute launchd job that restarts
+stopped containers, re-asserts the funnel when its public DNS record vanishes, and reads the
+status endpoint once a day - surfacing anything broken as a macOS notification. `make
+stack-schedule` brings the whole stack up at login after a reboot.
 
 ## Deep backfill
 
@@ -220,8 +216,7 @@ registry stub is `config/sources.yaml`.
 The public site is the frontend on Vercel plus this backend in Docker, published through
 Tailscale Funnel - no inbound port, no domain to buy. `deploy/README.md` is the runbook for the
 container stack (including moving the development database into it and the nightly backup);
-`deploy/PUBLISHING.md` is the account-by-account setup for Funnel, Auth0, Vercel and Grafana
-Cloud.
+`deploy/PUBLISHING.md` is the account-by-account setup for Funnel, Auth0, and Vercel.
 
 ```bash
 cp deploy/.env.example deploy/.env   # fill in, then
