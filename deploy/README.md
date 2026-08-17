@@ -13,7 +13,7 @@ visitor -> researchscout.vercel.app   Vercel, Astro SSR, holds the session cooki
               |
               v
            api:8001                   this compose stack
-                                      postgres, scheduler, [stream], [pdc-agent]
+                                      postgres, scheduler, [stream]
                                       Ollama stays on the host
 ```
 
@@ -51,9 +51,26 @@ Optional profiles:
 
 ```bash
 make deploy-up-stream       # adds kafka and the streaming worker
-docker compose -f deploy/docker-compose.yml --profile monitoring up -d  # Grafana Cloud PDC
 tailscale funnel --bg 8001  # publishes the API (on the host, not in compose)
 ```
+
+## Surviving reboots
+
+Two launchd jobs, installed the same way as the nightly backup (scripts are copied to
+`~/Library/Application Support/researchscout`, because launchd cannot read `~/Desktop`):
+
+```bash
+make stack-schedule      # at login: start Docker, the containers, re-assert the funnel
+make watchdog-schedule   # every 10 min: restart stopped containers, check the API, check
+                         # the funnel's PUBLIC DNS record (on-tailnet curls lie), and once a
+                         # day read /v1/system/status - failures become macOS notifications
+```
+
+One honest limitation: LaunchAgents fire at login, not at boot, because starting Docker
+Desktop needs a GUI session. Unattended recovery from a power cut therefore needs auto-login
+enabled (System Settings -> Users & Groups); without it the stack comes back when someone
+logs in, not before. Keep the machine on `sudo pmset -c sleep 0` either way - a sleeping
+host is a down site.
 
 ## Moving the existing data in
 
