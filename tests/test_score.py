@@ -8,6 +8,7 @@ from researchscout.score import (
     ScoreConfig,
     SignalSpec,
     _acceleration,
+    _from_grouped,
     _level,
     _slope,
     breakthrough,
@@ -153,3 +154,45 @@ def test_sources_sharing_a_type_score_independently(session: Session) -> None:
     assert both.contributions["social_mention"] == pytest.approx(
         hn_only.contributions["social_mention"] + bsky_only.contributions["social_mention"]
     )
+
+
+def _at(day: int) -> datetime:
+    return datetime(2026, 8, day, tzinfo=UTC)
+
+
+def test_exclusive_type_scores_only_the_freshest_source() -> None:
+    """Two counters of the same quantity must not sum - the level would count twice."""
+    stale_but_huge = [(_at(1), 400.0), (_at(10), 500.0)]
+    fresh = [(_at(12), 40.0), (_at(15), 50.0)]
+    grouped = {
+        ("citation", "semantic_scholar"): stale_but_huge,
+        ("citation", "openalex"): fresh,
+    }
+    result = _from_grouped(grouped, CFG)
+    only_fresh = _from_grouped({("citation", "openalex"): fresh}, CFG)
+    assert result.contributions["citation"] == only_fresh.contributions["citation"]
+
+
+def test_non_exclusive_types_still_sum_across_sources() -> None:
+    """HN points and Bluesky engagement are different phenomena sharing a type."""
+    hn = [(_at(1), 10.0), (_at(2), 30.0)]
+    bluesky = [(_at(1), 5.0), (_at(2), 8.0)]
+    both = _from_grouped(
+        {("social_mention", "hn_discussion"): hn, ("social_mention", "bluesky"): bluesky}, CFG
+    )
+    alone = _from_grouped({("social_mention", "hn_discussion"): hn}, CFG)
+    assert both.contributions["social_mention"] > alone.contributions["social_mention"]
+
+
+def test_a_single_citation_source_scores_exactly_as_before() -> None:
+    """The guard is a no-op while only one source has in-window data - the usual case."""
+    series = [(_at(1), 10.0), (_at(15), 30.0)]
+    result = _from_grouped({("citation", "semantic_scholar"): series}, CFG)
+    expected = score_signal(
+        _level(series),
+        _slope(series),
+        _acceleration(series),
+        spec=SignalSpec(weight=1.0, direction=1.0, exclusive=True),
+        config=CFG,
+    )
+    assert result.contributions["citation"] == expected
