@@ -82,11 +82,15 @@ elif sha[:7] != local[:7]:
     problems.append("the deployed SHA does not match local HEAD - rebuild and redeploy, or check out what is deployed")
 print("migration: " + str(s.get("migration")))
 
-newest = s.get("newest_paper_at")
+# Freshness is judged on arrival time (created_at) - published_at is submission time and
+# runs a day or more behind the announcement. Older images only report published_at; fall
+# back so this script still speaks to them.
+newest = s.get("newest_paper_created_at") or s.get("newest_paper_at")
 if newest:
     then = datetime.fromisoformat(newest)
     hours = (datetime.now(UTC) - then).total_seconds() / 3600
-    print("papers:    %s, newest %.1f hours old" % (s["papers"], hours))
+    which = "arrived" if s.get("newest_paper_created_at") else "published"
+    print("papers:    %s, newest %s %.1f hours old" % (s["papers"], which, hours))
     if hours > 96:
         problems.append("the newest paper is over four days old - the pipeline is not landing anything")
 else:
@@ -102,11 +106,25 @@ runs = s.get("runs") or []
 if runs:
     print("recent runs:")
     for r in runs[:8]:
-        mark = "ok " if r["ok"] else "FAIL"
         note = (" - " + r["note"]) if r.get("note") else ""
-        print("  %s %-9s finished %s%s" % (mark, r["task"], r["finished_at"], note))
+        if r.get("finished_at"):
+            mark = "ok " if r["ok"] else "FAIL"
+            print("  %s %-9s finished %s%s" % (mark, r["task"], r["finished_at"], note))
+        else:
+            print("  ..  %-9s running since %s" % (r["task"], r["started_at"]))
 else:
     print("recent runs: none recorded yet (the ledger fills as scheduled tasks run)")
+
+health = s.get("health") or []
+if health:
+    print("health:")
+    for c in health:
+        print("  %-4s %-16s %s" % (c["status"], c["name"], c["detail"]))
+        if c["status"] == "fail":
+            problems.append("health check %s failed: %s" % (c["name"], c["detail"]))
+last_health = s.get("last_health_run")
+if last_health and not last_health.get("ok"):
+    problems.append("the last health task run failed: " + (last_health.get("note") or ""))
 
 # A slot that passed after the newest scheduler start-up must have left a run behind. This
 # is the check that tells a stalled loop (the host slept through its deadlines) apart from a
