@@ -23,7 +23,10 @@ function hoursAgo(iso: string | null): string {
   return `${days} day${days === 1 ? '' : 's'} ago`;
 }
 
-const recentRuns = status?.runs.slice(0, 6) ?? [];
+// Every field is read defensively: on a deploy the web ships before the backend image is
+// rebuilt, so this page must render against an older API payload missing the new blocks.
+const recentRuns = status?.runs?.slice(0, 6) ?? [];
+const scheduleGroups = status?.schedule ?? [];
 const healthChecks = [
   ...(status?.health ?? []),
   ...(status?.last_health_run
@@ -292,10 +295,10 @@ const healthChecks = [
                 <strong>{status.papers.toLocaleString('en-US')} papers</strong> in the index; the
                 newest arrived {hoursAgo(status.newest_paper_created_at ?? status.newest_paper_at)}.
               </li>
-              {status.schedule.length > 0 && (
+              {scheduleGroups.length > 0 && (
                 <li>
-                  <strong>Daily schedule</strong> ({status.schedule[0].timezone}):{' '}
-                  {status.schedule
+                  <strong>Daily schedule</strong> ({scheduleGroups[0].timezone}):{' '}
+                  {scheduleGroups
                     .map((group) => `${group.group} at ${group.at.join(', ')}`)
                     .join('; ')}
                   .
