@@ -1,11 +1,11 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from researchscout.ingest.pipeline import run_ingest
+from researchscout.ingest.pipeline import run_ingest, window_start
 from researchscout.schema import Author, Paper, Signal, SignalType
 from researchscout.sources.base import RawItem, Source
 from researchscout.store.models import PaperRow
@@ -226,3 +226,109 @@ def test_citation_signal_sets_count(session: Session) -> None:
     assert got is not None
     assert got.title == "Updated"
     assert got.citation_count == 7  # content re-ingest never resets the materialized count
+
+
+class PoisonSource(FakeSource):
+    """Every second payload is unparseable — the malformed-entry case."""
+
+    def normalize(self, raw: RawItem) -> Paper:
+        if raw.payload.get("title") == "POISON":
+            raise ValueError("malformed entry")
+        return Paper.model_validate(raw.payload)
+
+
+def test_a_malformed_entry_is_skipped_not_fatal(session: Session) -> None:
+    """With a deterministic window a poison entry would otherwise stall the same run daily."""
+    papers = [_paper("2401.00001"), _paper("2401.00002", title="POISON"), _paper("2401.00003")]
+    summary = run_ingest(session, PoisonSource(papers), SINCE)
+    assert summary.skipped == 1
+    assert summary.new_papers == 2
+    assert _count(session) == 2
+
+
+def test_replayed_signals_write_once(session: Session) -> None:
+    """The unique observation index makes replays converge instead of raising."""
+    run_ingest(session, FakeSource([_paper("2401.00001")]), SINCE)
+    signal = Signal(
+        paper_id="arxiv:2401.00001",
+        type=SignalType.citation,
+        source="fake-signal",
+        value=4.0,
+        metadata={},
+        observed_at=SINCE,
+    )
+    first = run_ingest(session, FakeSignalSource([signal]), SINCE)
+    replay = run_ingest(session, FakeSignalSource([signal]), SINCE)
+    assert first.signals == 1
+    assert replay.signals == 1  # counted as processed, but the row exists exactly once
+    from researchscout.store.signals import series
+
+    assert len(series(session, "arxiv:2401.00001", "citation", SINCE)) == 1
+
+
+def _patched_state(
+    monkeypatch: pytest.MonkeyPatch,
+    cursor: str | None,
+    last_since: datetime | None,
+    updated_at: datetime | None,
+) -> None:
+    monkeypatch.setattr(
+        "researchscout.ingest.pipeline.read_state",
+        lambda session, source: (cursor, last_since, updated_at),
+    )
+
+
+NOW = datetime(2026, 8, 18, 0, 30, 17, 123456, tzinfo=UTC)
+
+
+def test_window_start_without_state_is_the_plain_overlap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patched_state(monkeypatch, None, None, None)
+    start = window_start(None, "arxiv", NOW, overlap_days=4, max_window_days=30)
+    assert start == datetime(2026, 8, 14, 0, 0, tzinfo=UTC)  # hour-truncated, minus overlap
+
+
+def test_window_start_resumes_an_interrupted_walk_exactly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The saved cursor indexes one specific query; only the identical since can adopt it."""
+    saved = datetime(2026, 8, 13, 0, 0, tzinfo=UTC)
+    _patched_state(monkeypatch, "1200", saved, datetime(2026, 8, 17, 9, 0, tzinfo=UTC))
+    start = window_start(None, "arxiv", NOW, overlap_days=4, max_window_days=30)
+    assert start == saved
+
+
+def test_window_start_widens_over_downtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The watermark froze when the host went down; the window reaches back past it."""
+    week_ago = datetime(2026, 8, 11, 7, 45, tzinfo=UTC)
+    _patched_state(monkeypatch, None, datetime(2026, 8, 7, 0, 0, tzinfo=UTC), week_ago)
+    start = window_start(None, "arxiv", NOW, overlap_days=4, max_window_days=30)
+    assert start == datetime(2026, 8, 7, 7, 0, tzinfo=UTC)  # trunc(watermark) - overlap
+
+
+def test_window_start_caps_at_the_maximum(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Anything longer gone is a deliberate backfill, not a catch-up."""
+    long_ago = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+    _patched_state(monkeypatch, None, long_ago, long_ago)
+    start = window_start(None, "arxiv", NOW, overlap_days=4, max_window_days=30)
+    assert start == NOW - timedelta(days=30)
+
+
+def test_window_start_treats_a_stale_cursor_as_a_completed_walk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stale = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
+    _patched_state(monkeypatch, "500", stale, datetime(2026, 8, 17, 9, 0, tzinfo=UTC))
+    start = window_start(None, "arxiv", NOW, overlap_days=4, max_window_days=30)
+    assert start == datetime(2026, 8, 13, 9, 0, tzinfo=UTC)  # falls through to the watermark
+
+
+def test_window_start_is_stable_within_the_hour(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A re-run inside the same slot must produce the same since, or resume can never work."""
+    _patched_state(monkeypatch, None, None, None)
+    first = window_start(None, "arxiv", NOW, overlap_days=4, max_window_days=30)
+    later = window_start(
+        None, "arxiv", NOW + timedelta(minutes=20), overlap_days=4, max_window_days=30
+    )
+    assert first == later
