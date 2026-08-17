@@ -21,7 +21,6 @@ import logging
 from collections import defaultdict
 from dataclasses import dataclass
 
-import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -190,7 +189,7 @@ def refresh_catalog(session: Session) -> CatalogSummary:
             upsert_models(session, upserts, authoritative=EPOCH_FIELDS)
             written |= {key for model in upserts if (key := slug(model.name))}
             claims.update(model_claims)
-        except (httpx.HTTPError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - keep yesterday's rows, name the upstream
             logger.warning("epoch models refresh failed: %s", exc)
             failed.append(EPOCH_SOURCE)
 
@@ -203,7 +202,7 @@ def refresh_catalog(session: Session) -> CatalogSummary:
             # than at whichever paper the model card happened to cite.
             for key, paper_id in model_claims.items():
                 claims.setdefault(key, paper_id)
-        except (httpx.HTTPError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - keep yesterday's rows, name the upstream
             logger.warning("hugging face models refresh failed: %s", exc)
             failed.append(HF_SOURCE)
 
@@ -214,7 +213,7 @@ def refresh_catalog(session: Session) -> CatalogSummary:
     if _enabled(EPOCH_SOURCE):
         try:
             summary.benchmarks, summary.results = _refresh_benchmarks(session)
-        except (httpx.HTTPError, ValueError) as exc:
+        except Exception as exc:  # noqa: BLE001 - keep yesterday's rows, name the upstream
             logger.warning("epoch benchmarks refresh failed: %s", exc)
             failed.append(f"{EPOCH_SOURCE}:benchmarks")
 
