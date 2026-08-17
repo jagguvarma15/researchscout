@@ -37,7 +37,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from datetime import time as clock_time
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 from zoneinfo import ZoneInfo
 
 from researchscout.config import Settings
@@ -182,7 +182,9 @@ def _embedder() -> Embedder:
     return default_embedder()
 
 
-def _run_sources(settings: Settings, kind: str, names: frozenset[str] | None) -> str:
+def _run_sources(
+    settings: Settings, kind: Literal["content", "signal"], names: frozenset[str] | None
+) -> str:
     """Fetch a set of sources, isolating each one's failure; the note names every outcome.
 
     Any exception in one source — HTTP, parse, database — must not cost the sources after
@@ -224,9 +226,7 @@ def _run_sources(settings: Settings, kind: str, names: frozenset[str] | None) ->
             continue
         suffix = f", stopped early: {summary.stopped_early}" if summary.stopped_early else ""
         if kind == "content":
-            part = (
-                f"{summary.source}: fetched={summary.fetched} new={summary.new_papers}{suffix}"
-            )
+            part = f"{summary.source}: fetched={summary.fetched} new={summary.new_papers}{suffix}"
         else:
             part = f"{summary.source}: {summary.signals} observation(s){suffix}"
         logger.info("%s %s", kind, part)
@@ -247,9 +247,7 @@ def _signals(settings: Settings) -> str:
     from researchscout.sources import enabled_sources
 
     fast = frozenset(
-        source.name
-        for source in enabled_sources("signal")
-        if source.name not in _CITATION_SOURCES
+        source.name for source in enabled_sources("signal") if source.name not in _CITATION_SOURCES
     )
     return _run_sources(settings, "signal", fast)
 
@@ -337,9 +335,7 @@ def _digest(settings: Settings) -> str:
     from researchscout.store.digests import upsert_digest
 
     with session_scope() as session:
-        items, start, end = rank_digest(
-            session, days=settings.digest_days, k=settings.digest_top_k
-        )
+        items, start, end = rank_digest(session, days=settings.digest_days, k=settings.digest_top_k)
     if not items:
         logger.info("digest: window empty, nothing to publish")
         return "window empty"
@@ -418,8 +414,7 @@ def _catalog(settings: Settings) -> str:
         summary.linked,
     )
     note = (
-        f"{summary.models} model(s), {summary.benchmarks} benchmark(s), "
-        f"{summary.results} result(s)"
+        f"{summary.models} model(s), {summary.benchmarks} benchmark(s), {summary.results} result(s)"
     )
     if summary.failed:
         # Yesterday's rows still stand — partial data is the module's contract — but the
