@@ -90,10 +90,12 @@ sources:
       data_license: Public repository metadata read through the REST API
       provides: Star count of the repository that names a paper
   openalex:
-    # Off by default: a keyless citation cross-check and S2-outage fallback. With both this and
-    # semantic_scholar on, the citation contribution to the breakthrough score counts twice
-    # (per-source series each score). Set `mailto` to join the polite pool.
-    enabled: false
+    # The citation fallback lane: the walker (ingest/citations.py) hands OpenAlex only papers
+    # whose Semantic Scholar watermark is stale, and breakthrough scoring treats citation as
+    # an exclusive type (only the freshest source's series counts) - so having both enabled
+    # no longer double-counts. Requires an API key (mandatory upstream since 2026-02): set
+    # OPENALEX_API_KEY or `api_key` below; without one the connector skips itself.
+    enabled: true
     kind: signal
     cadence: daily
     attribution:
@@ -101,7 +103,8 @@ sources:
       homepage: https://openalex.org
       terms: https://developers.openalex.org/
       data_license: CC0 1.0
-      provides: Citation counts, as a keyless cross-check on Semantic Scholar
+      provides: Citation counts for papers Semantic Scholar has not covered lately
+    # api_key: your-openalex-key
     # mailto: you@example.com
   epoch_ai:
     # The model and benchmark catalogue behind /models and /benchmarks: the notable-models CSV
