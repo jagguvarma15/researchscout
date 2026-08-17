@@ -476,13 +476,30 @@ class StreamStats(BaseModel):
 
 
 class SchedulerRun(BaseModel):
-    """One completed scheduled task run from the ledger."""
+    """One scheduled task run from the ledger; still running while finished_at is null."""
 
     task: str
     started_at: datetime
-    finished_at: datetime
+    finished_at: datetime | None
     ok: bool
     note: str
+
+
+class HealthCheckInfo(BaseModel):
+    """One self-check verdict: ok, warn, fail, or skipped, with the reason."""
+
+    name: str
+    status: str
+    detail: str
+
+
+class ScheduleGroup(BaseModel):
+    """One task group's wall-clock schedule and its next occurrence."""
+
+    group: str
+    at: list[str]
+    timezone: str
+    next_run: datetime | None
 
 
 class SystemStatus(BaseModel):
@@ -492,13 +509,21 @@ class SystemStatus(BaseModel):
     build_sha: str | None
     migration: str | None
     papers: int
+    # Freshness has two truths: published_at is the paper's submission time (what the feed
+    # shows) and created_at is when it landed here (what "is the pipeline running" means).
     newest_paper_at: datetime | None
+    newest_paper_created_at: datetime | None = None
     runs: list[SchedulerRun]
     # The pipeline slot most recently due (None on an interval schedule) and the newest
     # scheduler start-up. Together they let a verifier tell "the ledger is young" apart from
     # "a slot passed with the scheduler up and nothing ran".
     pipeline_due_at: datetime | None = None
     scheduler_started_at: datetime | None = None
+    # Database-only self-checks, plus the last health task run - which carries the network
+    # verdicts (the funnel DNS check) this endpoint deliberately never performs inline.
+    health: list[HealthCheckInfo] = []
+    last_health_run: SchedulerRun | None = None
+    schedule: list[ScheduleGroup] = []
 
 
 class NotableModelInfo(BaseModel):
