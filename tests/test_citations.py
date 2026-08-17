@@ -96,7 +96,11 @@ def test_stalest_targets_walk_null_watermarks_first(session: Session) -> None:
     session.flush()
 
     targets = stalest_citation_targets(session, limit=10)
-    assert [pid for pid, _ in targets] == ["arxiv:2401.00003", "arxiv:2401.00002", "arxiv:2401.00001"]
+    assert [pid for pid, _ in targets] == [
+        "arxiv:2401.00003",
+        "arxiv:2401.00002",
+        "arxiv:2401.00001",
+    ]
 
     mark_citations_refreshed(
         session,
@@ -105,7 +109,11 @@ def test_stalest_targets_walk_null_watermarks_first(session: Session) -> None:
         fetched_at=datetime(2024, 6, 1, tzinfo=UTC),
     )
     targets = stalest_citation_targets(session, limit=10)
-    assert [pid for pid, _ in targets] == ["arxiv:2401.00002", "arxiv:2401.00001", "arxiv:2401.00003"]
+    assert [pid for pid, _ in targets] == [
+        "arxiv:2401.00002",
+        "arxiv:2401.00001",
+        "arxiv:2401.00003",
+    ]
 
 
 def test_fallback_targets_exclude_freshly_stamped_papers(session: Session) -> None:
@@ -136,7 +144,9 @@ def test_marking_again_replaces_the_watermark(session: Session) -> None:
     upsert_paper(session, _paper("2401.00001", published=datetime(2024, 1, 1, tzinfo=UTC)))
     session.flush()
     first = datetime(2024, 6, 1, tzinfo=UTC)
-    mark_citations_refreshed(session, ["arxiv:2401.00001"], source="semantic_scholar", fetched_at=first)
+    mark_citations_refreshed(
+        session, ["arxiv:2401.00001"], source="semantic_scholar", fetched_at=first
+    )
     later = datetime(2024, 7, 1, tzinfo=UTC)
     mark_citations_refreshed(session, ["arxiv:2401.00001"], source="openalex", fetched_at=later)
 
