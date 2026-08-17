@@ -87,3 +87,12 @@ def test_ties_break_by_recency(monkeypatch: pytest.MonkeyPatch) -> None:
     digest = build_daily_report(None)
     assert digest is not None
     assert [item.paper.id for item in digest.items] == ["arxiv:2607.5", "arxiv:2607.4"]
+
+
+def test_day_slug_follows_the_scheduler_zone() -> None:
+    """An evening-ET run is already tomorrow in UTC; the slug must stay on the ET date."""
+    from zoneinfo import ZoneInfo
+
+    evening_et_in_utc = datetime(2026, 8, 18, 1, 0, tzinfo=UTC)  # Aug 17, 21:00 in New York
+    assert day_slug(evening_et_in_utc) == "2026-08-18"  # UTC default keeps old behavior
+    assert day_slug(evening_et_in_utc, ZoneInfo("America/New_York")) == "2026-08-17"
