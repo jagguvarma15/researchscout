@@ -147,9 +147,7 @@ def check_funnel_dns(settings: Settings) -> HealthCheck:
     if not host:
         return HealthCheck("funnel_dns", "skipped", "no public hostname configured")
     try:
-        resp = httpx.get(
-            _DOH_URL, params={"name": host, "type": "A"}, timeout=_DOH_TIMEOUT
-        )
+        resp = httpx.get(_DOH_URL, params={"name": host, "type": "A"}, timeout=_DOH_TIMEOUT)
         resp.raise_for_status()
         answers = resp.json().get("Answer") or []
     except (httpx.HTTPError, ValueError) as exc:
