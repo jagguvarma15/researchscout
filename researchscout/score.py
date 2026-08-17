@@ -28,20 +28,27 @@ _Series = list[tuple[datetime, float]]
 
 @dataclass(frozen=True)
 class SignalSpec:
-    """How one signal type contributes: its weight and whether higher or lower values are better."""
+    """How one signal type contributes: its weight and whether higher or lower values are better.
+
+    ``exclusive`` marks a type whose sources are alternative measurements of one quantity
+    (Semantic Scholar and OpenAlex both count citations): only the freshest source's series
+    scores, because summing them would count the same level twice. Non-exclusive types sum
+    across sources — HN points and Bluesky engagement are different phenomena sharing a type.
+    """
 
     weight: float
     direction: float  # +1: higher value is better (counts); -1: lower is better (rank)
+    exclusive: bool = False
 
 
 # Per-type defaults. hf_trending_rank is weighted up as a fast ignition proxy and inverted (rank 1
 # is best); the not-yet-produced types are pre-registered so enabling their sources needs no change.
 _SPECS: dict[str, SignalSpec] = {
-    "citation": SignalSpec(weight=1.0, direction=1.0),
+    "citation": SignalSpec(weight=1.0, direction=1.0, exclusive=True),
     "code_stars": SignalSpec(weight=1.0, direction=1.0),
     "hf_trending_rank": SignalSpec(weight=1.5, direction=-1.0),
     "social_mention": SignalSpec(weight=1.0, direction=1.0),
-    "review_score": SignalSpec(weight=0.75, direction=1.0),
+    "review_score": SignalSpec(weight=0.75, direction=1.0, exclusive=True),
     "discussion": SignalSpec(weight=0.5, direction=1.0),
 }
 
@@ -123,17 +130,33 @@ def score_signal(
 
 
 def _from_grouped(grouped: dict[tuple[str, str], _Series], cfg: ScoreConfig) -> Breakthrough:
-    """Score each (type, source) series independently, then sum per type.
+    """Score each (type, source) series independently, then combine per type.
 
     Sources observing the same type (HN points and Bluesky engagement are both
     ``social_mention``) run on different scales, so each series keeps its own level and
     derivatives; the reported contribution stays keyed by type, summed across sources.
+    Exclusive types are the exception: their sources measure the same quantity, so only the
+    series with the newest observation scores — never a sum, and never a splice, because two
+    counters with different methodologies stitched together would fabricate a velocity jump.
     """
+    exclusive_pick: dict[str, _Series] = {}
     contributions: dict[str, float] = {}
     for (type_name, _source), points in grouped.items():
         spec = _SPECS.get(type_name)
         if spec is None or not points:
             continue
+        if spec.exclusive:
+            current = exclusive_pick.get(type_name)
+            if current is None or points[-1][0] > current[-1][0]:
+                exclusive_pick[type_name] = points
+            continue
+        contribution = score_signal(
+            _level(points), _slope(points), _acceleration(points), spec=spec, config=cfg
+        )
+        if contribution != 0.0:
+            contributions[type_name] = contributions.get(type_name, 0.0) + contribution
+    for type_name, points in exclusive_pick.items():
+        spec = _SPECS[type_name]
         contribution = score_signal(
             _level(points), _slope(points), _acceleration(points), spec=spec, config=cfg
         )
