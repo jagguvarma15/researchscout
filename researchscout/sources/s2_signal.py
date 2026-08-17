@@ -10,6 +10,11 @@ calls rather than one per paper — which is the only shape the unauthenticated 
 permits. The pool can still throttle: retries honor Retry-After, and a call that stays throttled
 raises so the pipeline stops there and keeps what earlier pages already stored. An ``S2_API_KEY``
 moves requests off the shared pool entirely.
+
+The batch response is matched back to the requested papers by each entry's arXiv external id,
+never by position: papers unknown to Semantic Scholar have come back both as null entries and as
+nothing at all — a dropped entry shifts every later position, which would silently attach counts
+to the wrong papers.
 """
 
 from __future__ import annotations
@@ -35,7 +40,7 @@ from researchscout.sources.base import (
 from researchscout.useragent import default_headers
 
 _S2_BASE = "https://api.semanticscholar.org/graph/v1"
-_FIELDS = "citationCount,influentialCitationCount"
+_FIELDS = "citationCount,influentialCitationCount,externalIds"
 _REQUEST_TIMEOUT = 30.0
 _RETRY_MAX = 2
 _RETRY_WAIT_CAP = 60.0
@@ -82,11 +87,12 @@ class SemanticScholarSource(Source):
         return [(paper_id, arxiv_id) for paper_id, arxiv_id in rows]
 
     def _fetch_batch(self, arxiv_ids: list[str]) -> list[dict[str, Any] | None]:
-        """One POST for the whole page; the response array aligns with the request order.
+        """One POST for the whole page; entries carry their arXiv id for matching.
 
-        A paper unknown to Semantic Scholar is a null entry rather than a 404, and the call as
-        a whole is what gets rate limited — so the retries live here, and a still-throttled
-        pool raises for the pipeline to treat as stop-here-keep-progress.
+        A paper unknown to Semantic Scholar is a null entry or simply absent — never a 404 —
+        so neither the length nor the order of the response is trusted. The call as a whole is
+        what gets rate limited, so the retries live here, and a still-throttled pool raises
+        for the pipeline to treat as stop-here-keep-progress.
         """
         for attempt in range(_RETRY_MAX + 1):
             resp = httpx.post(
@@ -111,8 +117,16 @@ class SemanticScholarSource(Source):
             return [], None
         fetched_at = datetime.now(UTC)
         entries = self._fetch_batch([arxiv_id for _, arxiv_id in targets])
+        by_arxiv: dict[str, dict[str, Any]] = {}
+        for entry in entries:
+            if entry is None:
+                continue
+            arxiv_id = (entry.get("externalIds") or {}).get("ArXiv")
+            if arxiv_id:
+                by_arxiv[arxiv_id] = entry
         items: list[RawItem] = []
-        for (paper_id, _), entry in zip(targets, entries, strict=True):
+        for paper_id, arxiv_id in targets:
+            entry = by_arxiv.get(arxiv_id)
             if entry is None:
                 continue  # paper unknown to Semantic Scholar
             items.append(
