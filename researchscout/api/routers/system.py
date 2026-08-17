@@ -98,9 +98,7 @@ def _last_health_run(session: Session) -> SchedulerRun | None:
 @router.get("/system/status")
 def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemStatus:
     settings = get_settings()
-    newest_published = session.execute(
-        select(func.max(PaperRow.published_at))
-    ).scalar_one_or_none()
+    newest_published = session.execute(select(func.max(PaperRow.published_at))).scalar_one_or_none()
     newest_created = session.execute(select(func.max(PaperRow.created_at))).scalar_one_or_none()
     papers = session.execute(select(func.count()).select_from(PaperRow)).scalar_one()
     # Read the migration stamp directly: alembic's own table is the one source of truth for
