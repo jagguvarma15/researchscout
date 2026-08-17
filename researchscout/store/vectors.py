@@ -26,18 +26,29 @@ def upsert_embedding(session: Session, paper_id: str, model_id: str, vector: lis
 
 
 def index_papers(session: Session, embedder: Embedder, *, batch_size: int = 64) -> int:
-    """Embed papers lacking a vector for the embedder's model; return how many were embedded."""
-    pending = papers_missing_embedding(session, embedder.model_id)
+    """Embed papers lacking a vector for the embedder's model; return how many were embedded.
+
+    Selects one batch of (id, title, abstract) at a time — never full rows, whose full_text
+    would drag the whole backlog into memory — newest first so the feed's fresh papers embed
+    first, and commits per batch so an interruption keeps everything already embedded.
+    """
+    have = select(PaperEmbeddingRow.paper_id).where(PaperEmbeddingRow.model_id == embedder.model_id)
     embedded = 0
-    for start in range(0, len(pending), batch_size):
-        batch = pending[start : start + batch_size]
-        texts = [f"{paper.title}\n\n{paper.abstract}" for paper in batch]
+    while True:
+        batch = session.execute(
+            select(PaperRow.id, PaperRow.title, PaperRow.abstract)
+            .where(PaperRow.id.not_in(have))
+            .order_by(PaperRow.published_at.desc(), PaperRow.id)
+            .limit(batch_size)
+        ).all()
+        if not batch:
+            return embedded
+        texts = [f"{title}\n\n{abstract}" for _, title, abstract in batch]
         vectors = embedder.embed_documents(texts)
-        for paper, vector in zip(batch, vectors, strict=True):
-            upsert_embedding(session, paper.id, embedder.model_id, vector)
+        for (paper_id, _, _), vector in zip(batch, vectors, strict=True):
+            upsert_embedding(session, paper_id, embedder.model_id, vector)
             embedded += 1
-        session.flush()
-    return embedded
+        session.commit()
 
 
 def _configure_scan(session: Session) -> None:
