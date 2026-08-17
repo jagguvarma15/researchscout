@@ -269,6 +269,7 @@ def serve_scheduler(
     import signal as signalmod
     import threading
     from contextlib import suppress
+    from pathlib import Path
 
     from researchscout.config import get_settings
     from researchscout.scheduler import Scheduler, build_tasks, record_started
@@ -276,8 +277,21 @@ def serve_scheduler(
 
     configure_logging()
     settings = get_settings()
-    tasks = build_tasks(settings)
-    scheduler = Scheduler(tasks, tick_sec=settings.scheduler_tick_sec)
+
+    heartbeat = None
+    if settings.scheduler_heartbeat_path:
+        # Touched every tick and between long-running items; the container healthcheck reads
+        # the file's age to tell a live loop from a wedged one.
+        heartbeat_file = Path(settings.scheduler_heartbeat_path)
+
+        def _beat() -> None:
+            with suppress(OSError):
+                heartbeat_file.touch()
+
+        heartbeat = _beat
+
+    tasks = build_tasks(settings, heartbeat=heartbeat)
+    scheduler = Scheduler(tasks, tick_sec=settings.scheduler_tick_sec, heartbeat=heartbeat)
 
     if once:
         scheduler.run_pass()
