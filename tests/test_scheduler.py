@@ -84,10 +84,11 @@ def test_build_tasks_maps_settings_intervals() -> None:
         scheduler_digest_interval_sec=444,
         scheduler_topics_interval_sec=555,
         scheduler_report_interval_sec=666,
+        scheduler_health_interval_sec=777,
     )
     tasks = build_tasks(settings)
-    assert [t.name for t in tasks] == ["catalog", "digest", "topics", "report"]
-    assert [t.interval_sec for t in tasks] == [333, 444, 555, 666]
+    assert [t.name for t in tasks] == ["catalog", "digest", "topics", "report", "health"]
+    assert [t.interval_sec for t in tasks] == [333, 444, 555, 666, 777]
 
 
 def test_tasks_are_on_intervals_unless_times_are_configured() -> None:
@@ -105,10 +106,29 @@ def test_configured_times_move_the_named_tasks_onto_the_clock() -> None:
     )
     by_name = {task.name: task for task in build_tasks(settings)}
     assert by_name["ingest"].at == (time(5, 0), time(10, 0), time(14, 0), time(17, 0))
+    # Unset, the signal and citation groups follow the pipeline times.
     assert by_name["signals"].at == by_name["ingest"].at
+    assert by_name["citations"].at == by_name["ingest"].at
     assert by_name["catalog"].at == (time(17, 0),)
     assert by_name["report"].at == (time(17, 0),)  # unset report times stay with the daily set
     assert by_name["ingest"].zone.key == "America/New_York"
+    assert by_name["health"].at == ()  # the health task stays on its interval everywhere
+
+
+def test_signal_and_citation_groups_take_their_own_times() -> None:
+    settings = Settings(
+        scheduler_batch_pipeline=True,
+        scheduler_pipeline_at="00:30",
+        scheduler_signals_at="08:00,18:00",
+        scheduler_citations_at="06:00",
+        scheduler_daily_at="17:00",
+        scheduler_report_at="07:00",
+    )
+    by_name = {task.name: task for task in build_tasks(settings)}
+    assert by_name["ingest"].at == (time(0, 30),)
+    assert by_name["signals"].at == (time(8, 0), time(18, 0))
+    assert by_name["citations"].at == (time(6, 0),)
+    assert by_name["report"].at == (time(7, 0),)
 
 
 def test_the_report_can_run_on_its_own_clock() -> None:
@@ -214,23 +234,41 @@ def test_batch_pipeline_adds_the_work_the_stream_would_do() -> None:
         "index",
         "fulltext",
         "signals",
+        "citations",
         "catalog",
         "digest",
         "topics",
         "report",
+        "health",
     ]
     assert [t.interval_sec for t in tasks[:4]] == [11, 22, 33, 44]
 
 
+def _patch_source_run(
+    monkeypatch: pytest.MonkeyPatch, sources: list[object], fake_run_ingest: object
+) -> None:
+    from datetime import UTC, datetime
+
+    monkeypatch.setattr("researchscout.sources.enabled_sources", lambda kind=None: sources)
+    monkeypatch.setattr("researchscout.ingest.pipeline.run_ingest", fake_run_ingest)
+    monkeypatch.setattr(
+        "researchscout.ingest.pipeline.window_start",
+        lambda session, name, **kwargs: datetime(2026, 8, 1, tzinfo=UTC),
+    )
+    monkeypatch.setattr("researchscout.store.db.session_scope", lambda: nullcontext(None))
+
+
+class _Source:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
 def test_one_failing_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A rate-limited upstream is normal; it must not cost the others their turn."""
+    """A rate-limited upstream is normal; it must not cost the others their turn — but the
+    aggregate still raises so the ledger row names the failure."""
     import httpx
 
     import researchscout.scheduler as scheduler_mod
-
-    class _Source:
-        def __init__(self, name: str) -> None:
-            self.name = name
 
     seen: list[str] = []
 
@@ -239,22 +277,102 @@ def test_one_failing_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyP
         seen.append(name)
         if name == "broken":
             raise httpx.HTTPError("429 from upstream")
-        return SimpleNamespace(source=name, fetched=1, new_papers=1, signals=0, stopped_early=None)
+        return SimpleNamespace(
+            source=name, fetched=1, new_papers=1, signals=0, skipped=0, stopped_early=None
+        )
 
-    monkeypatch.setattr(
-        "researchscout.sources.enabled_sources",
-        lambda kind=None: [_Source("broken"), _Source("fine")],
-    )
-    monkeypatch.setattr("researchscout.ingest.pipeline.run_ingest", fake_run_ingest)
-    monkeypatch.setattr(scheduler_mod, "session_scope", nullcontext, raising=False)
-    monkeypatch.setattr("researchscout.store.db.session_scope", lambda: nullcontext(None))
+    _patch_source_run(monkeypatch, [_Source("broken"), _Source("fine")], fake_run_ingest)
 
-    scheduler_mod._ingest(Settings())
+    with pytest.raises(RuntimeError) as excinfo:
+        scheduler_mod._ingest(Settings())
+    assert seen == ["broken", "fine"]
+    # The note names the broken source and still carries the healthy one's outcome.
+    assert "broken: failed" in str(excinfo.value)
+    assert "fine: fetched=1" in str(excinfo.value)
+
+
+def test_a_non_http_failure_is_isolated_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A parse or database error in one source must not cost the sources after it."""
+    import researchscout.scheduler as scheduler_mod
+
+    seen: list[str] = []
+
+    def fake_run_ingest(session: object, source: object, since: object, **kwargs: object) -> object:
+        name = getattr(source, "name", "?")
+        seen.append(name)
+        if name == "broken":
+            raise ValueError("malformed payload")
+        return SimpleNamespace(
+            source=name, fetched=0, new_papers=0, signals=3, skipped=0, stopped_early=None
+        )
+
+    _patch_source_run(monkeypatch, [_Source("broken"), _Source("fine")], fake_run_ingest)
+
+    with pytest.raises(RuntimeError):
+        scheduler_mod._signals(Settings())
     assert seen == ["broken", "fine"]
 
 
-def test_recorded_wrapper_writes_the_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Every scheduled run lands in the ledger — the success, and the failure with its reason."""
+def test_signals_excludes_the_citation_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Citations belong to the walker task; the fast poll must not double-fetch them."""
+    import researchscout.scheduler as scheduler_mod
+
+    seen: list[str] = []
+
+    def fake_run_ingest(session: object, source: object, since: object, **kwargs: object) -> object:
+        seen.append(getattr(source, "name", "?"))
+        return SimpleNamespace(
+            source="x", fetched=0, new_papers=0, signals=0, skipped=0, stopped_early=None
+        )
+
+    sources = [_Source("semantic_scholar"), _Source("hf_trending"), _Source("openalex")]
+    _patch_source_run(monkeypatch, sources, fake_run_ingest)
+
+    scheduler_mod._signals(Settings())
+    assert seen == ["hf_trending"]
+
+
+def test_recorded_wrapper_writes_the_ledger_in_two_phases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A row opens before the task runs and completes after — a hang leaves the open row."""
+    import researchscout.scheduler as scheduler_mod
+
+    events: list[tuple[str, object]] = []
+
+    def fake_started(session: object, task: str, *, started_at: object) -> int:
+        events.append(("open", task))
+        return 7
+
+    def fake_finished(
+        session: object, run_id: int, *, finished_at: object, ok: bool, note: str = ""
+    ) -> None:
+        events.append(("finish", (run_id, ok, note)))
+
+    monkeypatch.setattr("researchscout.store.runs.record_task_started", fake_started)
+    monkeypatch.setattr("researchscout.store.runs.record_task_finished", fake_finished)
+    monkeypatch.setattr("researchscout.store.db.session_scope", lambda: nullcontext(None))
+
+    scheduler_mod._recorded("fine", lambda: "did the thing")()
+
+    def boom() -> str:
+        raise RuntimeError("no")
+
+    with pytest.raises(RuntimeError):
+        scheduler_mod._recorded("broken", boom)()
+
+    assert events == [
+        ("open", "fine"),
+        ("finish", (7, True, "did the thing")),
+        ("open", "broken"),
+        ("finish", (7, False, "no")),
+    ]
+
+
+def test_recorded_falls_back_to_a_single_write_when_the_open_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bookkeeping trouble must not stop the task, and the run still lands in the ledger."""
     import researchscout.scheduler as scheduler_mod
 
     entries: list[tuple[str, bool, str]] = []
@@ -262,17 +380,25 @@ def test_recorded_wrapper_writes_the_ledger(monkeypatch: pytest.MonkeyPatch) -> 
     def fake_record(name: str, started: object, *, ok: bool, note: str = "") -> None:
         entries.append((name, ok, note))
 
+    def broken_started(session: object, task: str, *, started_at: object) -> int:
+        raise RuntimeError("ledger down")
+
+    monkeypatch.setattr("researchscout.store.runs.record_task_started", broken_started)
+    monkeypatch.setattr("researchscout.store.db.session_scope", lambda: nullcontext(None))
     monkeypatch.setattr(scheduler_mod, "_record_safely", fake_record)
 
-    scheduler_mod._recorded("fine", lambda: None)()
+    scheduler_mod._recorded("fine", lambda: "note")()
+    assert entries == [("fine", True, "note")]
 
-    def boom() -> None:
-        raise RuntimeError("no")
 
-    with pytest.raises(RuntimeError):
-        scheduler_mod._recorded("broken", boom)()
-
-    assert entries == [("fine", True, ""), ("broken", False, "no")]
+def test_the_heartbeat_ticks_around_tasks() -> None:
+    """The healthcheck file must move even while a slot runs several tasks back to back."""
+    beats: list[int] = []
+    tasks = [Task("a", 1.0, lambda: None), Task("b", 1.0, lambda: None)]
+    sched = Scheduler(tasks, clock=lambda: 0.0, heartbeat=lambda: beats.append(1))
+    sched.run_due(0.0)
+    # One beat after each task plus one for the tick itself.
+    assert len(beats) == 3
 
 
 def test_record_started_writes_the_scheduler_row(monkeypatch: pytest.MonkeyPatch) -> None:
