@@ -129,8 +129,13 @@ def test_pipeline_runs_reads_the_ledger(session: Session) -> None:
     now = datetime.now(UTC)
     assert check_pipeline_runs(session, settings, now).status == "warn"  # nothing yet
 
-    record_run(session, "ingest", started_at=now - timedelta(hours=3),
-               finished_at=now - timedelta(hours=3), ok=True)
+    record_run(
+        session,
+        "ingest",
+        started_at=now - timedelta(hours=3),
+        finished_at=now - timedelta(hours=3),
+        ok=True,
+    )
     session.commit()
     assert check_pipeline_runs(session, settings, now).status == "ok"
 
@@ -141,8 +146,14 @@ def test_pipeline_runs_reads_the_ledger(session: Session) -> None:
 def test_task_streaks_fail_on_three_and_warn_on_one(session: Session) -> None:
     now = datetime.now(UTC)
     for offset in (3, 2, 1):
-        record_run(session, "digest", started_at=now - timedelta(hours=offset),
-                   finished_at=now - timedelta(hours=offset), ok=False, note="llm down")
+        record_run(
+            session,
+            "digest",
+            started_at=now - timedelta(hours=offset),
+            finished_at=now - timedelta(hours=offset),
+            ok=False,
+            note="llm down",
+        )
     record_run(session, "topics", started_at=now, finished_at=now, ok=False)
     record_run(session, "ingest", started_at=now, finished_at=now, ok=True)
     session.commit()
