@@ -29,3 +29,12 @@ def test_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
     assert s.chat_guardrail is False
     assert s.cluster_algo == "hdbscan"
     assert s.foryou_centroids == 3
+
+
+def test_build_sha_falls_back_to_the_platform_stamp(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Railway stamps deploys with RAILWAY_GIT_COMMIT_SHA; RS_BUILD_SHA still wins when set."""
+    monkeypatch.delenv("RS_BUILD_SHA", raising=False)
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "abc1234def")
+    assert Settings().build_sha == "abc1234def"
+    monkeypatch.setenv("RS_BUILD_SHA", "override99")
+    assert Settings().build_sha == "override99"
