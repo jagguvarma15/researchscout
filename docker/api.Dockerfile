@@ -1,13 +1,13 @@
-# The backend image: the API, the scheduler and the stream worker all run from it - same code,
-# different command. Build from the repo root:
+# The backend image: one container runs the API and the scheduler together via
+# `scout serve all`. Railway builds it straight from the repo (see railway.json); by hand:
 #   docker build -f docker/api.Dockerfile -t researchscout-api .
 #
 # It is a large image - torch and the sentence-transformers stack are runtime dependencies,
 # because embedding happens in process - but not as large as it would be: pyproject.toml
 # resolves torch from the CPU index on Linux, which drops about fifteen CUDA packages a
-# container on a laptop would never load. The model weights are not baked in either; they
-# download on first use into the cache below, which compose keeps in a volume so a restart
-# does not refetch them.
+# container on a laptop would never load. The model weights ARE baked in: a redeploy on a
+# platform without shared volumes would otherwise refetch them on every cold start, and the
+# healthcheck would spend its whole grace period watching a download.
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 WORKDIR /app
@@ -15,10 +15,9 @@ WORKDIR /app
 # part-way through and fails the whole build.
 ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_HTTP_TIMEOUT=180
 
-# One extra beyond the API, named at build time. Empty is the deployment: it drives ingestion
-# from the scheduler in batches, so it has no use for a broker client. Compose's stream service
-# passes "stream" and tags the result separately, because an image that can run
-# `scout stream serve` is a different image.
+# One extra beyond the API, named at build time. Empty is the deployment: ingestion runs
+# from the scheduler in batches, so it has no use for a broker client. Pass "stream" to get
+# an image that can run `scout stream serve`.
 ARG EXTRAS=
 
 # Dependencies first, so a code change does not re-resolve or re-download them.
@@ -49,18 +48,17 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     HF_HOME=/home/scout/.cache/huggingface
 
-# Which commit this image is. make deploy-build stamps it and /v1/system/status serves it, so
-# a stale deployment is a readable fact rather than a guess. Empty when built by hand.
-ARG GIT_SHA=
-ENV RS_BUILD_SHA=$GIT_SHA
-
-# The model cache is a named volume in compose. Docker seeds a fresh volume from whatever the
-# image has at that path, ownership included - without this directory it creates one owned by
-# root and the unprivileged process cannot write the weights it just downloaded.
-RUN mkdir -p /home/scout/.cache/huggingface && chown -R scout:scout /home/scout/.cache
-
 USER scout
+
+# Bake the embedder and reranker weights into the image (~150MB) so a fresh container is
+# serving within seconds of boot instead of downloading models inside its healthcheck grace
+# period. The ids mirror the config defaults; a model swap means rebuilding the image.
+RUN python -c "\
+from sentence_transformers import CrossEncoder, SentenceTransformer; \
+SentenceTransformer('BAAI/bge-small-en-v1.5'); \
+CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+
 EXPOSE 8000
 
-# Overridden per service in compose; this is the one that serves traffic.
-CMD ["scout", "serve", "api", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form so the platform's injected PORT wins; 8000 for a plain `docker run`.
+CMD ["sh", "-c", "scout serve all --host 0.0.0.0 --port ${PORT:-8000}"]
