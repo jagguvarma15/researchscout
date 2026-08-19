@@ -10,12 +10,15 @@ pnpm build        # SSR build via @astrojs/node (standalone)
 node dist/server/entry.mjs
 ```
 
-Env vars: `API_URL` (default `http://localhost:8000`) points at the API; `SITE_URL` (default
-`http://localhost:4321`) anchors the same-origin check on mutating `/api/*` requests. Pages
+Env vars: `API_URL` (default `http://localhost:8000`) points at the API - in production the
+Railway service's public URL; `API_SERVICE_TOKEN` rides every proxied request as
+`x-rs-service-token` and must match the backend's `RS_SERVICE_TOKEN`; `SITE_URL` (default
+`http://localhost:4321`) anchors the same-origin check on mutating `/api/*` requests; the
+`AUTH0_*` variables and `SESSION_SECRET` drive sign-in (see `deploy/PUBLISHING.md`). Pages
 degrade gracefully when the API is unreachable instead of failing the render.
 
-There is no sign-in: the app always acts as the built-in local user, matching the API's
-local no-auth mode, and `/api/*` proxies to the API without credentials.
+Without an Auth0 configuration the app acts as the built-in local user, matching the API's
+local no-auth mode.
 
 ## Filters, math, and the reader
 
