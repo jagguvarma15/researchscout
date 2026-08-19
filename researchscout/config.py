@@ -6,6 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -214,10 +215,15 @@ class Settings(BaseSettings):
     # that table compares them on. A file rather than a query because "which labs matter" is a
     # judgement call, and one that will need revisiting as the field moves.
     providers_config_path: Path = Path("config/providers.yaml")
-    # The commit a deployment runs, set on the Railway service from RAILWAY_GIT_COMMIT_SHA
-    # and served by /v1/system/status - which is how a stale deployment becomes a readable
-    # fact instead of a guess. Empty for a source checkout.
-    build_sha: str = ""
+    # The commit a deployment runs, served by /v1/system/status - which is how a stale
+    # deployment becomes a readable fact instead of a guess. Railway stamps every
+    # GitHub-triggered deploy with RAILWAY_GIT_COMMIT_SHA, read directly because template
+    # references cannot reach per-deploy variables; RS_BUILD_SHA overrides when set (its
+    # alias is listed first). Empty for a source checkout or a CLI upload.
+    build_sha: str = Field(
+        default="",
+        validation_alias=AliasChoices("RS_BUILD_SHA", "RAILWAY_GIT_COMMIT_SHA"),
+    )
 
 
 @lru_cache(maxsize=1)
