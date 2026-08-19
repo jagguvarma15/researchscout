@@ -52,7 +52,7 @@ const server = spawn('node', ['dist/server/entry.mjs'], {
     ...process.env,
     HOST: '127.0.0.1',
     PORT: String(PORT),
-    API_URL: process.env.API_URL ?? 'http://127.0.0.1:8001',
+    API_URL: process.env.API_URL ?? 'http://127.0.0.1:8000',
   },
   stdio: 'ignore',
 });
