@@ -44,9 +44,11 @@ import { CONTACT_URL, MINIMUM_AGE, TERMS_EFFECTIVE } from '../lib/legal';
           personalized feed work.
         </li>
         <li>
-          <strong>Questions you ask Scout.</strong> Answers are generated on the operator's own
-          machine. A truncated copy of the question is stored with timing information to
-          diagnose slow answers.
+          <strong>Questions you ask Scout.</strong> Fast answers are assembled from the stored
+          papers and involve no model provider. AI answers send your question, with short
+          excerpts of the matched papers, to a hosted language model to write the reply. A
+          truncated copy of the question is stored with timing information to diagnose slow
+          answers.
         </li>
         <li>
           <strong>Ordinary server records.</strong> Requests reach the site through hosting and
@@ -78,15 +80,17 @@ import { CONTACT_URL, MINIMUM_AGE, TERMS_EFFECTIVE } from '../lib/legal';
         <li><strong>Auth0</strong> handles registration, sign-in and password resets.</li>
         <li><strong>Vercel</strong> serves the web pages.</li>
         <li>
-          <strong>Tailscale</strong> relays traffic between the web pages and the operator's
-          machine, where the database lives.
+          <strong>Railway</strong> hosts the backend and the database, in the United States.
+        </li>
+        <li>
+          <strong>A language model provider</strong> receives the questions you ask Scout in AI
+          mode, together with short excerpts of the matched papers, to generate the answer.
         </li>
       </ul>
       <p>
-        Those three see what they need to do their job, under their own terms. Nobody else
-        does.
-        Your saved papers, interests and reading history live in a database on the operator's own
-        machine, along with its backups, and are not shared with anyone.
+        Each of those sees what it needs to do its job, under its own terms. Nobody else does.
+        Your saved papers, interests and reading history live in the service's database and its
+        backups, and are not shared with anyone.
       </p>
     </section>
 
