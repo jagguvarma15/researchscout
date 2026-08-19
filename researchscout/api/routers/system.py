@@ -7,8 +7,7 @@ deploy-verify``, the web footer's freshness line, and the about page's status se
 read it.
 
 The self-checks reported here are database-only: this endpoint renders on page loads and
-must never resolve DNS or call out. The network verdicts (the funnel check) arrive via the
-scheduler's last ``health`` run, which did the calling on its own time.
+must never call out to anything slower than Postgres.
 """
 
 from __future__ import annotations
@@ -118,7 +117,7 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
     ]
     health = [
         HealthCheckInfo(name=check.name, status=check.status, detail=check.detail)
-        for check in run_health_checks(session, settings, include_network=False)
+        for check in run_health_checks(session, settings)
     ]
     return SystemStatus(
         version=__version__,
