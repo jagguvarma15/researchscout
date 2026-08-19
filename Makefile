@@ -16,18 +16,9 @@ KAFKA_DATA := $(LOCAL)/kafka-logs
 KAFKA_CONF := $(LOCAL)/kafka/server.properties
 KAFKA_HEAP ?= -Xmx512m -Xms128m
 
-# The deployment stack: containers, its own database volume, separate from everything above.
-COMPOSE := deploy/docker-compose.yml
-AGENT_PLIST := $(HOME)/Library/LaunchAgents/com.researchscout.backup.plist
-# Outside ~/Desktop and friends: launchd jobs are denied those by macOS privacy protection.
-AGENT_DIR := $(HOME)/Library/Application Support/researchscout
-
 .DEFAULT_GOAL := help
 .PHONY: help setup start stop status logs seed digest scheduler kafka-start kafka-stop \
-        deploy-build deploy-up deploy-up-stream deploy-down deploy-verify \
-        deploy-ps deploy-logs backup backup-schedule backup-unschedule \
-        stack-schedule stack-unschedule watchdog-schedule watchdog-unschedule \
-        check clean
+        deploy-verify backup check clean
 
 help: ## list targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  \033[1m%-18s\033[0m %s\n", $$1, $$2}'
@@ -123,8 +114,6 @@ digest: ## build and publish this week's digest (needs the LLM up)
 	uv run scout digest
 
 scheduler: ## run the refresh loop in the foreground (Ctrl-C to stop)
-	@docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^researchscout-scheduler' && \
-	  echo "warning: the deployed scheduler container is running too - two fetchers on one address is what trips arXiv rate limits" || true
 	uv run scout serve scheduler
 
 kafka-start: ## start the kafka broker (KRaft single node) in the background
@@ -146,85 +135,14 @@ kafka-stop: ## stop the kafka broker
 	-@lsof -ti :9092 2>/dev/null | xargs kill 2>/dev/null; true
 	@echo "kafka: stopped"
 
-deploy-build: ## build the backend image used by the deployment stack
-	docker compose -f $(COMPOSE) build --build-arg GIT_SHA=$$(git rev-parse --short HEAD)
-
-deploy-up: ## start the deployed backend (postgres, migrations, api, scheduler)
-	docker compose -f $(COMPOSE) up -d
-	@echo "api on http://127.0.0.1:8001 (the dev stack keeps :8000)"
-
+# The backend deploys itself: Railway builds docker/api.Dockerfile on every push to main
+# (railway.json is the config), so there is nothing to build or start from here - these two
+# targets are the client side: prove the deployment, and hold a copy of the data.
 deploy-verify: ## check the deployed backend is current, migrated, and fetching
 	./deploy/verify.sh
 
-# The batch pipeline is on by default so a stream-less deployment still fetches papers, which
-# means turning the stream on has to turn it back off in the same breath: two processes pulling
-# from the same upstreams on one address is what arXiv's three-second floor cannot survive. A
-# shell variable beats deploy/.env in compose's interpolation, so this wins whatever that says.
-deploy-up-stream: ## the same, plus kafka and the streaming worker
-	RS_SCHEDULER_BATCH_PIPELINE=false docker compose -f $(COMPOSE) --profile stream up -d
-
-deploy-down: ## stop the deployed backend, keeping the data volume
-	docker compose -f $(COMPOSE) --profile stream down
-
-deploy-ps: ## what the deployment stack is running
-	docker compose -f $(COMPOSE) ps
-
-deploy-logs: ## follow the deployment logs
-	docker compose -f $(COMPOSE) logs -f
-
 backup: ## dump the deployed database, keep a week, verify the file
 	./deploy/backup.sh
-
-backup-schedule: ## run the backup nightly at 03:30 (launchd)
-	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
-	@cp deploy/backup.sh "$(AGENT_DIR)/backup.sh" && chmod +x "$(AGENT_DIR)/backup.sh"
-	@sed "s|@AGENT_DIR@|$(AGENT_DIR)|g" deploy/launchd/com.researchscout.backup.plist.template > $(AGENT_PLIST)
-	-@launchctl bootout gui/$$(id -u)/com.researchscout.backup 2>/dev/null
-	launchctl bootstrap gui/$$(id -u) $(AGENT_PLIST)
-	@echo "nightly backup scheduled: 03:30"
-	@echo "  script: $(AGENT_DIR)/backup.sh   (a copy - rerun this target after changing it)"
-	@echo "  log:    $(AGENT_DIR)/backup.log"
-
-backup-unschedule: ## stop the nightly backup
-	-@launchctl bootout gui/$$(id -u)/com.researchscout.backup 2>/dev/null
-	-@rm -f $(AGENT_PLIST) "$(AGENT_DIR)/backup.sh"
-	@echo "nightly backup removed"
-
-stack-schedule: ## bring the deployed stack and funnel up at login (launchd)
-	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
-	@cp deploy/stack-up.sh "$(AGENT_DIR)/stack-up.sh" && chmod +x "$(AGENT_DIR)/stack-up.sh"
-	@sed "s|@AGENT_DIR@|$(AGENT_DIR)|g" deploy/launchd/com.researchscout.stack.plist.template \
-	  > $(HOME)/Library/LaunchAgents/com.researchscout.stack.plist
-	-@launchctl bootout gui/$$(id -u)/com.researchscout.stack 2>/dev/null
-	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.researchscout.stack.plist
-	@echo "stack start-up scheduled at login (needs auto-login for unattended reboots)"
-	@echo "  script: $(AGENT_DIR)/stack-up.sh   (a copy - rerun this target after changing it)"
-	@echo "  log:    $(AGENT_DIR)/stack.log"
-
-stack-unschedule: ## stop bringing the stack up at login
-	-@launchctl bootout gui/$$(id -u)/com.researchscout.stack 2>/dev/null
-	-@rm -f $(HOME)/Library/LaunchAgents/com.researchscout.stack.plist "$(AGENT_DIR)/stack-up.sh"
-	@echo "stack start-up removed"
-
-watchdog-schedule: ## check the stack, funnel, and health every 10 minutes (launchd)
-	@mkdir -p "$(AGENT_DIR)" $(HOME)/Library/LaunchAgents
-	@cp deploy/watchdog.sh "$(AGENT_DIR)/watchdog.sh" && chmod +x "$(AGENT_DIR)/watchdog.sh"
-	@grep '^RS_SERVICE_TOKEN=' deploy/.env > "$(AGENT_DIR)/watchdog.env" 2>/dev/null || \
-	  : > "$(AGENT_DIR)/watchdog.env"
-	@chmod 600 "$(AGENT_DIR)/watchdog.env"
-	@sed "s|@AGENT_DIR@|$(AGENT_DIR)|g" deploy/launchd/com.researchscout.watchdog.plist.template \
-	  > $(HOME)/Library/LaunchAgents/com.researchscout.watchdog.plist
-	-@launchctl bootout gui/$$(id -u)/com.researchscout.watchdog 2>/dev/null
-	launchctl bootstrap gui/$$(id -u) $(HOME)/Library/LaunchAgents/com.researchscout.watchdog.plist
-	@echo "watchdog scheduled every 10 minutes"
-	@echo "  script: $(AGENT_DIR)/watchdog.sh   (a copy - rerun this target after changing it)"
-	@echo "  log:    $(AGENT_DIR)/watchdog.log"
-
-watchdog-unschedule: ## stop the watchdog
-	-@launchctl bootout gui/$$(id -u)/com.researchscout.watchdog 2>/dev/null
-	-@rm -f $(HOME)/Library/LaunchAgents/com.researchscout.watchdog.plist \
-	  "$(AGENT_DIR)/watchdog.sh" "$(AGENT_DIR)/watchdog.env"
-	@echo "watchdog removed"
 
 check: ## everything CI runs: lint, types, unit tests, web check + build
 	uv run ruff check researchscout tests
