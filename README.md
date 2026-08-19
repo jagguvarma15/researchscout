@@ -113,30 +113,28 @@ time the loop comes up - and `GET /v1/system/status` serves it along with the ap
 build SHA, the migration stamp, the newest paper's age, and the pipeline slot most recently
 due. That last pair is what lets `make deploy-verify` flag a stalled loop by name: a slot that
 passed after the newest scheduler start with no run recorded is a problem, not a young ledger.
-One warning worth repeating: never run two fetchers against arXiv from one address.
-`make scheduler` says so out loud if the deployed scheduler container is already running.
+One warning worth repeating: never run two fetchers against arXiv from one address - with the
+deployed scheduler on Railway, `make scheduler` on this machine is safe, but a second local
+fetcher is not.
 
 ## Monitoring
 
 The pipeline checks itself; there is no external monitoring stack. A `health` task runs in
 the scheduler every half hour: is ingest completing on cadence, are any tasks failing
 repeatedly, is the corpus arriving on the mornings arXiv actually announces (weekends are
-quiet by design), did any run hang, does the funnel hostname still resolve on public DNS,
-and is retention holding. The verdict lands in the `scheduler_runs` ledger like any other
-run, and a failing check fails the task so it is impossible to miss in the recent-runs list.
+quiet by design), did any run hang, and is retention holding. The verdict lands in the
+`scheduler_runs` ledger like any other run, and a failing check fails the task so it is
+impossible to miss in the recent-runs list.
 
 `GET /v1/system/status` carries all of it: version and build SHA, the migration stamp, both
 freshness truths (newest paper by submission time and by arrival time), the recent runs with
-their notes, the database-side health checks, the last health task's verdict (which includes
-the network checks the endpoint itself never performs), and the wall-clock schedule with
-each group's next occurrence. The about page renders the human version; the footer's
+their notes, the health checks, the last health task's verdict, and the wall-clock schedule
+with each group's next occurrence. The about page renders the human version; the footer's
 freshness line reads the same payload; `make deploy-verify` fails loudly on any of it being
 wrong.
 
-On the host, `make watchdog-schedule` installs a ten-minute launchd job that restarts
-stopped containers, re-asserts the funnel when its public DNS record vanishes, and reads the
-status endpoint once a day - surfacing anything broken as a macOS notification. `make
-stack-schedule` brings the whole stack up at login after a reboot.
+Process supervision is Railway's: its healthcheck restarts the container when `/healthz`
+stops answering, and the dashboard holds the logs, restart history, and resource graphs.
 
 ## Deep backfill
 
@@ -213,22 +211,20 @@ registry stub is `config/sources.yaml`.
 
 ## Deploying
 
-The public site is the frontend on Vercel plus this backend in Docker, published through
-Tailscale Funnel - no inbound port, no domain to buy. `deploy/README.md` is the runbook for the
-container stack (including moving the development database into it and the nightly backup);
-`deploy/PUBLISHING.md` is the account-by-account setup for Funnel, Auth0, and Vercel.
+The public site is the frontend on Vercel plus this backend on Railway - both build from this
+repository and both auto-deploy on a push to main, so a merge is the whole deploy step.
+`deploy/README.md` is the runbook (schedule, restores, backups, failure triage);
+`deploy/PUBLISHING.md` is the account-by-account setup for Railway, Auth0, and Vercel.
 
 ```bash
-cp deploy/.env.example deploy/.env   # fill in, then
-make deploy-build && make deploy-up  # postgres, migrations, api, scheduler on :8001
+cp deploy/.env.example deploy/.env   # the client-side values verify.sh and backup.sh read
 make deploy-verify                   # current SHA, migrations, run ledger, catalogue answering
-make backup                          # nightly dump, keeps a week, verifies the file
+make backup                          # manual dump over the TCP proxy, keeps a week, verifies
 ```
 
-`deploy-build` stamps the image with the commit it was built from and `/v1/system/status`
+Railway stamps the image with the commit it built (`RS_BUILD_SHA`) and `/v1/system/status`
 serves it back, so `deploy-verify` can tell a stale deployment from a broken one - the failure
-mode that once ran for two days looking healthy. Rebuild and re-up after every merge you want
-live; a restart alone keeps the old image and the old environment.
+mode that once ran for two days looking healthy under the old self-hosted stack.
 
 The development stack is unchanged and independent: `make start` still runs everything as host
 processes against the repo-local Postgres, and with no identity provider configured the API and
