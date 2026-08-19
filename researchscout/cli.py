@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 from researchscout import __version__
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from researchscout.config import Settings
 
 app = typer.Typer(
     name="scout",
@@ -259,6 +264,66 @@ def serve_api(
     uvicorn.run("researchscout.api.main:app", host=host, port=port, reload=reload)
 
 
+def _heartbeat_for(settings: Settings) -> Callable[[], None] | None:
+    """Touch-the-file closure for the scheduler heartbeat, or ``None`` when unset.
+
+    Touched every tick and between long-running items; a container healthcheck can read
+    the file's age to tell a live loop from a wedged one.
+    """
+    from contextlib import suppress
+
+    if not settings.scheduler_heartbeat_path:
+        return None
+    heartbeat_file = Path(settings.scheduler_heartbeat_path)
+
+    def _beat() -> None:
+        with suppress(OSError):
+            heartbeat_file.touch()
+
+    return _beat
+
+
+@serve_app.command("all")
+def serve_all(
+    host: Annotated[str, typer.Option(help="Bind address.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Port.")] = 8000,
+) -> None:
+    """Run the API and the scheduler in one process (single-container deployments).
+
+    The scheduler loops on a daemon thread so both halves share the warmed model
+    singletons — the nightly index reuses the embedder the API already holds instead of
+    loading a second copy. A scheduler crash is logged loudly but leaves the API serving;
+    process shutdown (uvicorn handling SIGTERM) takes the thread down with it.
+    """
+    import logging
+    import threading
+
+    import uvicorn
+
+    from researchscout.config import get_settings
+    from researchscout.scheduler import Scheduler, build_tasks, record_started
+    from researchscout.trace import configure_logging
+
+    configure_logging()
+    _warm_models()
+    settings = get_settings()
+    heartbeat = _heartbeat_for(settings)
+    tasks = build_tasks(settings, heartbeat=heartbeat)
+    scheduler = Scheduler(tasks, tick_sec=settings.scheduler_tick_sec, heartbeat=heartbeat)
+    record_started(len(tasks))
+
+    def _run_scheduler() -> None:
+        try:
+            scheduler.run_forever(lambda: False)
+        except Exception:
+            logging.getLogger("researchscout.scheduler").critical(
+                "scheduler thread died; the API keeps serving", exc_info=True
+            )
+
+    threading.Thread(target=_run_scheduler, name="scheduler", daemon=True).start()
+    uvicorn.run("researchscout.api.main:app", host=host, port=port)
+
+
 @serve_app.command("scheduler")
 def serve_scheduler(
     once: Annotated[
@@ -269,7 +334,6 @@ def serve_scheduler(
     import signal as signalmod
     import threading
     from contextlib import suppress
-    from pathlib import Path
 
     from researchscout.config import get_settings
     from researchscout.scheduler import Scheduler, build_tasks, record_started
@@ -277,19 +341,7 @@ def serve_scheduler(
 
     configure_logging()
     settings = get_settings()
-
-    heartbeat = None
-    if settings.scheduler_heartbeat_path:
-        # Touched every tick and between long-running items; the container healthcheck reads
-        # the file's age to tell a live loop from a wedged one.
-        heartbeat_file = Path(settings.scheduler_heartbeat_path)
-
-        def _beat() -> None:
-            with suppress(OSError):
-                heartbeat_file.touch()
-
-        heartbeat = _beat
-
+    heartbeat = _heartbeat_for(settings)
     tasks = build_tasks(settings, heartbeat=heartbeat)
     scheduler = Scheduler(tasks, tick_sec=settings.scheduler_tick_sec, heartbeat=heartbeat)
 
