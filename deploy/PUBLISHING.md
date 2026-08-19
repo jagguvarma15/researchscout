@@ -1,91 +1,94 @@
-# Publishing: Funnel, Auth0, Vercel
+# Publishing: Railway, Auth0, Vercel
 
-The compose stack in this directory runs the backend. This is everything outside it - the three
-accounts that make the site public, in the order they need to happen. Each step ends with
-something you can check, because a half-configured deployment fails in ways that look like code
-bugs.
+The backend runs on Railway; the frontend on Vercel; sign-in through Auth0. This is the
+account-level setup in the order it needs to happen. Each step ends with something you can
+check, because a half-configured deployment fails in ways that look like code bugs.
 
 Nothing here can be scripted from the repository: every step needs credentials only you can
 create.
 
-## 1. Publishing the API with Tailscale Funnel
+## 1. The backend on Railway
 
-The backend runs at home. Funnel gives it a public HTTPS hostname without a domain, without an
-inbound firewall rule, and without exposing this machine's address: the daemon holds an
-outbound connection and Tailscale relays to it.
+One project, two services, one region (pick the same US region for both; Vercel's functions
+default to us-east, so us-east keeps the proxy hop short).
 
-1. Install Tailscale on this Mac and sign in (`brew install --cask tailscale`).
-2. Enable HTTPS and Funnel for the tailnet: admin console -> DNS -> enable MagicDNS and HTTPS
-   certificates, then Access controls -> add `funnel` to the node attributes for this machine.
-   The admin console prompts for both the first time you run the command below.
-3. Publish the API, which compose binds to `127.0.0.1:8001`:
+### Postgres
 
-   ```bash
-   tailscale funnel --bg 8001
-   tailscale funnel status        # prints the public https://<machine>.<tailnet>.ts.net
-   ```
+New service from the Docker image `pgvector/pgvector:pg17` (the plain Railway Postgres
+template ships without the vector extension this schema needs):
 
-Check: `curl https://<machine>.<tailnet>.ts.net/healthz` from a phone off wifi returns
-`{"status":"ok"}`.
+- Volume mounted at `/var/lib/postgresql/data` - the pg17 data path; without a volume the
+  database is erased on every redeploy.
+- Service variables: `POSTGRES_USER=researchscout`, `POSTGRES_DB=researchscout`,
+  `POSTGRES_PASSWORD` (generate with `openssl rand -hex 24` - hex, not base64: the value is
+  substituted into connection URLs, where a `/` or `@` breaks parsing rather than failing
+  cleanly).
+- Enable the TCP proxy (Settings -> Networking) and note the public connection string -
+  restores and `make backup` go through it. It is password-authed; leave it on.
 
-Funnel listens only on 443, 8443 and 10000, only over TLS, and its bandwidth is capped at a
-level Tailscale does not publish. For a personal research radar that is fine; it is not a CDN.
+### The api service
+
+New service from this GitHub repository, `main` branch, auto-deploy on push. `railway.json`
+at the repo root carries the config as code: the Dockerfile build
+(`docker/api.Dockerfile`), the pre-deploy migration command (`scout db upgrade`), and the
+`/healthz` healthcheck. The container runs `scout serve all` - API and scheduler in one
+process.
+
+Variables to set on the service: the full list with explanations is in
+`deploy/.env.example`. The two that are not plain values:
+
+```
+RS_DATABASE_URL=postgresql+psycopg://${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.PGDATABASE}}
+RS_BUILD_SHA=${{RAILWAY_GIT_COMMIT_SHA}}
+```
+
+The first exists because Railway's own `DATABASE_URL` lacks the `+psycopg` driver marker
+SQLAlchemy needs; the second is what lets `make deploy-verify` prove the deployed commit is
+origin/main. Then Settings -> Networking -> Generate Domain; that public https URL goes
+into Vercel's `API_URL` and `deploy/.env`'s `RAILWAY_API_URL`.
+
+Check: `curl https://<the-domain>/healthz` returns `{"status":"ok"}`.
 
 ### Close the front door
 
-That hostname is public, so anyone who learns it can call the API - including the routes open
-to signed-out visitors. One shared secret separates the site's own server from everyone else:
+That hostname is public, so anyone who learns it can call the API - including the routes
+open to signed-out visitors. One shared secret separates the site's own server from
+everyone else:
 
 ```bash
-openssl rand -base64 36        # put it in deploy/.env as RS_SERVICE_TOKEN
-                               # and in Vercel as API_SERVICE_TOKEN
+openssl rand -base64 36        # put it in the Railway service as RS_SERVICE_TOKEN,
+                               # in Vercel as API_SERVICE_TOKEN,
+                               # and in deploy/.env for verify.sh
 ```
 
-The frontend proxies every browser request server-side, so the token never reaches a browser.
-Requests without it get a 404 rather than a 403 - there is no reason to confirm to a scanner
-that an API lives there. `/healthz` stays open so the container healthcheck works.
+The frontend proxies every browser request server-side, so the token never reaches a
+browser. Requests without it get a 404 rather than a 403 - there is no reason to confirm to
+a scanner that an API lives there. `/healthz` stays open so Railway's healthcheck works.
 
-That token is also what makes rate limiting mean anything. Every request arrives from the same
-place (the site's server), so the socket address is useless for telling visitors apart; the
-proxy forwards each visitor's address, and the API believes it only because the token proved
-where the request came from.
+That token is also what makes rate limiting mean anything. Every request arrives from the
+same place (the site's server), so the socket address is useless for telling visitors
+apart; the proxy forwards each visitor's address, and the API believes it only because the
+token proved where the request came from.
 
-With no edge in front of the API any more, that in-process limiter is the only limiter. It is
-per process and resets on restart - adequate for this scale, and worth remembering before
+With no edge in front of the API, that in-process limiter is the only limiter. It is per
+process and resets on restart - adequate for this scale, and worth remembering before
 posting the link somewhere busy.
 
 ### Prove the deployment is current
 
-After every `make deploy-build && make deploy-up`, run:
+Merging to main deploys both halves (Railway builds the backend, Vercel the web). After a
+merge:
 
 ```bash
 make deploy-verify
 ```
 
-It reads `GET /v1/system/status` on :8001 and answers the three questions that matter: is the
-running image built from the commit checked out here (the build SHA is stamped at
-`deploy-build`), did the migrations land, and are the scheduled runs actually happening (the
-`scheduler_runs` ledger, with the newest paper's age beside it). It exits nonzero when the
-deployment is unreachable, stale, or missing the catalogue routes - each with a message saying
-which. The web footer's "Newest paper" line reads the same endpoint, so staleness is also
-visible on the page itself.
-
-Worth internalising once: `docker restart` and a reboot keep the old image and the old
-container environment. Only `deploy-build` + `deploy-up` (which recreates the containers)
-delivers merged code and new compose defaults - that gap is how the stack once ran for two
-days on stale code while looking perfectly healthy.
-
-And its sibling: a Mac hosting the deployment must not sleep. While it sleeps the API is
-unreachable and no scheduled slot can fire (a slept-over slot now runs once on wake, but on
-wake, not on time). Keep the machine awake on AC power:
-
-```bash
-sudo pmset -c sleep 0
-```
-
-The display can still sleep; `-c` scopes the setting to being plugged in. `deploy-verify`
-names the failure if it happens anyway: a pipeline slot that passed after the scheduler's
-newest start-up with no run recorded exits nonzero.
+It reads `GET /v1/system/status` through the public URL and answers the questions that
+matter: is the running image built from origin/main (`RS_BUILD_SHA`), did the migrations
+land, and are the scheduled runs actually happening (the `scheduler_runs` ledger, with the
+newest paper's age beside it). It exits nonzero when the deployment is unreachable, stale,
+or missing the catalogue routes - each with a message saying which. The web footer's
+"Newest paper" line reads the same endpoint, so staleness is also visible on the page.
 
 ## 2. Auth0
 
@@ -129,8 +132,8 @@ Copy its Domain, Client ID and Client Secret - they are different from the first
 
 | Auth0 | Setting | Format |
 | --- | --- | --- |
-| Domain | `RS_OIDC_ISSUER` in `deploy/.env` | `https://tenant.us.auth0.com/` - scheme and trailing slash |
-| Domain | `RS_AUTH0_DOMAIN` in `deploy/.env` | `tenant.us.auth0.com` - bare, no scheme, no slash |
+| Domain | `RS_OIDC_ISSUER` on the Railway service | `https://tenant.us.auth0.com/` - scheme and trailing slash |
+| Domain | `RS_AUTH0_DOMAIN` on the Railway service | `tenant.us.auth0.com` - bare, no scheme, no slash |
 | Domain | `AUTH0_DOMAIN` in Vercel | bare, as above |
 | API Identifier | `RS_OIDC_AUDIENCE` and Vercel's `AUTH0_AUDIENCE` | identical in both |
 | Web app Client ID / Secret | Vercel `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` | |
@@ -147,10 +150,11 @@ One thing to look at before inviting anyone: Authentication -> Social. A new ten
 Google using Auth0's shared development keys, which are rate limited and show an Auth0 notice
 on the consent screen. Either turn the connection off or give it your own Google credentials.
 
-Then restart the backend so it picks up the issuer: `make deploy-down && make deploy-up`.
+Changing a variable on the Railway service redeploys it, so the new issuer is picked up on
+save.
 
-Check: `curl -H "x-rs-service-token: <token>" https://<machine>.<tailnet>.ts.net/v1/me` returns
-401 (no account token), and the same request to `/v1/papers` still returns papers.
+Check: `curl -H "x-rs-service-token: <token>" https://<the-domain>/v1/me` returns 401 (no
+account token), and the same request to `/v1/papers` still returns papers.
 
 ## 3. Vercel
 
@@ -162,14 +166,14 @@ Project settings: root directory `apps/web`, framework Astro. Environment variab
 
 | Variable | Value |
 | --- | --- |
-| `API_URL` | `https://<machine>.<tailnet>.ts.net` |
+| `API_URL` | the Railway api service's public https URL |
 | `SITE_URL` | `https://<site>` |
 | `AUTH0_DOMAIN` | `<tenant>.us.auth0.com` |
 | `AUTH0_CLIENT_ID` | the regular web application's id |
 | `AUTH0_CLIENT_SECRET` | its secret |
 | `AUTH0_AUDIENCE` | the API identifier from step 2 |
 | `SESSION_SECRET` | `openssl rand -base64 48` |
-| `API_SERVICE_TOKEN` | the same value as `RS_SERVICE_TOKEN` in `deploy/.env` |
+| `API_SERVICE_TOKEN` | the same value as `RS_SERVICE_TOKEN` on the Railway service |
 
 Keep the Hobby plan's terms in view: non-commercial personal use only, and that includes
 donation links and advertising.
@@ -180,8 +184,8 @@ The terms dialog must not appear the second time.
 ## Monitoring
 
 There is no external monitoring stack. The scheduler's health task self-checks every half
-hour (ingest cadence, failing streaks, weekend-aware corpus freshness, hung runs, the
-funnel's public DNS record, retention), `GET /v1/system/status` reports the verdict, the
-about page renders it, and `make watchdog-schedule` turns failures into macOS notifications.
-`make deploy-verify` reads the same payload after every deploy. See the Monitoring section
-of the top-level README.
+hour (ingest cadence, failing streaks, weekend-aware corpus freshness, hung runs,
+retention), `GET /v1/system/status` reports the verdict, and the about page renders it.
+`make deploy-verify` reads the same payload after every merge. Railway's own dashboard
+carries the service logs, restart history, and resource graphs; its healthcheck restarts
+the container when `/healthz` stops answering.
