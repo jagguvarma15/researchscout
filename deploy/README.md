@@ -1,164 +1,84 @@
 # Deploying the backend
 
-The public site is two halves: the Astro frontend on Vercel, and this - the API, the database
-and the refresh loop - running in Docker on the machine you are reading this on, published
-through Tailscale Funnel. No inbound port is opened and this machine's address stays hidden.
+The backend runs on Railway: one container (API + scheduler via `scout serve all`, built
+from `docker/api.Dockerfile`) beside a `pgvector/pgvector:pg17` Postgres with a volume. The
+frontend deploys separately on Vercel and reaches the API through its public Railway URL.
 
 ```
-visitor -> researchscout.vercel.app   Vercel, Astro SSR, holds the session cookie
-              |  server-side proxy attaches the account token, the service
-              |  token, and the visitor's address
-              v
-           <machine>.<tailnet>.ts.net Tailscale Funnel: TLS, outbound only
-              |
-              v
-           api:8001                   this compose stack
-                                      postgres, scheduler, [stream]
-                                      Ollama stays on the host
+GitHub main ──push──> Railway build ──migrate (pre-deploy)──> api service ── /healthz
+     │                                                            │
+     └────push──────> Vercel build ──────────> site ──proxy──────>┘
+                                                          Postgres (private network)
 ```
 
-The API is open on localhost and closed to everyone else by one shared secret
-(`RS_SERVICE_TOKEN`); requests without it get a 404. Setting up Funnel, the token and the rest
-is `deploy/PUBLISHING.md`.
+Account-level setup (Railway project, Auth0, Vercel) is in `PUBLISHING.md`. The full
+variable list for the api service is in `.env.example`, which is also the template for the
+local `deploy/.env` the two scripts here read.
 
-## Before the first run
+## Deploying
 
-1. `cp deploy/.env.example deploy/.env` and fill it in. `POSTGRES_PASSWORD` is chosen once: it
-   is baked into the database volume on first start.
-2. Ollama on the host: `brew services start ollama` and `ollama pull qwen2.5:3b-instruct`. Use
-   the service rather than `ollama serve` in a terminal - answers and the digest depend on it,
-   and a model that only runs until the next reboot fails silently afterwards. It stays outside
-   Docker deliberately: Docker on macOS has no Metal passthrough, so a containerised model
-   would run on CPU at a fraction of the speed.
-3. Docker Desktop needs enough memory for Postgres plus the API's models. 4 GB works without
-   the stream profile; with it, expect pressure on an 8 GB machine.
-
-## Running it
+Merge to main. Railway builds the image, runs `scout db upgrade` as the pre-deploy command,
+health-checks `/healthz`, and swaps traffic; Vercel ships the web in parallel. Then, from
+the repo root:
 
 ```bash
-make deploy-build     # build the backend image (large: torch is a runtime dependency)
-make deploy-up        # postgres, migrations, api, scheduler
-make deploy-ps        # what is running
-make deploy-logs      # follow all of it
-make deploy-down      # stop, keeping the data volume
+make deploy-verify
 ```
 
-The API listens on `127.0.0.1:8001` so it never collides with the development stack on 8000.
-Migrations run as their own service and must finish before the API starts, so a deploy never
-serves against a schema it does not match.
+which proves through the public URL that the deployed commit is origin/main, migrations are
+at head, papers are fresh, and the scheduled runs are landing. There is no build or start
+step on this machine - if verify says the SHA is stale, look at the Railway deploy logs,
+not for a restart command.
 
-Optional profiles:
+One sequencing note: Vercel ships the web before Railway finishes building the backend, so
+a PR that changes an API shape has a short window where the new UI talks to the old API.
+Requests that 422 during that window are sequencing, not bugs.
+
+## Scheduling
+
+Everything is wall-clock slots inside the one container (`RS_SCHEDULER_*_AT` variables, ET
+by default): pipeline 00:30, citations 06:00, report 07:00, fast signals 08:00 and 18:00,
+daily set 17:00, health every 30 minutes. A redeploy or restart re-arms the next future
+slot; a slot missed while a deploy was in flight is covered by the watermark-derived ingest
+window on the next run.
+
+## Moving data in or out
+
+The Postgres service's TCP proxy is the path for both directions; its connection string
+lives in `deploy/.env` as `DATABASE_PUBLIC_URL`.
+
+Restore a dump (custom format) into a fresh database:
 
 ```bash
-make deploy-up-stream       # adds kafka and the streaming worker
-tailscale funnel --bg 8001  # publishes the API (on the host, not in compose)
+pg_restore --no-owner --dbname "$DATABASE_PUBLIC_URL" the-dump.dump
 ```
 
-## Surviving reboots
-
-Two launchd jobs, installed the same way as the nightly backup (scripts are copied to
-`~/Library/Application Support/researchscout`, because launchd cannot read `~/Desktop`):
+Restore one of `backup.sh`'s plain dumps:
 
 ```bash
-make stack-schedule      # at login: start Docker, the containers, re-assert the funnel
-make watchdog-schedule   # every 10 min: restart stopped containers, check the API, check
-                         # the funnel's PUBLIC DNS record (on-tailnet curls lie), and once a
-                         # day read /v1/system/status - failures become macOS notifications
+gunzip -c researchscout-<stamp>.sql.gz | psql "$DATABASE_PUBLIC_URL"
 ```
 
-One honest limitation: LaunchAgents fire at login, not at boot, because starting Docker
-Desktop needs a GUI session. Unattended recovery from a power cut therefore needs auto-login
-enabled (System Settings -> Users & Groups); without it the stack comes back when someone
-logs in, not before. Keep the machine on `sudo pmset -c sleep 0` either way - a sleeping
-host is a down site.
-
-## Moving the existing data in
-
-The development stack keeps its data in `.local/pgdata` under Homebrew Postgres; the deployment
-keeps its own volume. Copy one into the other once.
-
-Note the drop and recreate: `make deploy-up` has already run the migrations, so the target
-holds an empty schema, and restoring a plain dump on top of it fails on every `CREATE TABLE`.
-The dump carries its own schema and its own `alembic_version`, so the cleanest target is an
-empty database rather than a migrated one.
-
-```bash
-# 1. Dump the development database (with the local stack running).
-pg_dump -h localhost -p 5432 -U researchscout --format plain --no-owner researchscout \
-  > /tmp/researchscout-dev.sql
-
-# 2. Free the database: the API and scheduler hold connections that block a drop.
-docker compose -f deploy/docker-compose.yml stop api scheduler
-
-# 3. Recreate it empty, then restore into it.
-docker compose -f deploy/docker-compose.yml exec -T postgres \
-  psql -U researchscout -d postgres \
-  -c 'DROP DATABASE researchscout WITH (FORCE)' \
-  -c 'CREATE DATABASE researchscout OWNER researchscout'
-
-docker compose -f deploy/docker-compose.yml exec -T postgres \
-  psql -U researchscout -d researchscout -v ON_ERROR_STOP=1 < /tmp/researchscout-dev.sql
-
-docker compose -f deploy/docker-compose.yml start api scheduler
-```
-
-Check the counts match before trusting it:
-
-```bash
-psql -h localhost -p 5432 -U researchscout -d researchscout -c 'select count(*) from papers'
-docker compose -f deploy/docker-compose.yml exec -T postgres \
-  psql -U researchscout -d researchscout -c 'select count(*) from papers'
-```
-
-The Homebrew cluster is left untouched, so it stays the rollback.
-
-## Only one of them may ingest
-
-The development stack and the deployment both know how to fetch from arXiv - `scout stream
-serve` on the host, the scheduler in compose - and they share this machine's address. The
-three-second floor arXiv asks for is held per process, so running both halves it, and the
-first sign is 429s on every request for a while afterwards.
-
-So: with the deployment running, stop the development ingest.
-
-```bash
-[ -f .local/run/stream.pid ] && kill $(cat .local/run/stream.pid) && rm .local/run/stream.pid
-```
-
-`make start` brings it back for development; just do not leave both running. The development
-API and web app are fine either way - they only reach arXiv when somebody asks them to.
+The pg17 client tools come from `brew install postgresql@17` (the dev stack already needs
+them).
 
 ## Backups
 
 ```bash
-make backup             # dump to ~/backups/researchscout, keep 7 days, verify the file
-make backup-schedule    # and nightly at 03:30, under launchd
-make backup-unschedule  # stop it
+make backup
 ```
 
-`backup-schedule` copies the script to `~/Library/Application Support/researchscout/` and
-points the agent there. That indirection is not fussiness: macOS denies launchd jobs access to
-`~/Desktop`, `~/Documents` and `~/Downloads`, so a job pointed at a checkout in one of those
-fails with "Operation not permitted" before it reaches Postgres - and writes that message to a
-log it also cannot create. The script addresses the database container by name for the same
-reason, so it needs nothing from the repository. **After changing `deploy/backup.sh`, rerun
-`make backup-schedule`** to refresh the copy.
+dumps through the TCP proxy into `~/backups/researchscout`, keeps a week, and verifies the
+file. Railway's volume backups cover the routine case; this is the copy you hold yourself.
+Run it before risky migrations.
 
-Check it: `launchctl kickstart -p gui/$(id -u)/com.researchscout.backup`, then read
-`~/Library/Application Support/researchscout/backup.log`.
+## When something is wrong
 
-To restore a dump into an empty database:
-
-```bash
-gunzip -c ~/backups/researchscout/researchscout-20260801-033000.sql.gz |
-  docker compose -f deploy/docker-compose.yml exec -T postgres \
-    psql --username researchscout --dbname researchscout
-```
-
-## What this machine owes the site
-
-The backend is a desktop at home, which is a better arrangement than a laptop - it is not
-going to close its lid mid-request - but it is still one machine on one domestic connection.
-Reboots, updates, power cuts and outages all reach the site. The frontend keeps serving cached
-pages with a banner saying so, and the terms disclaim availability. Moving Postgres and the API
-to a hosted machine is the fix when that stops being acceptable.
+- `make deploy-verify` names the failure: stale SHA, missed slot, failing health check, or
+  an unreachable service - each with where to look next.
+- The scheduler's health task writes its verdict to the `scheduler_runs` ledger every half
+  hour; `GET /v1/system/status` (service token required) and the about page's Status
+  section show it.
+- Service logs, restarts, and resource graphs are on the Railway dashboard. The healthcheck
+  restarts the container when `/healthz` stops answering; `restartPolicyType` in
+  `railway.json` covers crashes.
