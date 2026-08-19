@@ -128,10 +128,6 @@ class Settings(BaseSettings):
     citations_fallback_papers: int = 2000
     # Raw fetched payloads are kept this many days for replay/debugging, then pruned.
     raw_items_keep_days: int = 30
-    # The site's public hostname (the Tailscale Funnel name). The health task resolves it
-    # through a public DNS-over-HTTPS resolver to catch the record vanishing while every
-    # on-tailnet check still passes. Empty skips the check.
-    public_hostname: str = ""
     # Breakthrough scoring: how the signal series becomes a ranking boost. The window bounds how
     # far back momentum is measured; the weights set how much velocity and acceleration count
     # relative to the raw level.
