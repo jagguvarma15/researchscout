@@ -22,7 +22,12 @@ template ships without the vector extension this schema needs):
 - Service variables: `POSTGRES_USER=researchscout`, `POSTGRES_DB=researchscout`,
   `POSTGRES_PASSWORD` (generate with `openssl rand -hex 24` - hex, not base64: the value is
   substituted into connection URLs, where a `/` or `@` breaks parsing rather than failing
-  cleanly).
+  cleanly), and `PGDATA=/var/lib/postgresql/data/pgdata`. The last one is not optional: the
+  volume mounts with a `lost+found` directory at its root, and initdb refuses a non-empty
+  data directory - pointing PGDATA one level down is the standard fix.
+- Restores that build HNSW indexes need parallelism off (`SET
+  max_parallel_maintenance_workers = 0`): parallel index builds allocate dynamic shared
+  memory, and the container's 64MB `/dev/shm` is too small for these tables.
 - Enable the TCP proxy (Settings -> Networking) and note the public connection string -
   restores and `make backup` go through it. It is password-authed; leave it on.
 
