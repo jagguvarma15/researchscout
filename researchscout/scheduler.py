@@ -424,12 +424,12 @@ def _catalog(settings: Settings) -> str:
 
 
 def _health(settings: Settings) -> str:
-    """Self-check the pipeline, corpus, and public reachability; fail loudly on any fail."""
+    """Self-check the pipeline and corpus; fail loudly on any fail."""
     from researchscout.health import overall_ok, run_health_checks, summarize
     from researchscout.store.db import session_scope
 
     with session_scope() as session:
-        checks = run_health_checks(session, settings, include_network=True)
+        checks = run_health_checks(session, settings)
     note = summarize(checks)
     if not overall_ok(checks):
         raise RuntimeError(note)
