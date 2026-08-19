@@ -1,9 +1,9 @@
-"""Self-checks: is the pipeline landing papers, running its tasks, and reachable in public.
+"""Self-checks: is the pipeline landing papers and running its tasks on schedule.
 
 The checks are pure functions over the ledger, the corpus, and the settings, so the same list
-serves three consumers: the scheduler's health task (which includes the network checks and
-writes the verdict to the ledger), the status endpoint (database-only — it renders on page
-loads and must not resolve DNS), and tests.
+serves three consumers: the scheduler's health task (which writes the verdict to the ledger),
+the status endpoint (it renders on page loads, so every check must stay database-only), and
+tests.
 
 The weekend logic lives in the corpus-freshness check and nowhere else: the pipeline RUNS
 every day, but arXiv announces Sunday through Thursday evenings only, so new papers are
@@ -17,7 +17,6 @@ from datetime import UTC, datetime, time, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -28,8 +27,6 @@ from researchscout.store.runs import last_ok_finish, open_runs_older_than, recen
 
 Status = Literal["ok", "warn", "fail", "skipped"]
 
-_DOH_URL = "https://dns.google/resolve"
-_DOH_TIMEOUT = 5.0
 _RUN_SLACK = timedelta(hours=2)
 _ARRIVAL_SLACK = timedelta(hours=1)
 _HUNG_AFTER = timedelta(hours=6)
@@ -66,7 +63,9 @@ def check_task_streaks(session: Session) -> HealthCheck:
     failing: list[str] = []
     warning: list[str] = []
     for task, runs in recent_finished_by_task(session, per_task=_STREAK_LEN).items():
-        if task == "scheduler" or not runs:
+        if task in ("scheduler", "health") or not runs:
+            # "scheduler" rows are start markers, and "health" rows echo these very
+            # checks — counting either would latch an old verdict into a new failure.
             continue
         if len(runs) >= _STREAK_LEN and all(not run.ok for run in runs):
             failing.append(f"{task} ({runs[0].note or 'no note'})")
@@ -136,31 +135,6 @@ def check_hung_runs(session: Session, now: datetime) -> HealthCheck:
     return HealthCheck("hung_run", "ok", "no hung runs")
 
 
-def check_funnel_dns(settings: Settings) -> HealthCheck:
-    """Resolve the public hostname through a public resolver — the tailnet's answer lies.
-
-    A missing record means the world cannot reach the API even though every local probe
-    passes; that is precisely the failure a reboot can cause while the tailscale client
-    still reports the funnel as on.
-    """
-    host = settings.public_hostname
-    if not host:
-        return HealthCheck("funnel_dns", "skipped", "no public hostname configured")
-    try:
-        resp = httpx.get(_DOH_URL, params={"name": host, "type": "A"}, timeout=_DOH_TIMEOUT)
-        resp.raise_for_status()
-        answers = resp.json().get("Answer") or []
-    except (httpx.HTTPError, ValueError) as exc:
-        return HealthCheck("funnel_dns", "warn", f"resolver unreachable: {exc}")
-    if not answers:
-        return HealthCheck(
-            "funnel_dns",
-            "fail",
-            f"{host} has no public DNS record - re-assert with: tailscale funnel --bg 8001",
-        )
-    return HealthCheck("funnel_dns", "ok", f"{host} resolves publicly")
-
-
 def check_storage(session: Session, settings: Settings, now: datetime) -> HealthCheck:
     """Is retention holding? Old raw payloads surviving past the window mean the prune died."""
     cutoff = now - timedelta(days=settings.raw_items_keep_days + 3)
@@ -182,20 +156,16 @@ def run_health_checks(
     settings: Settings,
     *,
     now: datetime | None = None,
-    include_network: bool = False,
 ) -> list[HealthCheck]:
-    """Every check, in reporting order; network checks only when asked for."""
+    """Every check, in reporting order. All checks read the database only."""
     now = now or datetime.now(UTC)
-    checks = [
+    return [
         check_pipeline_runs(session, settings, now),
         check_task_streaks(session),
         check_corpus_freshness(session, settings, now),
         check_hung_runs(session, now),
+        check_storage(session, settings, now),
     ]
-    if include_network:
-        checks.append(check_funnel_dns(settings))
-    checks.append(check_storage(session, settings, now))
-    return checks
 
 
 def summarize(checks: list[HealthCheck]) -> str:
