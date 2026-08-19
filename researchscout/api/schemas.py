@@ -519,8 +519,7 @@ class SystemStatus(BaseModel):
     # "a slot passed with the scheduler up and nothing ran".
     pipeline_due_at: datetime | None = None
     scheduler_started_at: datetime | None = None
-    # Database-only self-checks, plus the last health task run - which carries the network
-    # verdicts (the funnel DNS check) this endpoint deliberately never performs inline.
+    # Database-only self-checks, plus the last scheduler health run's ledger row.
     health: list[HealthCheckInfo] = []
     last_health_run: SchedulerRun | None = None
     schedule: list[ScheduleGroup] = []
