@@ -40,17 +40,18 @@ at the repo root carries the config as code: the Dockerfile build
 process.
 
 Variables to set on the service: the full list with explanations is in
-`deploy/.env.example`. The two that are not plain values:
+`deploy/.env.example`. The one that is not a plain value:
 
 ```
-RS_DATABASE_URL=postgresql+psycopg://${{Postgres.PGUSER}}:${{Postgres.PGPASSWORD}}@${{Postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{Postgres.PGDATABASE}}
-RS_BUILD_SHA=${{RAILWAY_GIT_COMMIT_SHA}}
+RS_DATABASE_URL=postgresql+psycopg://${{postgres.POSTGRES_USER}}:${{postgres.POSTGRES_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/${{postgres.POSTGRES_DB}}
 ```
 
-The first exists because Railway's own `DATABASE_URL` lacks the `+psycopg` driver marker
-SQLAlchemy needs; the second is what lets `make deploy-verify` prove the deployed commit is
-origin/main. Then Settings -> Networking -> Generate Domain; that public https URL goes
-into Vercel's `API_URL` and `deploy/.env`'s `RAILWAY_API_URL`.
+It exists because Railway's own `DATABASE_URL` lacks the `+psycopg` driver marker
+SQLAlchemy needs. The build identity needs nothing: the app reads Railway's per-deploy
+`RAILWAY_GIT_COMMIT_SHA` stamp directly (a `${{...}}` reference cannot reach it), which is
+what lets `make deploy-verify` prove the deployed commit is origin/main. Then Settings ->
+Networking -> Generate Domain; that public https URL goes into Vercel's `API_URL` and
+`deploy/.env`'s `RAILWAY_API_URL`.
 
 Check: `curl https://<the-domain>/healthz` returns `{"status":"ok"}`.
 
