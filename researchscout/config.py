@@ -214,9 +214,9 @@ class Settings(BaseSettings):
     # that table compares them on. A file rather than a query because "which labs matter" is a
     # judgement call, and one that will need revisiting as the field moves.
     providers_config_path: Path = Path("config/providers.yaml")
-    # The commit an image was built from, stamped by `make deploy-build` through the GIT_SHA
-    # build arg and served by /v1/system/status - which is how a stale deployment becomes a
-    # readable fact instead of a guess. Empty for a source checkout.
+    # The commit a deployment runs, set on the Railway service from RAILWAY_GIT_COMMIT_SHA
+    # and served by /v1/system/status - which is how a stale deployment becomes a readable
+    # fact instead of a guess. Empty for a source checkout.
     build_sha: str = ""
 
 
