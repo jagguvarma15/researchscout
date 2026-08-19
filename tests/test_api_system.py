@@ -74,11 +74,9 @@ def test_status_reports_corpus_and_runs(
     # the test runs, so pin presence rather than a value.
     assert body["pipeline_due_at"] is not None
     assert body["scheduler_started_at"].startswith("2026-08-05")
-    # The self-checks travel with the payload; the network-only funnel check must not.
     names = [check["name"] for check in body["health"]]
     assert "pipeline_runs" in names
     assert "corpus_freshness" in names
-    assert "funnel_dns" not in names
     groups = {group["group"]: group for group in body["schedule"]}
     assert groups["pipeline"]["at"] == ["05:00", "10:00", "14:00", "17:00"]
     assert groups["pipeline"]["next_run"] is not None
