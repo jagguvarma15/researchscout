@@ -26,6 +26,7 @@ class _TinyEmbedder(Embedder):
     def embed_query(self, text: str) -> list[float]:
         return [0.1] * 384
 
+
 _ATOM = """<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <entry>
