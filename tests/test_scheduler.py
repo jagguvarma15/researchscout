@@ -197,6 +197,65 @@ def test_a_slot_slept_over_fires_once_on_wake() -> None:
     assert sched.run_due(0.0) == []  # one catch-up covers the backlog, not one per slot
 
 
+def test_a_failed_wall_clock_run_retries_after_the_delay() -> None:
+    outcomes = {"fail": True}
+
+    def run() -> None:
+        if outcomes["fail"]:
+            raise RuntimeError("upstream down")
+
+    task = Task("x", 60.0, run, at=(time(14, 0), time(17, 0)), zone=NY)
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    # Failed: re-armed half an hour out instead of conceding the day to 17:00.
+    assert task.next_wall == datetime(2026, 8, 4, 14, 30, tzinfo=NY)
+    assert task.retries_left == task.max_retries - 1
+
+    outcomes["fail"] = False
+    now["wall"] = datetime(2026, 8, 4, 14, 30, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    # Succeeded: onto the real slot, with the retry budget reset for it.
+    assert task.next_wall == datetime(2026, 8, 4, 17, 0, tzinfo=NY)
+    assert task.retries_left == task.max_retries
+
+
+def test_the_retry_never_passes_the_next_slot() -> None:
+    def run() -> None:
+        raise RuntimeError("still down")
+
+    task = Task("x", 60.0, run, at=(time(14, 0), time(15, 0)), zone=NY, retry_delay_sec=7200.0)
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    # A two-hour delay would land at 16:00, past the 15:00 slot: capped at the slot, so
+    # a retry can only ever move work earlier than the schedule already would.
+    assert task.next_wall == datetime(2026, 8, 4, 15, 0, tzinfo=NY)
+
+
+def test_retries_exhaust_onto_the_following_slot() -> None:
+    def run() -> None:
+        raise RuntimeError("still down")
+
+    task = Task("x", 60.0, run, at=(time(14, 0), time(17, 0)), zone=NY, max_retries=1)
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    assert task.next_wall == datetime(2026, 8, 4, 14, 30, tzinfo=NY)
+
+    now["wall"] = datetime(2026, 8, 4, 14, 30, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    # Budget spent: the next deadline is the real slot, and the budget resets with it.
+    assert task.next_wall == datetime(2026, 8, 4, 17, 0, tzinfo=NY)
+    assert task.retries_left == 1
+
+
 def test_an_interval_task_still_starts_due() -> None:
     task = Task("x", 60.0, lambda: None)
     Scheduler([task], clock=lambda: 1000.0, wall=lambda: datetime(2026, 8, 4, 15, 2, tzinfo=NY))
@@ -224,6 +283,7 @@ def test_batch_pipeline_adds_the_work_the_stream_would_do() -> None:
     settings = Settings(
         scheduler_batch_pipeline=True,
         scheduler_ingest_interval_sec=11,
+        scheduler_categorize_interval_sec=15,
         scheduler_index_interval_sec=22,
         scheduler_fulltext_interval_sec=33,
         scheduler_signals_interval_sec=44,
@@ -231,6 +291,7 @@ def test_batch_pipeline_adds_the_work_the_stream_would_do() -> None:
     tasks = build_tasks(settings)
     assert [t.name for t in tasks] == [
         "ingest",
+        "categorize",
         "index",
         "fulltext",
         "signals",
@@ -241,7 +302,15 @@ def test_batch_pipeline_adds_the_work_the_stream_would_do() -> None:
         "report",
         "health",
     ]
-    assert [t.interval_sec for t in tasks[:4]] == [11, 22, 33, 44]
+    assert [t.interval_sec for t in tasks[:5]] == [11, 15, 22, 33, 44]
+
+
+def test_the_revisions_sweep_needs_its_own_slot() -> None:
+    """Unset means not scheduled at all - an interval default would re-walk hourly."""
+    on = Settings(scheduler_batch_pipeline=True, scheduler_revisions_at="01:30")
+    assert "revisions" in [t.name for t in build_tasks(on)]
+    off = Settings(scheduler_batch_pipeline=True)
+    assert "revisions" not in [t.name for t in build_tasks(off)]
 
 
 def _patch_source_run(
@@ -278,7 +347,13 @@ def test_one_failing_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyP
         if name == "broken":
             raise httpx.HTTPError("429 from upstream")
         return SimpleNamespace(
-            source=name, fetched=1, new_papers=1, signals=0, skipped=0, stopped_early=None
+            source=name,
+            fetched=1,
+            new_papers=1,
+            signals=0,
+            skipped=0,
+            stopped_early=None,
+            stopped_by_error=False,
         )
 
     _patch_source_run(monkeypatch, [_Source("broken"), _Source("fine")], fake_run_ingest)
@@ -289,6 +364,31 @@ def test_one_failing_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyP
     # The note names the broken source and still carries the healthy one's outcome.
     assert "broken: failed" in str(excinfo.value)
     assert "fine: fetched=1" in str(excinfo.value)
+
+
+def test_an_error_stop_fails_the_ledger_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A walk that lands a page then rate-limits out must not read as success - the pages
+    it committed stand, but repeated truncation quietly thins coverage."""
+    import researchscout.scheduler as scheduler_mod
+
+    def fake_run_ingest(session: object, source: object, since: object, **kwargs: object) -> object:
+        return SimpleNamespace(
+            source="arxiv",
+            fetched=100,
+            new_papers=93,
+            signals=0,
+            skipped=0,
+            stopped_early="429 from upstream",
+            stopped_by_error=True,
+        )
+
+    _patch_source_run(monkeypatch, [_Source("arxiv")], fake_run_ingest)
+
+    with pytest.raises(RuntimeError) as excinfo:
+        scheduler_mod._ingest(Settings())
+    # The note still carries what landed before the stop.
+    assert "fetched=100" in str(excinfo.value)
+    assert "stopped early: 429" in str(excinfo.value)
 
 
 def test_a_non_http_failure_is_isolated_too(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -303,7 +403,13 @@ def test_a_non_http_failure_is_isolated_too(monkeypatch: pytest.MonkeyPatch) -> 
         if name == "broken":
             raise ValueError("malformed payload")
         return SimpleNamespace(
-            source=name, fetched=0, new_papers=0, signals=3, skipped=0, stopped_early=None
+            source=name,
+            fetched=0,
+            new_papers=0,
+            signals=3,
+            skipped=0,
+            stopped_early=None,
+            stopped_by_error=False,
         )
 
     _patch_source_run(monkeypatch, [_Source("broken"), _Source("fine")], fake_run_ingest)
@@ -322,7 +428,13 @@ def test_signals_excludes_the_citation_sources(monkeypatch: pytest.MonkeyPatch) 
     def fake_run_ingest(session: object, source: object, since: object, **kwargs: object) -> object:
         seen.append(getattr(source, "name", "?"))
         return SimpleNamespace(
-            source="x", fetched=0, new_papers=0, signals=0, skipped=0, stopped_early=None
+            source="x",
+            fetched=0,
+            new_papers=0,
+            signals=0,
+            skipped=0,
+            stopped_early=None,
+            stopped_by_error=False,
         )
 
     sources = [_Source("semantic_scholar"), _Source("hf_trending"), _Source("openalex")]
