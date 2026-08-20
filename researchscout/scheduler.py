@@ -379,10 +379,15 @@ def _fulltext(settings: Settings, heartbeat: Heartbeat | None = None) -> str:
 
     from sqlalchemy import select
 
+    from researchscout.chunking import section_headings
     from researchscout.fulltext import fetch_full_text
     from researchscout.store.db import session_scope
     from researchscout.store.models import EventRow, SavedPaperRow
-    from researchscout.store.papers import papers_missing_full_text, set_full_text
+    from researchscout.store.papers import (
+        papers_missing_full_text,
+        record_full_text_result,
+        set_enrichment,
+    )
 
     beat = heartbeat or (lambda: None)
     delay = settings.arxiv_page_delay_sec
@@ -394,11 +399,15 @@ def _fulltext(settings: Settings, heartbeat: Heartbeat | None = None) -> str:
         pending = papers_missing_full_text(
             session, limit=settings.scheduler_fulltext_batch, first=sorted(priority)
         )
-        for position, (paper_id, arxiv_id) in enumerate(pending):
+        for position, (paper_id, arxiv_id, published_at) in enumerate(pending):
             if position and delay > 0:
                 time.sleep(delay)
             text = fetch_full_text(arxiv_id)
-            set_full_text(session, paper_id, text or "")
+            record_full_text_result(session, paper_id, text, published_at=published_at)
+            if text:
+                sections = section_headings(text)
+                if sections:
+                    set_enrichment(session, paper_id, sections=sections)
             session.commit()
             fetched += 1 if text else 0
             beat()
