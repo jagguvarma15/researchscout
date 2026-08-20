@@ -240,6 +240,24 @@ def papers_missing_full_text(
     return [(paper_id, arxiv_id) for paper_id, arxiv_id in rows]
 
 
+def papers_missing_keywords(
+    session: Session, *, limit: int
+) -> list[tuple[str, str, str, str | None]]:
+    """(id, title, abstract, primary_category) for papers never categorized, newest first.
+
+    A written keyword list - even an empty one - marks the paper as processed, the same
+    checked-marker convention the full-text tombstone uses.
+    """
+    stmt = (
+        select(PaperRow.id, PaperRow.title, PaperRow.abstract, PaperRow.primary_category)
+        .where(PaperRow.keywords.is_(None))
+        .order_by(PaperRow.created_at.desc())
+        .limit(limit)
+    )
+    rows = session.execute(stmt).all()
+    return [(paper_id, title, abstract, primary) for paper_id, title, abstract, primary in rows]
+
+
 def get_papers(session: Session, paper_ids: Sequence[str]) -> dict[str, Paper]:
     """Load many canonical papers by id in two queries; unknown ids are simply absent.
 
