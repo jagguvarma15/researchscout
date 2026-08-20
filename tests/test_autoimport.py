@@ -1,8 +1,8 @@
 """The curated-signal auto-import lane: scope-checked, paced, fail-open."""
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
-from collections.abc import Iterator
 
 import httpx
 import pytest
@@ -80,8 +80,6 @@ def test_the_per_run_bound_holds(
     monkeypatch: pytest.MonkeyPatch, _fast_and_stubbed: dict[str, list[str]]
 ) -> None:
     ids = [f"2607.{n:05d}" for n in range(1, 40)]
-    monkeypatch.setattr(
-        autoimport_mod, "fetch_arxiv_entry", lambda aid: _payload(aid, ["cs.LG"])
-    )
+    monkeypatch.setattr(autoimport_mod, "fetch_arxiv_entry", lambda aid: _payload(aid, ["cs.LG"]))
     landed = land_unknown_papers(ids)
     assert len(landed) == 25  # _MAX_PER_RUN
