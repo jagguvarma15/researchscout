@@ -58,6 +58,11 @@ TaskFn = Callable[[], str | None]
 # Citation sources belong to the walker (the ``citations`` task), not the fast-signal poll.
 _CITATION_SOURCES = frozenset({"semantic_scholar", "openalex"})
 
+# The revisions sweep's window: a couple of days of lastUpdatedDate nightly, capped so a
+# long outage becomes a deliberate backfill rather than a giant catch-up walk.
+_REVISIONS_OVERLAP_DAYS = 2
+_REVISIONS_MAX_WINDOW_DAYS = 7
+
 
 @dataclass
 class Task:
@@ -250,6 +255,11 @@ def _run_sources(
             part = f"{summary.source}: {summary.signals} observation(s){suffix}"
         logger.info("%s %s", kind, part)
         parts.append(part)
+        if summary.stopped_by_error:
+            # The committed pages stand, but the ledger row must not read ok: a walk that
+            # lands one page and then rate-limits out every day is quietly thinning
+            # coverage, and task_streaks only notices if the row fails.
+            failed = True
     note = "; ".join(parts) if parts else "no sources enabled"
     if failed:
         raise RuntimeError(note)
@@ -277,6 +287,39 @@ def _citations(settings: Settings) -> str:
 
     note = run_citation_refresh(settings)
     logger.info("citations: %s", note)
+    return note
+
+
+def _revisions(settings: Settings) -> str:
+    """Walk recently revised papers so v2s, DOIs, and journal refs re-enter the corpus.
+
+    The nightly ingest windows on submittedDate, which a revision never re-enters; this
+    sweep runs the same pipeline over lastUpdatedDate with its own watermark and cursor.
+    Nearly every entry is already stored, so pages count as collapsed refreshes - which
+    is the point - and the known-pages early stop stays off because it would fire on the
+    first page.
+    """
+    from researchscout.ingest.pipeline import run_ingest, window_start
+    from researchscout.sources.arxiv import ArxivUpdatesSource
+    from researchscout.store.db import session_scope
+
+    source = ArxivUpdatesSource()
+    with session_scope() as session:
+        since = window_start(
+            session,
+            source.name,
+            overlap_days=_REVISIONS_OVERLAP_DAYS,
+            max_window_days=_REVISIONS_MAX_WINDOW_DAYS,
+        )
+        summary = run_ingest(session, source, since, resume=True)
+    suffix = f", stopped early: {summary.stopped_early}" if summary.stopped_early else ""
+    note = (
+        f"fetched={summary.fetched} refreshed={summary.collapsed} "
+        f"new={summary.new_papers}{suffix}"
+    )
+    logger.info("revisions %s", note)
+    if summary.stopped_by_error:
+        raise RuntimeError(note)
     return note
 
 
@@ -635,6 +678,9 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
     pipeline_at = parse_times(settings.scheduler_pipeline_at)
     signals_at = parse_times(settings.scheduler_signals_at) or pipeline_at
     citations_at = parse_times(settings.scheduler_citations_at) or pipeline_at
+    # The revisions sweep runs only when it has its own slot: unset means off, because an
+    # interval default would re-walk lastUpdatedDate hourly for no reason.
+    revisions_at = parse_times(settings.scheduler_revisions_at)
     daily_at = parse_times(settings.scheduler_daily_at)
     # The report describes the overnight arrivals, so it takes its own morning time; unset,
     # it stays with the daily set.
@@ -686,6 +732,8 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
                 citations_at,
             ),
         ]
+        if revisions_at:
+            tasks.append(task("revisions", 86400.0, partial(_revisions, settings), revisions_at))
     else:
         # The one configuration in which this process schedules nothing that fetches a paper.
         # That is correct when the stream is running, and silently wrong when it is not - a
