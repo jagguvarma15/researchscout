@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 # OpenRouter reads these attribution headers; every other provider ignores them.
 _CLIENT_HEADERS = {
-    "HTTP-Referer": "https://github.com/jagadeshvarma/researchscout",
+    "HTTP-Referer": "https://github.com/jagguvarma15/researchscout",
     "X-Title": "ResearchScout",
 }
 
