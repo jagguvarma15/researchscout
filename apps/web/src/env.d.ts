@@ -1,5 +1,11 @@
 /// <reference types="astro/client" />
 
+interface ImportMetaEnv {
+  // The browser Sentry DSN, inlined at build time. Absent (the default) = no reporting;
+  // this is the repo's first PUBLIC_ variable, so it is declared rather than implied.
+  readonly PUBLIC_SENTRY_DSN?: string;
+}
+
 declare namespace App {
   interface Locals {
     // Null when sign-in is configured and nobody is signed in. With sign-in unconfigured this
