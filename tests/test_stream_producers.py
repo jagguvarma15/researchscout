@@ -75,8 +75,8 @@ def _stub_store(monkeypatch: pytest.MonkeyPatch) -> dict[str, list]:
     )
     monkeypatch.setattr(
         producers_mod,
-        "set_full_text",
-        lambda session, paper_id, text: calls["full_text"].append((paper_id, text)),
+        "record_full_text_result",
+        lambda session, paper_id, text, **kw: calls["full_text"].append((paper_id, text)),
     )
     monkeypatch.setattr(producers_mod, "_priority_ids", lambda session: set())
     return calls
@@ -134,7 +134,7 @@ def test_should_publish_covers_the_uncertainty_matrix() -> None:
 def test_poll_fulltext_publishes_and_marks_unavailable(
     monkeypatch: pytest.MonkeyPatch, _stub_store: dict[str, list]
 ) -> None:
-    pending = [("arxiv:2607.1", "2607.00001"), ("arxiv:2607.2", "2607.00002")]
+    pending = [("arxiv:2607.1", "2607.00001", NOW), ("arxiv:2607.2", "2607.00002", NOW)]
     monkeypatch.setattr(producers_mod, "papers_missing_full_text", lambda *a, **k: pending)
     texts = {"2607.00001": "## S\n\n" + "word " * 2_000_000, "2607.00002": None}
     monkeypatch.setattr(producers_mod, "fetch_full_text", lambda arxiv_id: texts[arxiv_id])
@@ -150,7 +150,8 @@ def test_poll_fulltext_publishes_and_marks_unavailable(
     assert envelope.kind == "fulltext"
     assert envelope.payload["paper_id"] == "arxiv:2607.1"
     assert len(envelope.payload["text"]) == 2_000_000  # capped under the topic message limit
-    assert _stub_store["full_text"] == [("arxiv:2607.2", "")]  # checked, no HTML
+    # The miss goes through the grace-aware recorder (the tombstone decision is its job).
+    assert _stub_store["full_text"] == [("arxiv:2607.2", None)]
 
 
 def test_build_producer_tasks_maps_intervals() -> None:
