@@ -37,9 +37,9 @@ _PAGE_DELAY_SEC = 1.1
 _DEFAULT_EXCLUDED = ("arxiv-daily-bot.bsky.social", "ai-firehose.column.social")
 
 # New-style arXiv ids in any common link shape (abs/pdf/html, optional version suffix).
-# New-style YYMM.NNNNN and old-style archive[.SUB]/YYMMNNN ids alike.
+# New-style YYMM.NNNNN and old-style archive[.subject]/YYMMNNN ids alike.
 _ARXIV_RE = re.compile(
-    r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?",
+    r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5}|[a-z-]+(?:\.[a-z-]+)?/\d{7})(?:v\d+)?",
     re.IGNORECASE,
 )
 
