@@ -134,6 +134,10 @@ class Settings(BaseSettings):
     citations_daily_papers: int = 5000
     citations_fallback_days: int = 7
     citations_fallback_papers: int = 2000
+    # Land papers that Hugging Face's curated daily list names but the corpus lacks, so a
+    # paper trending before the nightly ingest reaches it keeps its first observations.
+    # The scope rule still applies; open forums (HN, Bluesky) never auto-import.
+    signal_auto_import: bool = False
     # Raw fetched payloads are kept this many days for replay/debugging, then pruned.
     raw_items_keep_days: int = 30
     # Breakthrough scoring: how the signal series becomes a ranking boost. The window bounds how
