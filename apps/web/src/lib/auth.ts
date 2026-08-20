@@ -25,10 +25,14 @@ export interface Session extends SessionUser {
   refreshToken?: string;
   // Seconds since the epoch; the middleware refreshes shortly before this.
   expiresAt: number;
+  // True once the entry code has been redeemed (the private-site gate). Absent on
+  // cookies sealed before the gate existed, which unseal as not-approved.
+  approved?: boolean;
 }
 
 export const SESSION_COOKIE = 'rs_session';
 export const RETURN_COOKIE = 'rs_return';
+export const ENTRY_COOKIE = 'rs_entry';
 const PKCE_COOKIE = 'rs_pkce';
 // Refresh this long before expiry so a request never races the token going stale.
 const REFRESH_SKEW_SECONDS = 60;
@@ -80,7 +84,7 @@ export async function sealSession(session: Session): Promise<string> {
 export async function unsealSession(value: string): Promise<Session | null> {
   try {
     const { payload } = await jwtDecrypt(value, key());
-    const { sub, username, accessToken, refreshToken, expiresAt } = payload as Record<
+    const { sub, username, accessToken, refreshToken, expiresAt, approved } = payload as Record<
       string,
       unknown
     >;
@@ -91,6 +95,8 @@ export async function unsealSession(value: string): Promise<Session | null> {
       accessToken,
       refreshToken: typeof refreshToken === 'string' ? refreshToken : undefined,
       expiresAt: typeof expiresAt === 'number' ? expiresAt : 0,
+      // Pre-gate cookies carry no claim and read as not-approved - the safe default.
+      approved: typeof approved === 'boolean' ? approved : false,
     };
   } catch {
     // A cookie sealed with an older secret, or tampered with: treat as signed out.
@@ -150,17 +156,56 @@ export async function completeLogin(currentUrl: URL, pkce: string): Promise<Sess
   return sessionFromTokens(tokens);
 }
 
+/**
+ * Merge a freshly minted session over the previous one, keeping what only the previous
+ * one knows: the refresh token when the provider did not rotate it, and the entry-code
+ * approval. Access tokens refresh hourly against a 30-day cookie, so anything not
+ * carried here silently vanishes at the first refresh.
+ */
+export function carryOver(previous: Session, next: Session): Session {
+  return {
+    ...next,
+    refreshToken: next.refreshToken ?? previous.refreshToken,
+    approved: previous.approved ?? false,
+  };
+}
+
 /** Trade a refresh token for a fresh access token; null when the provider refuses. */
 export async function refreshSession(session: Session): Promise<Session | null> {
   if (!session.refreshToken) return null;
   try {
     const config = await configuration();
     const tokens = await oidc.refreshTokenGrant(config, session.refreshToken);
-    const next = sessionFromTokens(tokens);
-    // Providers may or may not rotate the refresh token; keep the old one if they did not.
-    return { ...next, refreshToken: next.refreshToken ?? session.refreshToken };
+    return carryOver(session, sessionFromTokens(tokens));
   } catch {
     return null;
+  }
+}
+
+// How long a redeemed entry code waits for the sign-in half of the flow to finish.
+const ENTRY_GRANT_MINUTES = 30;
+
+/**
+ * Seal the short-lived proof that the entry code was entered before sign-in, so it
+ * survives the Auth0 round trip in a cookie the browser cannot forge.
+ */
+export async function sealEntryGrant(): Promise<string> {
+  return await new EncryptJWT({ entry: true })
+    .setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
+    .setIssuedAt()
+    .setExpirationTime(`${ENTRY_GRANT_MINUTES}m`)
+    .encrypt(key());
+}
+
+export async function unsealEntryGrant(value: string | undefined): Promise<boolean> {
+  if (!value) return false;
+  try {
+    const { payload } = await jwtDecrypt(value, key());
+    // The literal claim is the whole check: session cookies seal under the same key,
+    // and a pasted rs_session value must not read as a redeemed entry code.
+    return payload.entry === true;
+  } catch {
+    return false;
   }
 }
 
