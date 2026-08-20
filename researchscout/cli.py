@@ -324,21 +324,25 @@ def serve_all(
 
     The scheduler loops on a daemon thread so both halves share the warmed model
     singletons — the nightly index reuses the embedder the API already holds instead of
-    loading a second copy. A scheduler crash is logged loudly but leaves the API serving;
-    process shutdown (uvicorn handling SIGTERM) takes the thread down with it.
+    loading a second copy. A scheduler crash takes the whole process down, after a ledger
+    row and an error report: a dead thread behind a healthy /healthz would freeze the
+    corpus invisibly, while an exit is a restart the platform performs and records.
     """
     import logging
+    import os
     import threading
 
     import uvicorn
 
+    from researchscout import observe
     from researchscout.config import get_settings
-    from researchscout.scheduler import Scheduler, build_tasks, record_started
+    from researchscout.scheduler import Scheduler, build_tasks, record_crashed, record_started
     from researchscout.trace import configure_logging
 
     configure_logging()
-    _warm_models()
     settings = get_settings()
+    observe.init_observability(settings)
+    _warm_models()
     heartbeat = _heartbeat_for(settings)
     tasks = build_tasks(settings, heartbeat=heartbeat)
     scheduler = Scheduler(tasks, tick_sec=settings.scheduler_tick_sec, heartbeat=heartbeat)
@@ -347,10 +351,16 @@ def serve_all(
     def _run_scheduler() -> None:
         try:
             scheduler.run_forever(lambda: False)
-        except Exception:
+        except Exception as exc:
             logging.getLogger("researchscout.scheduler").critical(
-                "scheduler thread died; the API keeps serving", exc_info=True
+                "scheduler thread died; exiting so the platform restarts the process",
+                exc_info=True,
             )
+            record_crashed(f"thread died: {str(exc) or type(exc).__name__}")
+            observe.capture_exception(exc)
+            # A hard exit skips the atexit flush, so drain the report queue first.
+            observe.flush(timeout=2.0)
+            os._exit(1)
 
     threading.Thread(target=_run_scheduler, name="scheduler", daemon=True).start()
     uvicorn.run("researchscout.api.main:app", host=host, port=port)
