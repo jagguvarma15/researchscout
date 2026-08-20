@@ -8,6 +8,7 @@ import {
   sealSession,
   unsealSession,
 } from './lib/auth';
+import { type GateDecision, gateDecision, gateEnabled } from './lib/gate';
 import { captureError } from './lib/sentry-server';
 
 // Every page render passes through here, so this is the one choke point where a thrown
@@ -62,6 +63,28 @@ function relaxInlineStyles(policy: string): string {
     .join('; ');
 }
 
+// The response for a request the gate refuses, or null for 'allow'. Both refusals
+// pre-set no-store BEFORE harden(): its has-cache-control check is the escape hatch,
+// and without it a signed-out redirect would sit in the edge cache for five minutes,
+// locking visitors out of even the public pages. Security headers still apply.
+function gateRefusal(decision: GateDecision, url: URL): Response | null {
+  if (decision === 'allow') return null;
+  if (decision === 'unauthorized') {
+    const refused = Response.json({ detail: 'sign in required' }, { status: 401 });
+    refused.headers.set('cache-control', PRIVATE_CACHE);
+    return refused;
+  }
+  const target = new URL('/welcome', url);
+  const wanted = url.pathname + url.search;
+  if (wanted !== '/') target.searchParams.set('next', wanted);
+  const redirect = new Response(null, {
+    status: 302,
+    headers: { location: target.pathname + target.search },
+  });
+  redirect.headers.set('cache-control', PRIVATE_CACHE);
+  return redirect;
+}
+
 function harden(response: Response, context: { url: URL }, signedIn: boolean): Response {
   for (const [name, value] of Object.entries(SECURITY_HEADERS)) response.headers.set(name, value);
   const policy = response.headers.get('content-security-policy');
@@ -82,6 +105,8 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (!authEnabled()) {
     context.locals.user = LOCAL_USER;
     context.locals.accessToken = null;
+    // gateEnabled() requires authEnabled(), so the gate is off by definition here.
+    context.locals.approved = true;
     return harden(await rendered(next), context, true);
   }
 
@@ -108,5 +133,18 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   context.locals.user = session ? { sub: session.sub, username: session.username } : null;
   context.locals.accessToken = session?.accessToken ?? null;
+  context.locals.approved = gateEnabled() ? (session?.approved ?? false) : true;
+
+  if (gateEnabled()) {
+    const refusal = gateRefusal(
+      gateDecision({
+        path: context.url.pathname,
+        signedIn: session !== null,
+        approved: context.locals.approved,
+      }),
+      context.url,
+    );
+    if (refusal) return harden(refusal, context, session !== null);
+  }
   return harden(await rendered(next), context, session !== null);
 });
