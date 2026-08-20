@@ -57,6 +57,12 @@ def upsert_paper(session: Session, paper: Paper) -> str:
             [label.model_dump() for label in paper.labels] if paper.labels is not None else None
         ),
     }
+    # The JSON columns must land as SQL NULL, not JSON null: every "still unprocessed"
+    # query says IS NULL, and SQLAlchemy's JSON type serializes a bound None as the JSON
+    # 'null' value instead. Omitting the keys lets the column default apply.
+    for key in ("keywords", "sections", "labels"):
+        if values[key] is None:
+            del values[key]
     stmt = insert(PaperRow).values(**values)
     stmt = stmt.on_conflict_do_update(
         index_elements=["id"],
