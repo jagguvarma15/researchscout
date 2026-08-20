@@ -282,7 +282,9 @@ def test_full_text_misses_tombstone_only_past_the_grace(session: Session) -> Non
     assert "arxiv:2404.00010" in pending  # retried next run
     assert "arxiv:2403.00011" not in pending  # tombstoned for good
 
-    record_full_text_result(session, "arxiv:2404.00010", "## S\n\nbody", published_at=fresh, now=now)
+    record_full_text_result(
+        session, "arxiv:2404.00010", "## S\n\nbody", published_at=fresh, now=now
+    )
     pending = {paper_id for paper_id, _, _ in papers_missing_full_text(session, limit=10)}
     assert "arxiv:2404.00010" not in pending  # real text always sticks
 
