@@ -29,12 +29,22 @@ const session = {
   accessToken: 'header.payload.signature',
   refreshToken: 'refresh-token',
   expiresAt: 2_000_000_000,
+  approved: true,
 };
 
 describe('session cookie', () => {
   it('round-trips every field', async () => {
     const restored = await auth.unsealSession(await auth.sealSession(session));
     expect(restored).toEqual(session);
+  });
+
+  it('reads a pre-gate cookie as not approved', async () => {
+    // Cookies sealed before the approved claim existed carry no claim at all;
+    // the safe default is the landing page, not the site.
+    const { approved: _dropped, ...legacy } = session;
+    const restored = await auth.unsealSession(await auth.sealSession(legacy as never));
+    expect(restored?.approved).toBe(false);
+    expect(restored?.sub).toBe(session.sub);
   });
 
   it('reads a tampered cookie as signed out rather than throwing', async () => {
@@ -52,6 +62,43 @@ describe('session cookie', () => {
     expect(Buffer.from(sealed.split('.')[1] ?? '', 'base64url').toString()).not.toContain(
       'accessToken',
     );
+  });
+});
+
+describe('token refresh carry-over', () => {
+  it('keeps the approval and the unrotated refresh token', () => {
+    // Access tokens refresh hourly against a 30-day cookie: anything carryOver drops
+    // silently vanishes at the first refresh, which is how approval would be lost.
+    const minted = { ...session, approved: undefined, refreshToken: undefined };
+    const carried = auth.carryOver(session, minted);
+    expect(carried.approved).toBe(true);
+    expect(carried.refreshToken).toBe('refresh-token');
+  });
+
+  it('prefers a rotated refresh token and an unapproved previous stays unapproved', () => {
+    const carried = auth.carryOver(
+      { ...session, approved: false },
+      { ...session, refreshToken: 'rotated' },
+    );
+    expect(carried.refreshToken).toBe('rotated');
+    expect(carried.approved).toBe(false);
+  });
+});
+
+describe('entry grant', () => {
+  it('round-trips and refuses tampering', async () => {
+    const grant = await auth.sealEntryGrant();
+    expect(await auth.unsealEntryGrant(grant)).toBe(true);
+    expect(await auth.unsealEntryGrant(`${grant.slice(0, -4)}AAAA`)).toBe(false);
+    expect(await auth.unsealEntryGrant('not-a-jwe')).toBe(false);
+    expect(await auth.unsealEntryGrant(undefined)).toBe(false);
+  });
+
+  it('never confuses the two cookie kinds despite the shared key', async () => {
+    // A pasted old session cookie must not read as a redeemed entry code, and a grant
+    // must not read as a session.
+    expect(await auth.unsealEntryGrant(await auth.sealSession(session))).toBe(false);
+    expect(await auth.unsealSession(await auth.sealEntryGrant())).toBeNull();
   });
 });
 
