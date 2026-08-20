@@ -50,6 +50,10 @@ class IngestSummary:
     #: Why the run ended before pagination was exhausted (rate limit, nothing-new stop), or
     #: None for a full walk. Everything counted above is stored either way.
     stopped_early: str | None = None
+    #: True only when the stop was an upstream error, never for the nothing-new stop. The
+    #: scheduler fails the ledger row on it: a walk that lands one page then rate-limits
+    #: out every day must not keep reading as success while coverage quietly thins.
+    stopped_by_error: bool = False
 
 
 def _trunc_hour(dt: datetime) -> datetime:
@@ -135,6 +139,7 @@ def run_ingest(
         except httpx.HTTPError as exc:
             # The saved cursor still points at this page, so a same-window resume retries it.
             summary.stopped_early = str(exc) or exc.__class__.__name__
+            summary.stopped_by_error = True
             break
         new_before = summary.new_papers
         for raw in items:
