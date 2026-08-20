@@ -93,6 +93,9 @@ class Settings(BaseSettings):
     scheduler_pipeline_at: str = ""
     scheduler_signals_at: str = ""
     scheduler_citations_at: str = ""
+    # The lastUpdatedDate revisions sweep. Unset (the default) = the task is not
+    # scheduled at all; there is no interval fallback.
+    scheduler_revisions_at: str = ""
     scheduler_daily_at: str = ""
     scheduler_report_at: str = ""
     scheduler_timezone: str = "America/New_York"
