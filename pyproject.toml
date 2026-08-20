@@ -40,6 +40,14 @@ stream = [
 static-embed = [
     "model2vec>=0.3",
 ]
+# Error reporting and LLM tracing. Both self-gate on their credentials (a Sentry DSN, the
+# LANGSMITH_* env contract) and every import is lazy, so an install without them behaves
+# exactly like one that has never heard of either service. The deployed image installs
+# this extra; a local checkout only needs it to exercise the enabled paths.
+observe = [
+    "sentry-sdk[fastapi]>=2.0",
+    "langsmith>=0.4",
+]
 
 [project.scripts]
 scout = "researchscout.cli:app"
@@ -59,6 +67,9 @@ dev = [
     # Here as well as in the extra: the stream tests import the flow, and a plain `uv sync`
     # is what CI runs.
     "bytewax[kafka]>=0.21,<0.22",
+    # Same reasoning for the observe extra: the tests exercise the enabled paths.
+    "sentry-sdk[fastapi]>=2.0",
+    "langsmith>=0.4",
 ]
 
 [build-system]
