@@ -26,8 +26,12 @@ _REQUEST_TIMEOUT = 30.0
 _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
-# New-style arXiv ids in any common link shape (abs/pdf/html, optional version suffix).
-_ARXIV_RE = re.compile(r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})(?:v\d+)?", re.IGNORECASE)
+# arXiv ids in any common link shape (abs/pdf/html, optional version suffix): new-style
+# YYMM.NNNNN and old-style archive[.SUB]/YYMMNNN (math/0309136 keeps resurfacing on HN).
+_ARXIV_RE = re.compile(
+    r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?",
+    re.IGNORECASE,
+)
 
 
 @register
