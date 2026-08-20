@@ -45,6 +45,7 @@ from researchscout.schedule import describe, next_run, parse_times
 
 if TYPE_CHECKING:
     from researchscout.embed.base import Embedder
+    from researchscout.llm.base import LLM
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +282,89 @@ def _index(settings: Settings) -> str:
     if papers or chunks:
         logger.info("index: %d paper(s), %d chunk(s)", papers, chunks)
     return f"{papers} paper(s), {chunks} chunk(s)"
+
+
+def run_categorize(
+    settings: Settings,
+    *,
+    limit: int,
+    llm_fallback: bool | None = None,
+    embedder: Embedder | None = None,
+    llm: LLM | None = None,
+) -> str:
+    """Enrich papers that lack keywords, sharing the stream's categorize core.
+
+    The streaming deployment does this per packet; this is the batch equivalent, so both
+    paths converge on identical rows. The Categorizer is constructed per call so its
+    topic-centroid cache is fresh each run, and the doc vector computed for topic
+    matching is stored as the paper embedding too - index has nothing left to do for
+    these papers. ``llm_fallback=None`` follows the settings; the CLI passes an explicit
+    value so a large backfill cannot silently spend the provider quota.
+    """
+    from researchscout.llm.openai_compat import OpenAICompatLLM
+    from researchscout.schema import PaperLabel
+    from researchscout.store.db import session_scope
+    from researchscout.store.papers import papers_missing_keywords, set_enrichment
+    from researchscout.store.vectors import upsert_embedding
+    from researchscout.stream.categorize import Categorizer, load_labels
+
+    embedder = embedder or _embedder()
+    labels = load_labels(settings.labels_config_path) if settings.stream_labels_enabled else []
+    categorizer = Categorizer(
+        embedder,
+        llm or OpenAICompatLLM(),
+        session_scope,
+        topic_match_min=settings.stream_topic_match_min,
+        keyword_min_similarity=settings.stream_keyword_min_similarity,
+        keywords_llm_fallback=(
+            settings.stream_keywords_llm_fallback if llm_fallback is None else llm_fallback
+        ),
+        labels=labels,
+        keyword_candidate_cap=settings.stream_keyword_candidates,
+    )
+    with session_scope() as session:
+        pending = papers_missing_keywords(session, limit=limit)
+    done = 0
+    by_llm = 0
+    # Sub-batches bound the merged embeds' memory and commit as they go, so an
+    # interruption keeps everything already enriched.
+    for start in range(0, len(pending), 50):
+        chunk = pending[start : start + 50]
+        enriched = categorizer.enrich_batch(
+            [(title, abstract, primary) for _, title, abstract, primary in chunk]
+        )
+        with session_scope() as session:
+            for (paper_id, _, _, _), (enrichment, vector) in zip(chunk, enriched, strict=True):
+                row_labels = []
+                topic = enrichment.get("topic")
+                if isinstance(topic, dict):
+                    row_labels.append(
+                        PaperLabel(
+                            label=topic["label"], source="topic", score=topic.get("similarity")
+                        )
+                    )
+                row_labels.extend(
+                    PaperLabel(label=name, source="custom")
+                    for name in enrichment.get("labels") or []
+                )
+                set_enrichment(
+                    session,
+                    paper_id,
+                    keywords=enrichment.get("keywords"),
+                    labels=row_labels or None,
+                )
+                upsert_embedding(session, paper_id, embedder.model_id, vector)
+                done += 1
+                if enrichment.get("keyword_method") == "llm":
+                    by_llm += 1
+    if done:
+        logger.info("categorize: %d paper(s), %d by llm", done, by_llm)
+    return f"{done} paper(s), {by_llm} by llm"
+
+
+def _categorize(settings: Settings) -> str:
+    """Batch keyword and label enrichment for whatever ingest landed unprocessed."""
+    return run_categorize(settings, limit=settings.scheduler_categorize_batch)
 
 
 def _fulltext(settings: Settings, heartbeat: Heartbeat | None = None) -> str:
@@ -525,13 +609,20 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
 
     tasks: list[Task] = []
     if settings.scheduler_batch_pipeline:
-        # Ordered so a cycle flows the way a paper does: arrive, get embedded, get its text —
-        # then the signal groups follow their own clocks.
+        # Ordered so a cycle flows the way a paper does: arrive, get keywords and an
+        # embedding, get embedded if categorize missed it, get its text — then the signal
+        # groups follow their own clocks.
         tasks += [
             task(
                 "ingest",
                 settings.scheduler_ingest_interval_sec,
                 partial(_ingest, settings),
+                pipeline_at,
+            ),
+            task(
+                "categorize",
+                settings.scheduler_categorize_interval_sec,
+                partial(_categorize, settings),
                 pipeline_at,
             ),
             task(
