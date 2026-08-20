@@ -81,19 +81,21 @@ def check_task_streaks(session: Session) -> HealthCheck:
 def expected_arrival_slots_since(
     newest: datetime, now: datetime, zone: ZoneInfo, slot: time
 ) -> int:
-    """How many weekday arrival moments (slot + slack, Mon-Fri in ``zone``) fall in
-    ``(newest, now]``.
+    """How many weekday arrival slots (Mon-Fri in ``zone``) passed with nothing landing.
 
     Monday through Friday mornings are exactly the mornings after a Sunday-through-Thursday
     arXiv announcement; Saturday and Sunday mornings never bring papers and never count.
+    A slot is missed only when no paper has arrived since the slot itself fired AND its
+    grace hour has passed - a run that lands papers minutes after the slot satisfies it,
+    rather than being disqualified for arriving inside the slack.
     """
     count = 0
     local_now = now.astimezone(zone)
     day = newest.astimezone(zone).date()
     while day <= local_now.date():
         if day.weekday() < 5:
-            moment = datetime.combine(day, slot).replace(tzinfo=zone) + _ARRIVAL_SLACK
-            if newest < moment <= now:
+            slot_moment = datetime.combine(day, slot).replace(tzinfo=zone)
+            if newest < slot_moment and slot_moment + _ARRIVAL_SLACK <= now:
                 count += 1
         day += timedelta(days=1)
     return count
