@@ -127,9 +127,7 @@ def index(
 
 @app.command()
 def categorize(
-    limit: Annotated[
-        int, typer.Option("--limit", help="Pending papers to enrich this run.")
-    ] = 300,
+    limit: Annotated[int, typer.Option("--limit", help="Pending papers to enrich this run.")] = 300,
     llm: Annotated[
         bool,
         typer.Option("--llm", help="Allow the LLM keyword fallback (spends provider quota)."),
