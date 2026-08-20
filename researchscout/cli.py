@@ -154,37 +154,46 @@ def fulltext(
 ) -> None:
     """Fetch full text for stored papers (saved and interacted-with first), politely paced.
 
-    arXiv HTML first, ar5iv fallback; papers with neither are marked checked so the batch
-    never retries them. Full-content harvesting is not permitted, so keep batches modest.
+    arXiv HTML first, ar5iv fallback. A paper with neither is marked checked only once it
+    is old enough that the HTML will never appear; a fresh miss stays pending and retries
+    next run. Full-content harvesting is not permitted, so keep batches modest.
     """
     import time
 
     from sqlalchemy import select
 
+    from researchscout.chunking import section_headings
     from researchscout.config import get_settings
     from researchscout.fulltext import fetch_full_text
     from researchscout.store.db import session_scope
     from researchscout.store.models import EventRow, SavedPaperRow
-    from researchscout.store.papers import papers_missing_full_text, set_full_text
+    from researchscout.store.papers import (
+        papers_missing_full_text,
+        record_full_text_result,
+        set_enrichment,
+    )
 
     delay = get_settings().arxiv_page_delay_sec
-    fetched = unavailable = 0
+    fetched = missing = 0
     with session_scope() as session:
         priority = set(session.execute(select(SavedPaperRow.paper_id)).scalars()) | set(
             session.execute(select(EventRow.paper_id).distinct()).scalars()
         )
         pending = papers_missing_full_text(session, limit=limit, first=sorted(priority))
-        for index, (paper_id, arxiv_id) in enumerate(pending):
+        for index, (paper_id, arxiv_id, published_at) in enumerate(pending):
             if index and delay > 0:
                 time.sleep(delay)
             text = fetch_full_text(arxiv_id)
-            set_full_text(session, paper_id, text or "")
-            if text is None:
-                unavailable += 1
-            else:
+            record_full_text_result(session, paper_id, text, published_at=published_at)
+            if text:
+                sections = section_headings(text)
+                if sections:
+                    set_enrichment(session, paper_id, sections=sections)
                 fetched += 1
+            else:
+                missing += 1
     typer.secho(
-        f"full text: fetched={fetched} unavailable={unavailable} of {len(pending)} attempted",
+        f"full text: fetched={fetched} missing={missing} of {len(pending)} attempted",
         fg=typer.colors.GREEN,
     )
 
