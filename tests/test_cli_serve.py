@@ -48,3 +48,43 @@ def test_serve_all_wires_scheduler_thread_and_uvicorn(monkeypatch: pytest.Monkey
     assert calls["recorded"] == 3
     assert calls["thread_name"] == "scheduler"
     assert calls["uvicorn"] == ("researchscout.api.main:app", "0.0.0.0", 8123)
+
+
+def test_a_dying_scheduler_thread_takes_the_process_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dead thread behind a healthy /healthz would freeze the corpus invisibly; the
+    exit is what turns it into a restart the platform performs and records."""
+    calls: dict[str, Any] = {}
+    exited = threading.Event()
+
+    monkeypatch.setattr(cli, "_warm_models", lambda: None)
+    monkeypatch.setattr(scheduler_mod, "build_tasks", lambda settings, heartbeat=None: [])
+    monkeypatch.setattr(scheduler_mod, "record_started", lambda count: None)
+    monkeypatch.setattr(
+        scheduler_mod, "record_crashed", lambda note: calls.__setitem__("crash_note", note)
+    )
+
+    class DyingScheduler:
+        def __init__(self, tasks: Any, tick_sec: int, heartbeat: Any = None) -> None:
+            pass
+
+        def run_forever(self, stop: Any) -> None:
+            raise RuntimeError("the loop broke")
+
+    monkeypatch.setattr(scheduler_mod, "Scheduler", DyingScheduler)
+
+    import os as os_mod
+
+    def fake_exit(code: int) -> None:
+        calls["exit_code"] = code
+        exited.set()
+
+    monkeypatch.setattr(os_mod, "_exit", fake_exit)
+    monkeypatch.setattr(uvicorn, "run", lambda app, host, port: exited.wait(5))
+
+    result = CliRunner().invoke(cli.app, ["serve", "all"])
+    assert result.exit_code == 0, result.output
+    assert exited.wait(5)
+    assert calls["exit_code"] == 1
+    assert calls["crash_note"] == "thread died: the loop broke"
