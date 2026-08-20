@@ -182,6 +182,21 @@ Project settings: root directory `apps/web`, framework Astro. Environment variab
 | `API_SERVICE_TOKEN` | the same value as `RS_SERVICE_TOKEN` on the Railway service |
 | `PUBLIC_SENTRY_DSN` | the frontend Sentry project's DSN (optional; inlined at build) |
 | `SENTRY_DSN` | the same DSN, for the server half of the frontend (optional) |
+| `SITE_PRIVATE` | `true` to make the site members-only (optional; see below) |
+| `ENTRY_CODE` | the shared code the members-only gate requires once per account |
+
+### Members-only mode
+
+With `SITE_PRIVATE=true` and an `ENTRY_CODE` set (both on Vercel; the backend needs
+nothing), anonymous visitors see only the `/welcome` landing page plus `/terms` and
+`/privacy` - every other page redirects there, and the `/api` proxy answers 401. Full
+access requires signing in and redeeming the entry code once; the code can be entered
+before sign-in (it rides a short-lived sealed cookie across the Auth0 round trip) or
+after, and the approval lives in the session cookie for its 30-day life. Sessions sealed
+before the gate existed read as unapproved, so existing users enter the code once too.
+Pick a long random code (`openssl rand -base64 12`); rotating it does not sign anyone
+out - already-approved sessions stay approved. Optional hardening: disable public
+sign-ups on the Auth0 database connection so accounts are invite-only as well.
 
 Keep the Hobby plan's terms in view: non-commercial personal use only, and that includes
 donation links and advertising.
