@@ -191,9 +191,37 @@ def count_papers(session: Session, facets: PaperFacets) -> int:
     return session.execute(stmt).scalar_one()
 
 
+# A fetch that finds no article text is only conclusive once the paper is old enough:
+# arXiv renders HTML hours-to-days after the announcement, and the nightly batch runs the
+# same night. Inside the grace window a miss stays NULL and the next batch retries it.
+_FULLTEXT_TOMBSTONE_GRACE = timedelta(days=7)
+
+
 def set_full_text(session: Session, paper_id: str, text: str) -> None:
     """Store extracted full text; an empty string marks "checked, no HTML available"."""
     session.execute(update(PaperRow).where(PaperRow.id == paper_id).values(full_text=text))
+
+
+def record_full_text_result(
+    session: Session,
+    paper_id: str,
+    text: str | None,
+    *,
+    published_at: datetime,
+    now: datetime | None = None,
+) -> None:
+    """Store a fetch outcome with grace: real text always; the tombstone only when the
+    paper is old enough that "no HTML" means unavailable rather than not rendered yet.
+
+    A transient failure on a fresh paper leaves the row NULL, so it stays in the pending
+    queue instead of being permanently marked as checked.
+    """
+    if text:
+        set_full_text(session, paper_id, text)
+        return
+    now = now or datetime.now(UTC)
+    if now - published_at > _FULLTEXT_TOMBSTONE_GRACE:
+        set_full_text(session, paper_id, "")
 
 
 def set_enrichment(
@@ -218,14 +246,16 @@ def set_enrichment(
 
 def papers_missing_full_text(
     session: Session, *, limit: int, first: Sequence[str] = ()
-) -> list[tuple[str, str]]:
-    """(paper_id, arXiv id) for papers never checked for full text, ``first`` ids leading.
+) -> list[tuple[str, str, datetime]]:
+    """(paper_id, arXiv id, published_at) for papers never checked for full text,
+    ``first`` ids leading.
 
     Papers marked with an empty string (checked, unavailable) are excluded, so the batch never
-    re-fetches the PDF-only tail.
+    re-fetches the PDF-only tail. ``published_at`` rides along so the caller can apply the
+    tombstone grace without a second read.
     """
     stmt = (
-        select(PaperRow.id, ExternalIdRow.value)
+        select(PaperRow.id, ExternalIdRow.value, PaperRow.published_at)
         .join(
             ExternalIdRow,
             (ExternalIdRow.paper_id == PaperRow.id) & (ExternalIdRow.scheme == "arxiv"),
@@ -237,7 +267,7 @@ def papers_missing_full_text(
     else:
         stmt = stmt.order_by(PaperRow.published_at.desc())
     rows = session.execute(stmt.limit(limit)).all()
-    return [(paper_id, arxiv_id) for paper_id, arxiv_id in rows]
+    return [(paper_id, arxiv_id, published_at) for paper_id, arxiv_id, published_at in rows]
 
 
 def papers_missing_keywords(
