@@ -157,3 +157,12 @@ def test_normalize_maps_engagement_and_replies() -> None:
     )
     assert replies.type == SignalType.discussion
     assert replies.value == 5.0
+
+
+def test_old_style_arxiv_ids_are_recognized() -> None:
+    from researchscout.sources.bluesky import _ARXIV_RE
+
+    match = _ARXIV_RE.search("https://arxiv.org/abs/math/0309136v2")
+    assert match is not None and match.group(1) == "math/0309136"
+    match = _ARXIV_RE.search("https://arxiv.org/pdf/cond-mat.str-el/0212346")
+    assert match is not None and match.group(1) == "cond-mat.str-el/0212346"
