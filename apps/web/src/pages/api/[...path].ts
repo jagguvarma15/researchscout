@@ -4,6 +4,7 @@
 
 import type { APIRoute } from 'astro';
 
+import { gateEnabled } from '../../lib/gate';
 import { captureError } from '../../lib/sentry-server';
 import { SITE_URL } from '../../lib/site-url.js';
 
@@ -15,6 +16,12 @@ const SERVICE_TOKEN = process.env.API_SERVICE_TOKEN ?? '';
 const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export const ALL: APIRoute = async ({ clientAddress, locals, params, request, url }) => {
+  // Belt to the middleware's suspenders: the proxy is the one route whose compromise
+  // exposes the backend, so it refuses unapproved callers independently.
+  if (gateEnabled() && !(locals.user && locals.approved)) {
+    return Response.json({ detail: 'sign in required' }, { status: 401 });
+  }
+
   if (MUTATING.has(request.method)) {
     const origin = request.headers.get('origin');
     const fetchSite = request.headers.get('sec-fetch-site');
