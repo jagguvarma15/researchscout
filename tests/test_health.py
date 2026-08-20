@@ -56,6 +56,17 @@ def test_the_slack_hour_keeps_the_current_morning_out() -> None:
     assert expected_arrival_slots_since(newest, now, NY, SLOT) == 0
 
 
+def test_papers_landing_inside_the_slack_satisfy_the_slot() -> None:
+    """The pipeline lands its papers a minute after the slot; that IS the arrival.
+
+    Counting it as missed made corpus_freshness warn permanently: the newest paper of
+    every normal day is created inside the grace hour.
+    """
+    newest = _ny(17, 0, 34)  # Monday 00:34, one minute after the 00:30 run began
+    now = _ny(17, 9, 0)
+    assert expected_arrival_slots_since(newest, now, NY, SLOT) == 0
+
+
 def test_summarize_and_overall_verdict() -> None:
     from researchscout.health import HealthCheck
 
