@@ -152,6 +152,8 @@ class ImportResponse(BaseModel):
     title: str
     already_known: bool
     enrichment_queued: bool
+    #: True when the paper's embedding was written synchronously with the import.
+    embedded: bool = False
 
 
 class KeywordCount(BaseModel):
