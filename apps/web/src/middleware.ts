@@ -8,6 +8,19 @@ import {
   sealSession,
   unsealSession,
 } from './lib/auth';
+import { captureError } from './lib/sentry-server';
+
+// Every page render passes through here, so this is the one choke point where a thrown
+// render can be reported before it becomes the default 500. Rethrown unchanged: the
+// response the reader sees is exactly what it was before reporting existed.
+async function rendered(next: () => Promise<Response>): Promise<Response> {
+  try {
+    return await next();
+  } catch (error) {
+    await captureError(error);
+    throw error;
+  }
+}
 
 // Response headers a public deployment should always send. The content policy is not here:
 // Astro emits it per response from the configuration in lib/csp.js, because only it knows the
@@ -69,7 +82,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
   if (!authEnabled()) {
     context.locals.user = LOCAL_USER;
     context.locals.accessToken = null;
-    return harden(await next(), context, true);
+    return harden(await rendered(next), context, true);
   }
 
   const cookie = context.cookies.get(SESSION_COOKIE)?.value;
@@ -95,5 +108,5 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   context.locals.user = session ? { sub: session.sub, username: session.username } : null;
   context.locals.accessToken = session?.accessToken ?? null;
-  return harden(await next(), context, session !== null);
+  return harden(await rendered(next), context, session !== null);
 });
