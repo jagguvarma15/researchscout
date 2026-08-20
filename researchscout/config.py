@@ -228,6 +228,12 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("RS_BUILD_SHA", "RAILWAY_GIT_COMMIT_SHA"),
     )
+    # Error reporting. Set a Sentry DSN under either name and the serve entrypoints report
+    # unhandled request and task errors; unset (the default), nothing ever initializes.
+    sentry_dsn: str = Field(
+        default="",
+        validation_alias=AliasChoices("RS_SENTRY_DSN", "SENTRY_DSN"),
+    )
 
 
 @lru_cache(maxsize=1)
