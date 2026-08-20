@@ -158,6 +158,12 @@ async function shoot(browser, name, viewport) {
   await page.click('.field input');
   await page.waitForTimeout(700);
   await page.screenshot({ path: `${OUT}/${name}-chat.png` });
+
+  // The members-only landing. With the gate off (always, locally) the route renders its
+  // signed-out state instead of redirecting, which is exactly what makes it shootable.
+  await page.goto(`${BASE}/welcome`, { waitUntil: 'load' });
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: `${OUT}/${name}-welcome.png`, fullPage: false });
   await context.close();
 }
 
