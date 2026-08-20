@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from researchscout.api.auth import User, require_user
-from researchscout.api.deps import get_session
+from researchscout.api.deps import get_embedder, get_session
 from researchscout.api.ratelimit import check_rate_limit
 from researchscout.api.schemas import (
     ImportRequest,
@@ -23,6 +23,7 @@ from researchscout.api.schemas import (
     WebSearchResponse,
 )
 from researchscout.config import get_settings
+from researchscout.embed.base import Embedder
 from researchscout.importing import fetch_arxiv_entry, import_paper, publish_enrichment
 from researchscout.schema import normalize_arxiv_id
 from researchscout.store.papers import find_by_external_id
@@ -71,8 +72,14 @@ def import_arxiv(
     body: ImportRequest,
     user: Annotated[User, Depends(require_user)],
     session: Annotated[Session, Depends(get_session)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
 ) -> ImportResponse:
-    """Import one arXiv paper: land it now, save it to the Reading list, queue enrichment."""
+    """Import one arXiv paper: land it embedded now, save it, queue stream enrichment.
+
+    The synchronous embed is what makes the paper vector-searchable immediately - the
+    deployment has no stream worker to do it later. The enrichment envelope stays
+    best-effort for stacks that do run one.
+    """
     settings = get_settings()
     check_rate_limit(
         f"websearch:{user.sub}",
@@ -86,8 +93,12 @@ def import_arxiv(
         raise HTTPException(status_code=502, detail="arXiv is unreachable") from exc
     if payload is None:
         raise HTTPException(status_code=404, detail="unknown arXiv id")
-    paper_id, title, already_known = import_paper(session, user.sub, payload)
+    paper_id, title, already_known, embedded = import_paper(session, user.sub, payload, embedder)
     queued = publish_enrichment(settings, payload)
     return ImportResponse(
-        id=paper_id, title=title, already_known=already_known, enrichment_queued=queued
+        id=paper_id,
+        title=title,
+        already_known=already_known,
+        enrichment_queued=queued,
+        embedded=embedded,
     )
