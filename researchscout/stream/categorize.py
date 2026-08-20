@@ -16,6 +16,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import yaml
 from sqlalchemy.orm import Session
@@ -279,6 +280,77 @@ class Categorizer:
         names = [allowed.get(p.strip(" .").lower()) for p in _LIST_SPLIT.split(reply)]
         return list(dict.fromkeys(name for name in names if name is not None))
 
+    def _enrich_one(
+        self,
+        title: str,
+        abstract: str,
+        primary_category: str | None,
+        vector: list[float],
+        scoring_vector: list[float],
+        candidates: list[str],
+        candidate_vectors: list[list[float]],
+    ) -> dict[str, Any]:
+        """The enrichment payload for one paper, given its precomputed vectors."""
+        group = group_for(primary_category)
+        extracted = select_keywords(
+            candidates,
+            candidate_vectors,
+            scoring_vector,
+            min_similarity=self._keyword_min_similarity,
+        )
+        keywords, method = self._finish_keywords(title, abstract, extracted)
+        if method == "statistical" and not self._same_space:
+            method = "static"
+        return {
+            "group": group.key if group else None,
+            "tech": group.tech if group else None,
+            "topic": self._match_topic(vector),
+            "keywords": keywords,
+            "keyword_method": method,
+            "labels": self._custom_labels(title, abstract),
+        }
+
+    def _batch_compute(
+        self, texts: list[str]
+    ) -> tuple[list[list[float]], list[list[float]], list[list[str]], list[list[list[float]]]]:
+        """Two merged embed calls for a batch of documents, re-split per document."""
+        doc_vectors = self._embedder.embed_documents(texts)
+        scoring_vectors = (
+            doc_vectors if self._same_space else self._keyword_embedder.embed_documents(texts)
+        )
+        candidate_lists = [
+            keyword_candidates(text, cap=self._keyword_candidate_cap) for text in texts
+        ]
+        flat = [c for candidates in candidate_lists for c in candidates]
+        flat_vectors = self._keyword_embedder.embed_documents(flat) if flat else []
+        per_doc: list[list[list[float]]] = []
+        offset = 0
+        for candidates in candidate_lists:
+            per_doc.append(flat_vectors[offset : offset + len(candidates)])
+            offset += len(candidates)
+        return doc_vectors, scoring_vectors, candidate_lists, per_doc
+
+    def enrich_batch(
+        self, items: list[tuple[str, str, str | None]]
+    ) -> list[tuple[dict[str, Any], list[float]]]:
+        """Enrich (title, abstract, primary_category) rows with two merged embed calls.
+
+        The Envelope-free core the batch scheduler task shares with the stream stage,
+        so both deployments converge on identical enrichment rows. Raises on an embed
+        failure - callers choose their own degradation.
+        """
+        texts = [f"{title}\n\n{abstract}" for title, abstract, _ in items]
+        doc_vectors, scoring_vectors, candidate_lists, per_doc = self._batch_compute(texts)
+        results: list[tuple[dict[str, Any], list[float]]] = []
+        for (title, abstract, primary), vector, scoring, candidates, candidate_vectors in zip(
+            items, doc_vectors, scoring_vectors, candidate_lists, per_doc, strict=True
+        ):
+            enrichment = self._enrich_one(
+                title, abstract, primary, vector, scoring, candidates, candidate_vectors
+            )
+            results.append((enrichment, vector))
+        return results
+
     def _passthrough(self, envelope: Envelope) -> Categorized | None:
         """The non-paper (and failed-parse) short-circuit shared by run and run_batch."""
         if envelope.kind != "paper" or "paper" not in envelope.payload:
@@ -302,36 +374,27 @@ class Categorizer:
         stamp = envelope.begin("categorize")
         try:
             paper = envelope.payload["paper"]
-            title, abstract = paper["title"], paper["abstract"]
             vector, scoring_vector, candidates, candidate_vectors = compute()
-            group = group_for(paper.get("primary_category"))
-            extracted = select_keywords(
+            enrichment = self._enrich_one(
+                paper["title"],
+                paper["abstract"],
+                paper.get("primary_category"),
+                vector,
+                scoring_vector,
                 candidates,
                 candidate_vectors,
-                scoring_vector,
-                min_similarity=self._keyword_min_similarity,
             )
-            keywords, method = self._finish_keywords(title, abstract, extracted)
-            if method == "statistical" and not self._same_space:
-                method = "static"
-            topic = self._match_topic(vector)
-            envelope.payload["enrichment"] = {
-                "group": group.key if group else None,
-                "tech": group.tech if group else None,
-                "topic": topic,
-                "keywords": keywords,
-                "keyword_method": method,
-                "labels": self._custom_labels(title, abstract),
-            }
+            envelope.payload["enrichment"] = enrichment
         except Exception as exc:  # noqa: BLE001 - a bad packet must not stop the flow
             envelope.finish(stamp, "error", f"{type(exc).__name__}: {exc}")
             return Categorized(envelope, None)
+        topic = enrichment["topic"]
         envelope.finish(
             stamp,
             detail={
-                "keyword_method": method,
+                "keyword_method": enrichment["keyword_method"],
                 "candidate_count": len(candidates),
-                "topic_score": topic.get("similarity") if topic else None,
+                "topic_score": topic.get("similarity") if isinstance(topic, dict) else None,
             },
         )
         return Categorized(envelope, vector)
@@ -373,28 +436,15 @@ class Categorizer:
         if papers:
             try:
                 texts = [text for _, _, text in papers]
-                doc_vectors = self._embedder.embed_documents(texts)
-                scoring_vectors = (
-                    doc_vectors
-                    if self._same_space
-                    else self._keyword_embedder.embed_documents(texts)
-                )
-                candidate_lists = [
-                    keyword_candidates(text, cap=self._keyword_candidate_cap) for text in texts
-                ]
-                flat = [c for candidates in candidate_lists for c in candidates]
-                flat_vectors = self._keyword_embedder.embed_documents(flat) if flat else []
+                doc_vectors, scoring_vectors, candidate_lists, per_doc = self._batch_compute(texts)
             except Exception:  # noqa: BLE001 - model hiccup: the serial path re-embeds
                 logger.warning("batch embed failed; categorizing serially", exc_info=True)
                 for index, envelope, _ in papers:
                     outputs[index] = self.run(envelope)
             else:
-                offset = 0
-                for (index, envelope, _), candidates, vector, scoring in zip(
-                    papers, candidate_lists, doc_vectors, scoring_vectors, strict=True
+                for (index, envelope, _), candidates, vector, scoring, candidate_vectors in zip(
+                    papers, candidate_lists, doc_vectors, scoring_vectors, per_doc, strict=True
                 ):
-                    candidate_vectors = flat_vectors[offset : offset + len(candidates)]
-                    offset += len(candidates)
                     outputs[index] = self._categorize_one(
                         envelope, _ready(vector, scoring, candidates, candidate_vectors)
                     )
