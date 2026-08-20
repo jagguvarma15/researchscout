@@ -28,7 +28,7 @@ from researchscout.store.models import EventRow, SavedPaperRow
 from researchscout.store.papers import (
     enrichment_watermarks,
     papers_missing_full_text,
-    set_full_text,
+    record_full_text_result,
 )
 from researchscout.store.raw import append_raw
 from researchscout.store.state import save_state
@@ -151,7 +151,8 @@ def poll_fulltext(settings: Settings, broker: Broker, topics: StreamTopics) -> N
 
     Papers with no HTML anywhere are marked checked here (an empty string), the one
     producer-side data write: there is nothing downstream to process, and without the mark
-    the batch would re-fetch the PDF-only tail forever.
+    the batch would re-fetch the PDF-only tail forever. The mark waits out the tombstone
+    grace - a fresh paper whose HTML is not rendered yet stays pending and retries.
     """
     delay = settings.arxiv_page_delay_sec
     published = unavailable = 0
@@ -160,12 +161,12 @@ def poll_fulltext(settings: Settings, broker: Broker, topics: StreamTopics) -> N
         pending = papers_missing_full_text(
             session, limit=settings.stream_fulltext_batch, first=sorted(priority)
         )
-        for index, (paper_id, arxiv_id) in enumerate(pending):
+        for index, (paper_id, arxiv_id, published_at) in enumerate(pending):
             if index and delay > 0:
                 time.sleep(delay)
             text = fetch_full_text(arxiv_id)
             if text is None:
-                set_full_text(session, paper_id, "")
+                record_full_text_result(session, paper_id, None, published_at=published_at)
                 unavailable += 1
                 continue
             envelope = Envelope(
