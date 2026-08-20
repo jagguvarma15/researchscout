@@ -36,6 +36,17 @@ def test_arxiv_link_shapes_are_recognized() -> None:
     assert _ARXIV_RE.search("https://example.com/2401.00001") is None
 
 
+def test_old_style_arxiv_ids_are_recognized() -> None:
+    """Old papers keep resurfacing on HN, and their ids look nothing like the new form."""
+    for url, expected in (
+        ("https://arxiv.org/abs/math/0309136", "math/0309136"),
+        ("https://arxiv.org/pdf/cond-mat.str-el/0309136v2", "cond-mat.str-el/0309136"),
+        ("https://arxiv.org/abs/quant-ph/9508027", "quant-ph/9508027"),
+    ):
+        match = _ARXIV_RE.search(url)
+        assert match is not None and match.group(1) == expected
+
+
 def test_fetch_aggregates_stories_and_emits_both_metrics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
