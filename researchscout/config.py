@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     # runs a day inside the request budget the upstream tolerates.
     scheduler_ingest_early_stop_pages: int = 0
     scheduler_index_interval_sec: int = 900
+    # Batch keyword/label enrichment (the stream's categorize stage, run over papers whose
+    # keywords are still NULL). The batch bounds one run; the backlog drains across runs.
+    scheduler_categorize_interval_sec: int = 3600
+    scheduler_categorize_batch: int = 300
     scheduler_signals_interval_sec: int = 21600
     scheduler_citations_interval_sec: int = 86400
     scheduler_fulltext_interval_sec: int = 3600
