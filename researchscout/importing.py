@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from researchscout.config import Settings
 from researchscout.embed.base import Embedder
 from researchscout.ingest.pipeline import resolve_existing
+from researchscout.schema import Paper
 from researchscout.sources.arxiv import _API_URL, _entry_payload, _normalize_payload
 from researchscout.store.papers import link_external_ids, upsert_paper
 from researchscout.store.raw import append_raw
@@ -57,19 +58,12 @@ def fetch_arxiv_entry(arxiv_id: str, *, timeout: float = _TIMEOUT) -> dict[str, 
     return payload
 
 
-def import_paper(
-    session: Session,
-    user_sub: str,
-    payload: dict[str, Any],
-    embedder: Embedder | None = None,
-) -> tuple[str, str, bool, bool]:
-    """Land one paper synchronously and save it; returns (paper_id, title, already_known,
-    embedded).
+def land_entry(session: Session, payload: dict[str, Any]) -> tuple[str, Paper, bool]:
+    """Normalize, clean, dedup, and store one arXiv entry payload.
 
-    Title and abstract pass through the same cleanup the stream's parse stage applies, so
-    the row is identical whichever path wrote it first. With an ``embedder`` the paper's
-    vector is written in the same transaction - the deployment has no stream to enrich it
-    later, and an import should be retrievable by the vector leg immediately.
+    Returns (paper_id, cleaned paper, already_known). Title and abstract pass through
+    the same cleanup the stream's parse stage applies, so the row is identical whichever
+    path wrote it first. Shared by the user-facing import and the signal auto-import.
     """
     paper = _normalize_payload(payload)
     paper = paper.model_copy(
@@ -88,6 +82,23 @@ def import_paper(
         if not already_known:
             append_raw(session, source="arxiv", fetched_at=datetime.now(UTC), payload=payload)
         paper_id = upsert_paper(session, paper)
+    return paper_id, paper, already_known
+
+
+def import_paper(
+    session: Session,
+    user_sub: str,
+    payload: dict[str, Any],
+    embedder: Embedder | None = None,
+) -> tuple[str, str, bool, bool]:
+    """Land one paper synchronously and save it; returns (paper_id, title, already_known,
+    embedded).
+
+    With an ``embedder`` the paper's vector is written in the same transaction - the
+    deployment has no stream to enrich it later, and an import should be retrievable by
+    the vector leg immediately.
+    """
+    paper_id, paper, already_known = land_entry(session, payload)
     embedded = False
     if embedder is not None:
         # The exact text index_papers and the categorize stage embed, so the row converges.
