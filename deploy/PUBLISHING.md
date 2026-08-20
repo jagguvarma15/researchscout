@@ -180,6 +180,8 @@ Project settings: root directory `apps/web`, framework Astro. Environment variab
 | `AUTH0_AUDIENCE` | the API identifier from step 2 |
 | `SESSION_SECRET` | `openssl rand -base64 48` |
 | `API_SERVICE_TOKEN` | the same value as `RS_SERVICE_TOKEN` on the Railway service |
+| `PUBLIC_SENTRY_DSN` | the frontend Sentry project's DSN (optional; inlined at build) |
+| `SENTRY_DSN` | the same DSN, for the server half of the frontend (optional) |
 
 Keep the Hobby plan's terms in view: non-commercial personal use only, and that includes
 donation links and advertising.
@@ -189,9 +191,30 @@ The terms dialog must not appear the second time.
 
 ## Monitoring
 
-There is no external monitoring stack. The scheduler's health task self-checks every half
-hour (ingest cadence, failing streaks, weekend-aware corpus freshness, hung runs,
-retention), `GET /v1/system/status` reports the verdict, and the about page renders it.
+Self-checks first: the scheduler's health task runs every half hour (ingest cadence,
+failing streaks, weekend-aware corpus freshness, hung runs, retention),
+`GET /v1/system/status` reports the verdict, the about page renders it, and
 `make deploy-verify` reads the same payload after every merge. Railway's own dashboard
 carries the service logs, restart history, and resource graphs; its healthcheck restarts
-the container when `/healthz` stops answering.
+the container when `/healthz` stops answering, and the api process exits on a scheduler
+thread crash precisely so that restart machinery notices.
+
+On top of that sit two free-tier services, both optional and both self-gating - with no
+credentials set, none of their code runs:
+
+- **Sentry** (errors). One org, two projects: a Python project whose DSN goes on the
+  Railway api service as `RS_SENTRY_DSN`, and a JavaScript project whose DSN goes on
+  Vercel as `PUBLIC_SENTRY_DSN` + `SENTRY_DSN`. The free Developer plan is 5,000 events a
+  month across the org with a hard stop - no overage billing. Errors only: tracing and
+  session replay stay off on both halves, deliberately.
+- **LangSmith** (LLM traces). One project; set `LANGSMITH_TRACING=true`,
+  `LANGSMITH_API_KEY`, and `LANGSMITH_PROJECT=researchscout` on the Railway api service
+  and every LLM call - ask, chat, digest, topic labels, guardrail, keyword fallback -
+  records its prompt, model, tokens, and latency. The free Developer plan is 5,000 traces
+  a month with 14-day retention; this deployment's daily background usage is a handful of
+  calls, so the budget is effectively all interactive.
+
+The LLM itself runs on OpenRouter's free tier (`RS_LLM_MODEL` ending `:free`): 20 requests
+a minute, 50 a day, lifted to 1,000 a day forever by a one-time 10-dollar credit purchase.
+Free variants may let the upstream provider log prompts; the privacy page says so, and
+swapping to a paid model id removes both the caps and that caveat.
