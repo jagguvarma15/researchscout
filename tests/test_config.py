@@ -38,3 +38,13 @@ def test_build_sha_falls_back_to_the_platform_stamp(monkeypatch: pytest.MonkeyPa
     assert Settings().build_sha == "abc1234def"
     monkeypatch.setenv("RS_BUILD_SHA", "override99")
     assert Settings().build_sha == "override99"
+
+
+def test_sentry_dsn_reads_either_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bare SENTRY_DSN works (the SDK's conventional name); RS_SENTRY_DSN wins when set."""
+    monkeypatch.delenv("RS_SENTRY_DSN", raising=False)
+    assert Settings(_env_file=None).sentry_dsn == ""
+    monkeypatch.setenv("SENTRY_DSN", "https://key@o1.ingest.us.sentry.io/1")
+    assert Settings().sentry_dsn == "https://key@o1.ingest.us.sentry.io/1"
+    monkeypatch.setenv("RS_SENTRY_DSN", "https://key@o1.ingest.us.sentry.io/2")
+    assert Settings().sentry_dsn == "https://key@o1.ingest.us.sentry.io/2"
