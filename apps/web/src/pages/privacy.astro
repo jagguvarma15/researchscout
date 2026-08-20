@@ -85,6 +85,14 @@ import { CONTACT_URL, MINIMUM_AGE, TERMS_EFFECTIVE } from '../lib/legal';
         <li>
           <strong>A language model provider</strong> receives the questions you ask Scout in AI
           mode, together with short excerpts of the matched papers, to generate the answer.
+          When the service runs on a provider's free model tier, that provider may log those
+          prompts under its own terms - ask nothing in AI mode you would not put in a search
+          box.
+        </li>
+        <li>
+          <strong>Sentry</strong> receives error reports - the technical details of a page or
+          request that broke, such as the failing URL and a stack trace - so faults get seen
+          and fixed. Error reports are not profiling and carry no reading history.
         </li>
       </ul>
       <p>
