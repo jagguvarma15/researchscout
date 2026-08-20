@@ -4,6 +4,7 @@
 
 import type { APIRoute } from 'astro';
 
+import { captureError } from '../../lib/sentry-server';
 import { SITE_URL } from '../../lib/site-url.js';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:8000';
@@ -38,13 +39,21 @@ export const ALL: APIRoute = async ({ clientAddress, locals, params, request, ur
     if (clientAddress) headers.set('x-rs-client-ip', clientAddress);
   }
 
-  const response = await fetch(`${API_URL}/v1/${params.path}${url.search}`, {
-    method: request.method,
-    headers,
-    body: request.body,
-    // Node's fetch requires half-duplex when streaming a request body through.
-    duplex: 'half',
-  } as RequestInit);
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}/v1/${params.path}${url.search}`, {
+      method: request.method,
+      headers,
+      body: request.body,
+      // Node's fetch requires half-duplex when streaming a request body through.
+      duplex: 'half',
+    } as RequestInit);
+  } catch (error) {
+    // A connection failure to the API used to throw out of the route as a bare 500;
+    // a 502 is the honest status, and the report says which deployment fell over.
+    await captureError(error);
+    return Response.json({ detail: 'the API is unreachable' }, { status: 502 });
+  }
 
   const out = new Headers();
   // content-type so bodies parse; retry-after because the chat's 429 copy tells the reader
