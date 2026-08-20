@@ -20,6 +20,13 @@ degrade gracefully when the API is unreachable instead of failing the render.
 Without an Auth0 configuration the app acts as the built-in local user, matching the API's
 local no-auth mode.
 
+`SITE_PRIVATE=true` plus an `ENTRY_CODE` (and a working Auth0 configuration) turn on the
+members-only gate: anonymous visitors see only `/welcome`, `/terms`, and `/privacy`, the
+`/api` proxy answers 401 without an approved session, and full access requires signing in
+plus redeeming the entry code once - entered before or after sign-in, remembered in the
+session cookie. Unset (the default, and always locally) the site is public exactly as
+before.
+
 ## Filters, math, and the reader
 
 The feed is URL-driven: the filter sidebar's Extract button serializes its controls into query
