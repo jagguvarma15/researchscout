@@ -13,5 +13,8 @@ declare namespace App {
     user: { sub: string; username: string } | null;
     // The API access token for this request, for the server-side proxy only. Never rendered.
     accessToken: string | null;
+    // The private-site gate's one truthful answer: true when the session has redeemed the
+    // entry code, and always true while the gate is off.
+    approved: boolean;
   }
 }
