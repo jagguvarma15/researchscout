@@ -93,12 +93,14 @@ const renderedAt = new Date().toISOString();
         needs no opt-out: it tears itself down in onDestroy when a swap removes it. */}
     <ClientRouter />
     <script>
-      // Bundled, not inline: this needs no pre-paint guarantee, so it stays out of the
-      // hashed inline script. Module scripts run once per full load; the document
+      // Bundled, not inline: neither needs a pre-paint guarantee, so both stay out of
+      // the hashed inline script. Module scripts run once per full load; the document
       // listeners inside survive every swap.
       import { initNavDirection } from '../lib/nav-direction';
+      import { initErrorReporting } from '../lib/sentry-client';
 
       initNavDirection();
+      initErrorReporting();
     </script>
   </head>
   <body>
