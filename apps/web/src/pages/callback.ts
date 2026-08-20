@@ -12,6 +12,7 @@
 import type { APIRoute } from 'astro';
 
 import {
+  ENTRY_COOKIE,
   PKCE_COOKIE_NAME,
   RETURN_COOKIE,
   SESSION_COOKIE,
@@ -19,7 +20,9 @@ import {
   completeLogin,
   safeNext,
   sealSession,
+  unsealEntryGrant,
 } from '../lib/auth';
+import { gateEnabled } from '../lib/gate';
 
 const THIRTY_DAYS = 60 * 60 * 24 * 30;
 
@@ -72,9 +75,15 @@ export const GET: APIRoute = async ({ cookies, redirect, url }) => {
   cookies.delete(PKCE_COOKIE_NAME, { path: '/' });
   cookies.delete(RETURN_COOKIE, { path: '/' });
 
+  // A code entered before sign-in rides the entry cookie across the Auth0 round trip;
+  // redeem it into the session now. Without it (or with the gate off) the claim simply
+  // records the current truth - unapproved sessions land on the welcome page's form.
+  const approved = !gateEnabled() || (await unsealEntryGrant(cookies.get(ENTRY_COOKIE)?.value));
+  cookies.delete(ENTRY_COOKIE, { path: '/' });
+
   let sealed: string;
   try {
-    sealed = await sealSession(await completeLogin(url, pkce));
+    sealed = await sealSession({ ...(await completeLogin(url, pkce)), approved });
   } catch (error) {
     console.error('sign-in exchange failed', error);
     return failed(describe(error));
