@@ -257,11 +257,59 @@ def test_full_text_batch_prioritizes_and_skips_checked(session: Session) -> None
     set_full_text(session, "arxiv:2402.00003", "")  # checked: no HTML available
 
     pending = papers_missing_full_text(session, limit=10, first=["arxiv:2403.00002"])
-    assert [paper_id for paper_id, _ in pending] == ["arxiv:2403.00002", "arxiv:2404.00001"]
+    assert [paper_id for paper_id, _, _ in pending] == ["arxiv:2403.00002", "arxiv:2404.00001"]
+    assert pending[0][2] == datetime(2024, 3, 1, tzinfo=UTC)  # published_at rides along
 
     set_full_text(session, "arxiv:2403.00002", "## S\n\nbody")
     pending = papers_missing_full_text(session, limit=10)
-    assert [paper_id for paper_id, _ in pending] == ["arxiv:2404.00001"]
+    assert [paper_id for paper_id, _, _ in pending] == ["arxiv:2404.00001"]
+
+
+def test_full_text_misses_tombstone_only_past_the_grace(session: Session) -> None:
+    """A fresh paper's miss stays pending; an old paper's miss is conclusively checked."""
+    from researchscout.store.papers import papers_missing_full_text, record_full_text_result
+
+    now = datetime(2024, 4, 10, tzinfo=UTC)
+    fresh = datetime(2024, 4, 9, tzinfo=UTC)
+    old = datetime(2024, 3, 1, tzinfo=UTC)
+    upsert_paper(session, _paper("arxiv:2404.00010", "2404.00010", "Fresh", published_at=fresh))
+    upsert_paper(session, _paper("arxiv:2403.00011", "2403.00011", "Old", published_at=old))
+    session.flush()
+
+    record_full_text_result(session, "arxiv:2404.00010", None, published_at=fresh, now=now)
+    record_full_text_result(session, "arxiv:2403.00011", None, published_at=old, now=now)
+    pending = {paper_id for paper_id, _, _ in papers_missing_full_text(session, limit=10)}
+    assert "arxiv:2404.00010" in pending  # retried next run
+    assert "arxiv:2403.00011" not in pending  # tombstoned for good
+
+    record_full_text_result(session, "arxiv:2404.00010", "## S\n\nbody", published_at=fresh, now=now)
+    pending = {paper_id for paper_id, _, _ in papers_missing_full_text(session, limit=10)}
+    assert "arxiv:2404.00010" not in pending  # real text always sticks
+
+
+def test_papers_missing_keywords_selects_uncategorized_newest_first(session: Session) -> None:
+    from researchscout.store.papers import papers_missing_keywords, set_enrichment
+
+    for pid, arxiv, title, month in [
+        ("arxiv:2404.00021", "2404.00021", "Newest", 4),
+        ("arxiv:2403.00022", "2403.00022", "Older", 3),
+        ("arxiv:2402.00023", "2402.00023", "Done", 2),
+    ]:
+        upsert_paper(
+            session,
+            _paper(pid, arxiv, title, published_at=datetime(2024, month, 1, tzinfo=UTC)),
+        )
+    session.flush()
+    # An empty list is still "processed": the write is the never-reprocess marker.
+    set_enrichment(session, "arxiv:2402.00023", keywords=[])
+
+    # created_at is the transaction timestamp for all three rows here, so only membership
+    # is asserted - the newest-first ordering matters across days, not within one insert.
+    pending = papers_missing_keywords(session, limit=10)
+    assert {row[0] for row in pending} == {"arxiv:2404.00021", "arxiv:2403.00022"}
+    by_id = {row[0]: row for row in pending}
+    _, title, abstract, _primary = by_id["arxiv:2404.00021"]
+    assert title == "Newest" and isinstance(abstract, str)
 
 
 def test_subjects_read_the_whole_category_list(session: Session) -> None:
