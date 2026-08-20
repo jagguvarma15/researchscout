@@ -291,6 +291,12 @@ def serve_api(
     """
     import uvicorn
 
+    from researchscout import observe
+    from researchscout.config import get_settings
+    from researchscout.trace import configure_logging
+
+    configure_logging()
+    observe.init_observability(get_settings())
     if not reload:
         _warm_models()
     uvicorn.run("researchscout.api.main:app", host=host, port=port, reload=reload)
@@ -377,12 +383,14 @@ def serve_scheduler(
     import threading
     from contextlib import suppress
 
+    from researchscout import observe
     from researchscout.config import get_settings
     from researchscout.scheduler import Scheduler, build_tasks, record_started
     from researchscout.trace import configure_logging
 
     configure_logging()
     settings = get_settings()
+    observe.init_observability(settings)
     heartbeat = _heartbeat_for(settings)
     tasks = build_tasks(settings, heartbeat=heartbeat)
     scheduler = Scheduler(tasks, tick_sec=settings.scheduler_tick_sec, heartbeat=heartbeat)
@@ -444,6 +452,8 @@ def stream_serve(
     ] = False,
 ) -> None:
     """Run the streaming pipeline: producers polling sources plus the processing worker."""
+    from researchscout import observe
+    from researchscout.config import get_settings
     from researchscout.stream.serve import run_stream
     from researchscout.trace import configure_logging
 
@@ -451,6 +461,7 @@ def stream_serve(
         typer.secho("choose at most one of --producer-only / --worker-only", fg=typer.colors.RED)
         raise typer.Exit(code=1)
     configure_logging()
+    observe.init_observability(get_settings())
     run_stream(producer_only=producer_only, worker_only=worker_only)
 
 
