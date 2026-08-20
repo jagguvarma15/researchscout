@@ -40,6 +40,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Literal
 from zoneinfo import ZoneInfo
 
+from researchscout import observe
 from researchscout.config import Settings
 from researchscout.schedule import describe, next_run, parse_times
 
@@ -156,8 +157,11 @@ class Scheduler:
     def _run(self, task: Task) -> None:
         try:
             task.run()
-        except Exception:  # noqa: BLE001 - a failing task must not stop the loop
+        except Exception as exc:  # noqa: BLE001 - a failing task must not stop the loop
             logger.warning("scheduled task %s failed", task.name, exc_info=True)
+            # The loop swallows the failure by design, so this is the one place a task
+            # error can reach the error reporter (a no-op when reporting is off).
+            observe.capture_exception(exc)
             if task.at and task.retries_left > 0:
                 # Re-arm within the day rather than concede the slot: arXiv being down at
                 # half past midnight should cost half an hour, not twenty-four. Capped at
