@@ -22,12 +22,12 @@ ARG EXTRAS=
 
 # Dependencies first, so a code change does not re-resolve or re-download them.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-install-project --no-dev --extra api ${EXTRAS:+--extra "$EXTRAS"}
+RUN uv sync --frozen --no-install-project --no-dev --extra api --extra observe ${EXTRAS:+--extra "$EXTRAS"}
 
 # Then the project, installed rather than linked, so the runtime stage needs nothing but the
 # virtualenv.
 COPY researchscout ./researchscout
-RUN uv sync --frozen --no-dev --extra api ${EXTRAS:+--extra "$EXTRAS"} --no-editable
+RUN uv sync --frozen --no-dev --extra api --extra observe ${EXTRAS:+--extra "$EXTRAS"} --no-editable
 
 FROM python:3.12-slim-bookworm
 WORKDIR /app
