@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 from sqlalchemy import select
 
+from researchscout.config import get_settings
 from researchscout.schema import Signal, SignalType, normalize_arxiv_id
 from researchscout.sources.base import HealthStatus, RawItem, Source, register
 from researchscout.useragent import default_headers
@@ -73,6 +74,14 @@ class HuggingFaceTrendingSource(Source):
             ranked.append((rank, normalize_arxiv_id(str(raw_id)), {**entry, "paper": paper}))
 
         stored = self._match_stored([arxiv_id for _, arxiv_id, _ in ranked])
+        unknown = [arxiv_id for _, arxiv_id, _ in ranked if arxiv_id not in stored]
+        if unknown and get_settings().signal_auto_import:
+            # The curated daily list is trustworthy enough to ingest from: land the
+            # in-scope unknowns now so their first trending observations attach instead
+            # of being dropped until the nightly ingest catches up.
+            from researchscout.ingest.autoimport import land_unknown_papers
+
+            stored.update(land_unknown_papers(unknown))
         items: list[RawItem] = []
         for rank, arxiv_id, entry in ranked:
             paper_id = stored.get(arxiv_id)
