@@ -126,6 +126,29 @@ def index(
 
 
 @app.command()
+def categorize(
+    limit: Annotated[
+        int, typer.Option("--limit", help="Pending papers to enrich this run.")
+    ] = 300,
+    llm: Annotated[
+        bool,
+        typer.Option("--llm", help="Allow the LLM keyword fallback (spends provider quota)."),
+    ] = False,
+) -> None:
+    """Compute keywords and labels for papers that lack them (the batch backfill).
+
+    The scheduler runs the same enrichment continuously; this command drains a backlog by
+    hand. The LLM fallback stays off unless --llm - a multi-thousand-paper backfill would
+    otherwise spend the provider's daily request quota on its weakest extractions.
+    """
+    from researchscout.config import get_settings
+    from researchscout.scheduler import run_categorize
+
+    note = run_categorize(get_settings(), limit=limit, llm_fallback=llm)
+    typer.secho(f"categorize: {note}", fg=typer.colors.GREEN)
+
+
+@app.command()
 def fulltext(
     limit: Annotated[int, typer.Option("--limit", help="Papers to fetch this run.")] = 25,
 ) -> None:
