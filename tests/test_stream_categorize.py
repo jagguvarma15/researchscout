@@ -348,3 +348,21 @@ def test_load_labels_reads_the_config(tmp_path: Path) -> None:
     config = tmp_path / "labels.yaml"
     config.write_text("labels:\n  - name: safety\n    description: Alignment work.\n  - name: ''\n")
     assert load_labels(config) == [LabelSpec("safety", "Alignment work.")]
+
+
+def test_enrich_batch_matches_the_stream_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The batch scheduler task's core and the stream's run produce identical enrichment."""
+    monkeypatch.setattr(categorize_mod, "list_topics", lambda session: [])
+    title = "Sparse attention"
+    abstract = "sparse attention speeds transformer inference remarkably well today"
+
+    batch = _categorizer(FakeEmbedder(_table(title, abstract)), FakeLLM(), fallback=False)
+    [(enrichment, vector)] = batch.enrich_batch([(title, abstract, "cs.LG")])
+
+    stream = _categorizer(FakeEmbedder(_table(title, abstract)), FakeLLM(), fallback=False)
+    streamed = stream.run(_paper_envelope(title, abstract))
+
+    assert streamed.envelope.payload["enrichment"] == enrichment
+    assert streamed.vector == vector == DOC  # the doc vector doubles as the embedding
+    assert enrichment["keywords"]  # the statistical extraction found phrases
+    assert enrichment["group"] == "cs"
