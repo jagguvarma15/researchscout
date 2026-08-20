@@ -34,7 +34,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from datetime import time as clock_time
 from functools import partial
 from typing import TYPE_CHECKING, Literal
@@ -76,6 +76,11 @@ class Task:
     at: tuple[clock_time, ...] = ()
     zone: ZoneInfo = field(default_factory=lambda: ZoneInfo("UTC"))
     next_wall: datetime | None = None
+    #: A failed wall-clock run re-arms after ``retry_delay_sec`` up to ``max_retries``
+    #: times per slot, instead of conceding the whole day to a transient upstream error.
+    max_retries: int = 2
+    retry_delay_sec: float = 1800.0
+    retries_left: int = 0
 
     def due(self, now: float, wall: datetime) -> bool:
         """True once the relevant clock has reached the next-run deadline.
@@ -134,6 +139,7 @@ class Scheduler:
         return f"at {describe(task.at, task.zone)}, next {when}"
 
     def _reschedule(self, task: Task) -> None:
+        task.retries_left = task.max_retries
         if task.at:
             # Stored as a datetime, not converted to monotonic seconds: the monotonic clock
             # pauses while the host sleeps, and a converted deadline would slip by exactly
@@ -147,6 +153,18 @@ class Scheduler:
             task.run()
         except Exception:  # noqa: BLE001 - a failing task must not stop the loop
             logger.warning("scheduled task %s failed", task.name, exc_info=True)
+            if task.at and task.retries_left > 0:
+                # Re-arm within the day rather than concede the slot: arXiv being down at
+                # half past midnight should cost half an hour, not twenty-four. Capped at
+                # the next real slot so a retry can only ever move work earlier, and the
+                # budget resets whenever a run succeeds or the slot rolls over.
+                task.retries_left -= 1
+                wall = self._wall()
+                slot = next_run(task.at, wall, task.zone)
+                retry_at = wall + timedelta(seconds=task.retry_delay_sec)
+                task.next_wall = min(retry_at, slot) if slot is not None else retry_at
+                self._heartbeat()
+                return
         self._reschedule(task)
         self._heartbeat()
 
