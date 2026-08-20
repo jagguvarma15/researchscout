@@ -1,0 +1,141 @@
+---
+import Base from '../layouts/Base.astro';
+import { safeNext } from '../lib/auth';
+import { gateEnabled } from '../lib/gate';
+
+// The one page an unapproved visitor is sent to; approved visitors have no business
+// here. With the gate off this is simply an unlinked static page - locally the built-in
+// user always reads as signed in, so an unconditional redirect would hide the landing
+// from dev preview and the visual smoke alike.
+const user = Astro.locals.user;
+if (gateEnabled() && user && Astro.locals.approved) return Astro.redirect('/', 302);
+
+const signedIn = gateEnabled() && user !== null;
+const next = safeNext(Astro.url.searchParams.get('next'));
+const flag = Astro.url.searchParams.get('code');
+
+// Varies by session, grant cookie, and query flags - never let an edge hold a copy.
+Astro.response.headers.set('cache-control', 'private, no-store');
+---
+
+<Base title="Welcome">
+  <div class="prose-page welcome">
+    <header class="hero">
+      <h1 class="page-title">A private radar for AI research</h1>
+      <p class="lede">
+        ResearchScout watches new arXiv papers and the signals gathering around them -
+        citations, trending lists, discussions - then scores, clusters, and summarizes so
+        what is worth reading surfaces on its own. This instance is members-only.
+      </p>
+    </header>
+
+    <section class="block gate-panel">
+      {
+        signedIn ? (
+          <p class="status">
+            Signed in as <strong>{user?.username}</strong>. Enter the entry code once to
+            unlock the site.
+          </p>
+        ) : (
+          <p class="status">
+            Sign in to continue. First visit? You will also need the entry code you were
+            given - enter it before or after signing in, whichever suits.
+          </p>
+        )
+      }
+
+      {flag === 'ok' && <p class="notice is-ok">Code accepted - sign in to continue.</p>}
+      {flag === 'bad' && <p class="notice is-bad">That code is not right.</p>}
+
+      <form method="post" action="/entry" class="code-form">
+        <label class="micro-label" for="entry-code">Entry code</label>
+        <div class="code-row">
+          <input
+            id="entry-code"
+            name="code"
+            type="password"
+            autocomplete="off"
+            required
+            placeholder="The code you were given"
+          />
+          <button class="btn btn-primary" type="submit">Unlock</button>
+        </div>
+      </form>
+
+      {
+        signedIn ? (
+          <p class="alt-action">
+            <a href="/logout">Not now, sign out</a>
+          </p>
+        ) : (
+          <p class="alt-action">
+            <a class="btn btn-primary signin" href={`/login?next=${encodeURIComponent(next)}`}>
+              Sign in
+            </a>
+          </p>
+        )
+      }
+    </section>
+  </div>
+</Base>
+
+<style>
+  .welcome {
+    max-width: 34rem;
+  }
+  .gate-panel {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--bg);
+    box-shadow: var(--shadow-sm);
+    padding: 1.5rem;
+    display: grid;
+    gap: 1rem;
+  }
+  .status {
+    margin: 0;
+    color: var(--ink);
+  }
+  .notice {
+    margin: 0;
+    padding: 0.5rem 0.75rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.9375rem;
+  }
+  .is-ok {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  .is-bad {
+    background: var(--danger-soft);
+    color: var(--danger-ink);
+  }
+  .code-form {
+    display: grid;
+    gap: 0.375rem;
+  }
+  .code-row {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .code-row input {
+    flex: 1;
+    min-width: 0;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    color: var(--ink);
+    font: inherit;
+  }
+  .code-row input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+  .alt-action {
+    margin: 0;
+  }
+  .alt-action a:not(.btn) {
+    color: var(--muted);
+  }
+</style>
