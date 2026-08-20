@@ -554,6 +554,15 @@ def record_started(count: int) -> None:
     _record_safely("scheduler", now, ok=True, note=f"started: {count} task(s)")
 
 
+def record_crashed(note: str) -> None:
+    """Write the scheduler's own death into the ledger, best-effort.
+
+    ``serve all`` calls this just before exiting the process, so the ledger explains the
+    restart the platform is about to perform.
+    """
+    _record_safely("scheduler", datetime.now(UTC), ok=False, note=note)
+
+
 def _recorded(name: str, run: TaskFn) -> Callable[[], None]:
     """Wrap a task so every run lands in the ledger — opened at start, completed at finish.
 
