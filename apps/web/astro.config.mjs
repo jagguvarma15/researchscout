@@ -49,7 +49,10 @@ export default defineConfig({
         // Inter ships as woff2 files; KaTeX inlines a couple of fonts as data URIs.
         "font-src 'self' data:",
         // The API is same-origin through the proxy; arXiv is where the reader gets PDFs.
-        "connect-src 'self' https://arxiv.org https://export.arxiv.org",
+        // The Sentry ingest hosts carry browser error reports when a DSN is configured -
+        // idle bytes in the policy otherwise (new orgs land on the us host; the bare
+        // ingest domain covers legacy DSNs so a pasted one cannot silently drop reports).
+        "connect-src 'self' https://arxiv.org https://export.arxiv.org https://*.ingest.us.sentry.io https://*.ingest.sentry.io",
         // Some stored arXiv links are http; upgrade them rather than have a browser block
         // them as mixed content on the deployed site.
         'upgrade-insecure-requests',
