@@ -62,10 +62,15 @@ class ArxivSource(Source):
         page_size: int = 100,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        date_field: str = "submittedDate",
     ) -> None:
         cfg_categories = source_config(self.name).get("categories")
         self.categories: list[str] = categories or cfg_categories or list(_DEFAULT_CATEGORIES)
         self.page_size = page_size
+        # Which date bounds the window and orders the walk: submittedDate for new papers,
+        # lastUpdatedDate for the revisions sweep. The cursor's pinned upper bound works
+        # identically for both.
+        self.date_field = date_field
         self._sleep = sleep
         self._clock = clock
 
@@ -85,7 +90,7 @@ class ArxivSource(Source):
     def _search_query(self, since: datetime, hi: str) -> str:
         cats = " OR ".join(f"cat:{c}" for c in self.categories)
         lo = _to_utc(since).strftime("%Y%m%d%H%M")
-        return f"({cats}) AND submittedDate:[{lo} TO {hi}]"
+        return f"({cats}) AND {self.date_field}:[{lo} TO {hi}]"
 
     def _get_feed(self, params: dict[str, str], start: int) -> Any:
         """One paced GET returning the parsed feed, with bounded retries for the three ways
@@ -140,7 +145,7 @@ class ArxivSource(Source):
                 "search_query": self._search_query(since, hi),
                 "start": str(start),
                 "max_results": str(self.page_size),
-                "sortBy": "submittedDate",
+                "sortBy": self.date_field,
                 "sortOrder": "descending",
             },
             start,
@@ -171,6 +176,34 @@ class ArxivSource(Source):
         if resp.status_code == 429:
             return "rate_limited"
         return "ok" if resp.is_success else "error"
+
+
+class ArxivUpdatesSource(ArxivSource):
+    """The revisions sweep: the same arXiv query keyed on lastUpdatedDate.
+
+    A distinct ``name`` because run_ingest keys cursor and watermark state on it -
+    sharing "arxiv" would let the sweep overwrite the nightly ingest's cursor mid-walk.
+    Deliberately unregistered: the scheduler constructs it directly (same upstream, same
+    attribution), and it reads the arxiv block's categories explicitly so the two walks
+    always cover the same scope - its own name has no sources.yaml entry, and the silent
+    fallback would be three default categories.
+    """
+
+    name = "arxiv_updates"
+
+    def __init__(
+        self,
+        page_size: int = 100,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        super().__init__(
+            categories=source_config("arxiv").get("categories"),
+            page_size=page_size,
+            sleep=sleep,
+            clock=clock,
+            date_field="lastUpdatedDate",
+        )
 
 
 def _parse_cursor(cursor: str | None) -> tuple[int, str | None]:
