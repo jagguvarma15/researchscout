@@ -37,10 +37,11 @@ Requests that 422 during that window are sequencing, not bugs.
 ## Scheduling
 
 Everything is wall-clock slots inside the one container (`RS_SCHEDULER_*_AT` variables, ET
-by default): pipeline 00:30, citations 06:00, report 07:00, fast signals 08:00 and 18:00,
-daily set 17:00, health every 30 minutes. A redeploy or restart re-arms the next future
-slot; a slot missed while a deploy was in flight is covered by the watermark-derived ingest
-window on the next run.
+by default): pipeline 00:30 (ingest, categorize, index, full text), revisions 01:30,
+citations 06:00, report 07:00, fast signals 08:00 and 18:00, daily set 17:00, health every
+30 minutes. A redeploy or restart re-arms the next future slot; a slot missed while a
+deploy was in flight is covered by the watermark-derived ingest window on the next run,
+and a slot whose run fails retries after half an hour, twice, before conceding the day.
 
 ## Moving data in or out
 
@@ -81,4 +82,9 @@ Run it before risky migrations.
   section show it.
 - Service logs, restarts, and resource graphs are on the Railway dashboard. The healthcheck
   restarts the container when `/healthz` stops answering; `restartPolicyType` in
-  `railway.json` covers crashes.
+  `railway.json` covers crashes - including a scheduler thread death, which now exits the
+  process on purpose after writing a `scheduler` failure row to the ledger.
+- With the DSNs configured, Sentry holds the tracebacks: backend task and request errors
+  in the Python project, page-render and browser errors in the JavaScript one. LangSmith
+  holds every LLM call's prompt, tokens, and latency. Both are documented in
+  `PUBLISHING.md` under Monitoring.
