@@ -318,8 +318,7 @@ def _revisions(settings: Settings) -> str:
         summary = run_ingest(session, source, since, resume=True)
     suffix = f", stopped early: {summary.stopped_early}" if summary.stopped_early else ""
     note = (
-        f"fetched={summary.fetched} refreshed={summary.collapsed} "
-        f"new={summary.new_papers}{suffix}"
+        f"fetched={summary.fetched} refreshed={summary.collapsed} new={summary.new_papers}{suffix}"
     )
     logger.info("revisions %s", note)
     if summary.stopped_by_error:
