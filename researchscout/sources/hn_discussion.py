@@ -27,9 +27,10 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 10
 
 # arXiv ids in any common link shape (abs/pdf/html, optional version suffix): new-style
-# YYMM.NNNNN and old-style archive[.SUB]/YYMMNNN (math/0309136 keeps resurfacing on HN).
+# YYMM.NNNNN and old-style archive[.subject]/YYMMNNN - math/0309136 keeps resurfacing on
+# HN, and subject classes range from math.GT to cond-mat.str-el.
 _ARXIV_RE = re.compile(
-    r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?/\d{7})(?:v\d+)?",
+    r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5}|[a-z-]+(?:\.[a-z-]+)?/\d{7})(?:v\d+)?",
     re.IGNORECASE,
 )
 
