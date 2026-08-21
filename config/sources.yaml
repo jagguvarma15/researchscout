@@ -62,10 +62,12 @@ sources:
       data_license: Reader-submitted posts; each stays with the person who wrote it
       provides: Story points and comment counts, plus the public story ids they came from
   bluesky:
-    # Unauthenticated searchPosts on api.bsky.app (the documented public host 403s for search).
-    # Post engagement feeds social_mention, reply counts feed discussion. Excluded handles are
-    # aggregator bots that would otherwise dominate mention counts.
-    enabled: true
+    # Off since 2026-08: Bluesky now requires authentication for searchPosts everywhere -
+    # api.bsky.app (the workaround after the documented public host started 403ing) answers
+    # 403 too. Re-enable only once the connector speaks authenticated search (app password).
+    # When it ran: post engagement fed social_mention, reply counts fed discussion; the
+    # excluded handles are aggregator bots that would otherwise dominate mention counts.
+    enabled: false
     kind: signal
     cadence: daily
     attribution:
