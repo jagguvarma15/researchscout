@@ -50,7 +50,7 @@ lists every target.
 ## How it works
 
 arXiv supplies the papers; citations (Semantic Scholar, OpenAlex fallback), Hugging Face
-trending, Hacker News, Bluesky, and GitHub code adoption supply the signals. Locally a
+trending, Hacker News, and GitHub code adoption supply the signals. Locally a
 streaming pipeline (Kafka + Bytewax, `scout stream serve`) parses, categorizes, and injects
 each paper with idempotent upserts; the deployed scheduler drives the same work in batches
 on a wall-clock schedule shaped around arXiv's announcement day. Papers are embedded and
