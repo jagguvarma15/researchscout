@@ -13,7 +13,6 @@ import {
   fetchPaper,
   fetchPapers,
   fetchSaved,
-  formatDate,
   type AiModel,
   type PaperSummary,
 } from '../../lib/api';
@@ -42,6 +41,9 @@ let models: AiModel[] = [];
 // The paper's own signal on the feed's scale, read off the search self-hit - the detail
 // endpoint serves no score, but the related-papers query already retrieves this paper.
 let signalScore: number | null = null;
+// Retrieval scores are small absolute numbers; the page's meters read relative within
+// this paper's own neighborhood - the self-hit and its related work.
+let signalMax = 1;
 if (paper !== null) {
   const [hits, catalogue] = await Promise.all([
     fetchPapers({ q: paper.title }),
@@ -49,6 +51,7 @@ if (paper !== null) {
   ]);
   const hitItems = hits.ok ? hits.data.items : [];
   signalScore = hitItems.find((hit) => hit.id === paper.id)?.score ?? null;
+  signalMax = Math.max(...hitItems.map((hit) => hit.score ?? 0), 0) || 1;
   related = hitItems.filter((hit) => hit.id !== paper.id).slice(0, 4);
   // A failed catalogue read costs this section, never the paper: the reason for the failure
   // belongs on /models, where somebody went looking for models.
@@ -79,6 +82,16 @@ function bibtexFor(p: PaperSummary): string {
 }
 
 const bibtex = paper === null ? '' : bibtexFor(paper);
+
+const published =
+  paper === null
+    ? ''
+    : new Date(paper.published_at).toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'UTC',
+      });
 ---
 
 <Base title={paper ? stripMath(paper.title) : 'Not found'}>
@@ -99,7 +112,7 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
           <SaveButton client:load paperId={paper.id} {saved} />
         </div>
         <div class="meta-band">
-          <span class="pair"><b>Published</b>{formatDate(paper.published_at)}</span>
+          <span class="pair"><b>Published</b>{published}</span>
           {paper.venue && (
             <span class="pair">
               <b>Venue</b>
@@ -127,8 +140,14 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
         {paper.comment && <p class="comment">{paper.comment}</p>}
         {signalScore !== null && (
           <div class="sig-block">
-            <SignalMark score={signalScore} />
-            <span class="sig-legend">Signal — momentum from citations and discussion, 0 to 1</span>
+            <SignalMark
+              score={signalScore}
+              max={signalMax}
+              label="momentum, relative among related work"
+            />
+            <span class="sig-legend">
+              Signal — momentum from citations and discussion, relative among related work
+            </span>
           </div>
         )}
         <p class="links">
@@ -228,7 +247,13 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
                     href={`/papers/${hit.id}`}
                     set:html={renderMathHTML(hit.title)}
                   />
-                  {hit.score !== null && <SignalMark score={hit.score} />}
+                  {hit.score !== null && (
+                    <SignalMark
+                      score={hit.score}
+                      max={signalMax}
+                      label="momentum, relative among related work"
+                    />
+                  )}
                 </li>
               ))}
             </ul>
