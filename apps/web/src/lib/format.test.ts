@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { compact, exponent, weightsLabel } from './format';
+import { compact, exponent, issueNumber, weightsLabel } from './format';
 
 describe('compact', () => {
   it.each([
@@ -40,5 +40,16 @@ describe('weightsLabel', () => {
     [null, 'unknown'],
   ])('renders %s as %s', (open, expected) => {
     expect(weightsLabel(open)).toBe(expected);
+  });
+});
+
+describe('issueNumber', () => {
+  it('reads the week number out of a weekly slug', () => {
+    expect(issueNumber('2026-w16')).toBe(16);
+    expect(issueNumber('2026-w05')).toBe(5);
+  });
+
+  it('returns null for daily report date slugs', () => {
+    expect(issueNumber('2026-08-23')).toBeNull();
   });
 });
