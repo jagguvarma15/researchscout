@@ -6,6 +6,7 @@ the model may cite only the ranked papers, and any invented id is dropped by the
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -30,6 +31,8 @@ _SYSTEM_PROMPT = (
 _HALF_LIFE_DAYS = 14.0
 _CANDIDATE_POOL = 200
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class RankedPaper:
@@ -47,6 +50,7 @@ class Digest:
     body: str
     cited: list[str]
     items: list[RankedPaper]
+    llm_ok: bool = True
 
 
 def week_slug(end: datetime) -> str:
@@ -92,6 +96,15 @@ def rank_digest(
     return rank_window(session, days=days, k=k), start, end
 
 
+def _fallback_body(items: list[RankedPaper]) -> str:
+    """Deterministic stand-in when the model is unavailable: the ranked list, ids citable."""
+    lines = ["The digest model was unavailable this week; the window's top papers, ranked:", ""]
+    lines.extend(
+        f"{index}. [{item.paper.id}] {item.paper.title}" for index, item in enumerate(items, 1)
+    )
+    return "\n".join(lines)
+
+
 def compose_digest(llm: LLM, items: list[RankedPaper], *, start: datetime, end: datetime) -> Digest:
     """The LLM half: synthesize the digest body from already-ranked papers (no session)."""
     with trace_span("digest", k=len(items)) as span:
@@ -99,7 +112,14 @@ def compose_digest(llm: LLM, items: list[RankedPaper], *, start: datetime, end: 
             f"[{item.paper.id}] {item.paper.title}\n{item.paper.abstract}" for item in items
         )
         user_prompt = f"Digest window: {start:%Y-%m-%d} to {end:%Y-%m-%d}\n\nPapers:\n{context}"
-        body = llm.complete(_SYSTEM_PROMPT, user_prompt)
+        llm_ok = True
+        try:
+            body = llm.complete(_SYSTEM_PROMPT, user_prompt)
+        except Exception:  # noqa: BLE001 - the ranked list is the safe floor
+            logger.warning("digest prose failed; publishing the ranked list", exc_info=True)
+            body = _fallback_body(items)
+            llm_ok = False
+            span["fallback"] = True
         span["model"] = llm.model
 
         found = list(dict.fromkeys(_CITATION_RE.findall(body)))
@@ -116,6 +136,7 @@ def compose_digest(llm: LLM, items: list[RankedPaper], *, start: datetime, end: 
             body=body,
             cited=cited,
             items=items,
+            llm_ok=llm_ok,
         )
 
 
