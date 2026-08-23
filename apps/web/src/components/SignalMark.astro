@@ -4,12 +4,16 @@
 // paper's or topic's momentum renders this instead of a bare number.
 interface Props {
   score: number;
+  /* The full-meter reading. Retrieval scores live on a 0-to-1 scale and use the default;
+     breakthrough totals are unbounded, so ranked lists pass their own maximum and the
+     meter reads relative within that list. */
+  max?: number;
   /* What the number measures, for the title legend. */
   label?: string;
 }
 
-const { score, label = 'momentum from citations and discussion, 0 to 1' } = Astro.props;
-const pct = Math.round(Math.min(Math.max(score, 0), 1) * 100);
+const { score, max = 1, label = 'momentum from citations and discussion' } = Astro.props;
+const pct = max > 0 ? Math.round(Math.min(Math.max(score / max, 0), 1) * 100) : 0;
 const text = score.toFixed(2);
 ---
 
