@@ -1,11 +1,22 @@
 ---
 import EmptyState from '../../components/EmptyState.astro';
 import PageIntro from '../../components/PageIntro.astro';
+import SignalMark from '../../components/SignalMark.astro';
+import TrendBadge from '../../components/TrendBadge.astro';
 import Base from '../../layouts/Base.astro';
 import { catalogMessage, fetchTopics } from '../../lib/api';
 import { renderMathHTML } from '../../lib/math';
+import { sparklineGeometry } from '../../lib/sparkline';
 
 const result = await fetchTopics();
+
+const topics = result.ok
+  ? result.data.map((topic) => ({
+      ...topic,
+      spark: sparklineGeometry(topic.history.map((point) => point.size)),
+      memberMax: Math.max(...topic.papers.map((paper) => paper.score), 0),
+    }))
+  : [];
 ---
 
 <Base title="Trends">
@@ -22,7 +33,7 @@ const result = await fetchTopics();
         message={catalogMessage(result.failure, 'topics')}
         action={{ href: '/topics', label: 'Retry' }}
       />
-    ) : result.data.length === 0 ? (
+    ) : topics.length === 0 ? (
       <EmptyState
         icon="lucide:hourglass"
         message="No topics yet."
@@ -30,33 +41,50 @@ const result = await fetchTopics();
       />
     ) : (
       <ul class="topics">
-        {result.data.map((topic) => (
+        {topics.map((topic) => (
           <li class="card topic">
             <div class="topic-head">
-              <h2 class="topic-label">{topic.label}</h2>
-              {topic.trend && (
-                <span
-                  class={`badge trend-${topic.trend}`}
-                  title="Size trend across builds"
+              <h2 class="topic-label">
+                <a href={`/topics/${topic.id}`}>{topic.label}</a>
+              </h2>
+              {topic.spark && (
+                <svg
+                  class="spark"
+                  width="100"
+                  height="28"
+                  viewBox="0 0 100 28"
+                  role="img"
+                  aria-label={`Cluster size across ${topic.history.length} builds`}
                 >
-                  {topic.trend}
-                </span>
+                  <title>
+                    {topic.history.map((point) => point.size).join(', ')} papers across the
+                    last {topic.history.length} builds
+                  </title>
+                  <path d={topic.spark.area} />
+                  <polyline points={topic.spark.line} />
+                  <circle cx={topic.spark.end.x} cy={topic.spark.end.y} r="4" />
+                </svg>
               )}
-              <span class="badge badge-score" title="Breakthrough momentum">
+            </div>
+            <p class="topic-badges">
+              <TrendBadge trend={topic.trend} />
+              <span class="badge" title="Breakthrough momentum, summed over members">
                 {topic.score.toFixed(1)}
               </span>
-            </div>
-            {topic.summary && <p class="topic-summary">{topic.summary}</p>}
-            <p class="topic-meta">
-              {topic.size} paper{topic.size === 1 ? '' : 's'}
+              <span class="badge">
+                {topic.size} paper{topic.size === 1 ? '' : 's'}
+              </span>
             </p>
+            {topic.summary && <p class="topic-summary">{topic.summary}</p>}
             <ul class="papers">
               {topic.papers.map((paper) => (
                 <li>
                   <a href={`/papers/${paper.paper_id}`} set:html={renderMathHTML(paper.title)} />
-                  <span class="badge badge-score" title="Breakthrough momentum">
-                    {paper.score.toFixed(1)}
-                  </span>
+                  <SignalMark
+                    score={paper.score}
+                    max={topic.memberMax}
+                    label="momentum, relative within this topic"
+                  />
                 </li>
               ))}
             </ul>
@@ -74,43 +102,69 @@ const result = await fetchTopics();
     padding: 0;
     display: grid;
     gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(24rem, 1fr));
+  }
+  @media (max-width: 40rem) {
+    .topics {
+      grid-template-columns: 1fr;
+    }
   }
   .topic {
     padding: 1.1rem 1.25rem;
   }
   .topic-head {
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 0.75rem;
   }
   .topic-label {
     margin: 0;
     flex: 1;
-    font-size: 1.1rem;
-    line-height: 1.3;
+    font-size: var(--text-lg);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--track-tight);
+    line-height: var(--leading-snug);
   }
-  /* Variants over the global .badge - the local re-declaration of the badge shape itself
-     used to shadow the shared class. */
-  .topic-head .badge {
+  .topic-label a {
+    color: var(--ink);
+    text-decoration: none;
+    transition: color var(--dur-fast) var(--ease-out);
+  }
+  .topic-label a:hover {
+    color: var(--accent);
+  }
+  /* The size history behind the trend word: line, wash, and the latest build's dot. */
+  .spark {
     flex: none;
   }
-  .trend-rising,
-  .trend-new {
-    background: var(--accent-soft);
-    color: var(--accent-ink);
+  .spark polyline {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
-  .trend-fading {
-    opacity: 0.7;
+  .spark path {
+    fill: var(--accent);
+    opacity: 0.08;
+  }
+  .spark circle {
+    fill: var(--accent);
+    stroke: var(--surface-2);
+    stroke-width: 2;
+  }
+  .topic-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.4rem 0 0;
   }
   .topic-summary {
-    margin: 0.4rem 0 0;
-    color: var(--ink);
-  }
-  .topic-meta {
-    margin: 0.35rem 0 0.6rem;
+    margin: 0.5rem 0 0.6rem;
     color: var(--muted);
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
   }
   .papers {
     list-style: none;
@@ -126,7 +180,12 @@ const result = await fetchTopics();
     gap: 0.75rem;
   }
   .papers a {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--ink);
+    font-size: var(--text-sm);
     text-decoration: none;
     line-height: 1.4;
     transition: color var(--dur-fast) var(--ease-out);
