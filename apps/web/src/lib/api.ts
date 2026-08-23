@@ -454,6 +454,8 @@ export interface DigestSummary {
   title: string;
   period_start: string;
   period_end: string;
+  /* Papers in the issue; 0 on rows stored before the field existed. */
+  item_count: number;
 }
 
 export interface DigestDetail extends DigestSummary {
@@ -482,6 +484,11 @@ export interface TopicPaper {
   score: number;
 }
 
+export interface TopicHistoryPoint {
+  built_at: string;
+  size: number;
+}
+
 export interface TopicDetail {
   id: number;
   label: string;
@@ -489,12 +496,24 @@ export interface TopicDetail {
   score: number;
   size: number;
   trend: string | null;
+  /* Cluster size per build, oldest first — the sparkline behind the trend word. */
+  history: TopicHistoryPoint[];
   papers: TopicPaper[];
 }
 
 export async function fetchTopics(): Promise<CatalogResult<TopicDetail[]>> {
   const result = await readCatalog<{ items: TopicDetail[] }>('/v1/topics');
   return result.ok ? { ok: true, data: result.data.items } : result;
+}
+
+export async function fetchTopic(id: number): Promise<TopicDetail | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/topics/${id}`, { headers: apiHeaders() });
+    if (!response.ok) return null;
+    return (await response.json()) as TopicDetail;
+  } catch {
+    return null;
+  }
 }
 
 // Digest bodies are plain LLM text: escape everything, then turn [scheme:id] citations into
