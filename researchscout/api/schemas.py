@@ -402,6 +402,9 @@ class DigestSummary(BaseModel):
     title: str
     period_start: datetime
     period_end: datetime
+    # How many papers the issue carries, for the index page; 0 on rows stored
+    # before the field existed.
+    item_count: int = 0
 
 
 class DigestDetail(DigestSummary):
@@ -419,6 +422,11 @@ class TopicPaper(BaseModel):
     score: float
 
 
+class TopicHistoryPoint(BaseModel):
+    built_at: datetime
+    size: int
+
+
 class TopicSummary(BaseModel):
     id: int
     label: str
@@ -427,6 +435,8 @@ class TopicSummary(BaseModel):
     size: int
     # new | rising | steady | fading (None before the first continuity-aware build).
     trend: str | None = None
+    # Cluster size per build, oldest first - the sparkline behind the trend word.
+    history: list[TopicHistoryPoint] = []
 
 
 class TopicDetail(TopicSummary):
