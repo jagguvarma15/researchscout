@@ -54,6 +54,30 @@ const total = result.ok ? result.data.total : 0;
 // both is what made this take an evening to work out.
 const failure = result.ok ? null : result.failure;
 
+// Relative bars on the currently sorted numeric column only: sorting is what asks the
+// distribution question, and bars on every column at once are noise. Compute spans twelve
+// orders of magnitude and reads on a log bar, matching its exponent rendering; the others
+// are linear against the page's own maximum.
+const barValue = (model: AiModel): number | null =>
+  sort === 'parameters'
+    ? model.parameters
+    : sort === 'compute'
+      ? model.training_compute_flop
+      : sort === 'downloads'
+        ? model.hf_downloads
+        : null;
+const barMax = Math.max(...(models ?? []).map((model) => barValue(model) ?? 0), 0);
+
+function barWidth(model: AiModel): number | null {
+  const value = barValue(model);
+  if (value === null || value <= 0 || barMax <= 0) return null;
+  if (sort === 'compute') {
+    const top = Math.log10(barMax);
+    return top > 0 ? Math.round((Math.log10(value) / top) * 100) : null;
+  }
+  return Math.round((value / barMax) * 100);
+}
+
 function sortAria(key: string): 'ascending' | 'descending' | 'none' {
   if (sort !== key) return 'none';
   return descending ? 'descending' : 'ascending';
@@ -273,22 +297,36 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
                   <td class="cell-muted cell-clip" title={field(model) || undefined}>
                     {field(model)}
                   </td>
-                  <td class="cell-num" title={model.parameters ? String(model.parameters) : undefined}>
-                    {compact(model.parameters)}
+                  <td
+                    class:list={['cell-num', { barcell: sort === 'parameters' }]}
+                    title={model.parameters ? String(model.parameters) : undefined}
+                  >
+                    <span class="bnum">{compact(model.parameters)}</span>
+                    {sort === 'parameters' && barWidth(model) !== null && (
+                      <span class="dbar" style={`width:${barWidth(model)}%`} />
+                    )}
                   </td>
                   <td
-                    class="cell-num"
+                    class:list={['cell-num', { barcell: sort === 'compute' }]}
                     title={model.training_compute_flop ? `${model.training_compute_flop} FLOP` : undefined}
                   >
-                    {exponent(model.training_compute_flop)}
+                    <span class="bnum">{exponent(model.training_compute_flop)}</span>
+                    {sort === 'compute' && barWidth(model) !== null && (
+                      <span class="dbar" style={`width:${barWidth(model)}%`} />
+                    )}
                   </td>
                   <td>
                     <span class:list={['badge', `w-${weightsLabel(model.open_weights)}`]}>
                       {weightsLabel(model.open_weights)}
                     </span>
                   </td>
-                  <td class="cell-num cell-muted">
-                    {model.hf_downloads === null ? '' : model.hf_downloads.toLocaleString('en-US')}
+                  <td class:list={['cell-num', 'cell-muted', { barcell: sort === 'downloads' }]}>
+                    <span class="bnum">
+                      {model.hf_downloads === null ? '' : model.hf_downloads.toLocaleString('en-US')}
+                    </span>
+                    {sort === 'downloads' && barWidth(model) !== null && (
+                      <span class="dbar" style={`width:${barWidth(model)}%`} />
+                    )}
                   </td>
                   <td>
                     {model.paper_id && (
