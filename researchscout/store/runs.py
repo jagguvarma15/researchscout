@@ -117,6 +117,21 @@ def last_ok_finish(session: Session, task: str) -> datetime | None:
     return session.execute(stmt).scalar_one_or_none()
 
 
+def last_finished(session: Session, task: str) -> SchedulerRunRow | None:
+    """The most recent finished run of ``task`` regardless of outcome, or None.
+
+    The finished filter keeps a caller's own still-open row out — the health task reads
+    this mid-run to decide whether the failure it is looking at is news.
+    """
+    stmt = (
+        select(SchedulerRunRow)
+        .where(SchedulerRunRow.task == task, SchedulerRunRow.finished_at.is_not(None))
+        .order_by(SchedulerRunRow.finished_at.desc(), SchedulerRunRow.id.desc())
+        .limit(1)
+    )
+    return session.execute(stmt).scalar_one_or_none()
+
+
 def recent_finished_by_task(
     session: Session, *, per_task: int = 3
 ) -> dict[str, list[SchedulerRunRow]]:
