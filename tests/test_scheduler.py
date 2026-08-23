@@ -256,6 +256,26 @@ def test_retries_exhaust_onto_the_following_slot() -> None:
     assert task.retries_left == 1
 
 
+def test_a_quota_failure_concedes_the_slot() -> None:
+    """A spent daily cap does not come back in half an hour; retrying only builds a streak."""
+
+    class _Quota(Exception):
+        status_code = 429
+
+    def run() -> None:
+        raise _Quota("Error code: 429 - Rate limit exceeded: free-models-per-day")
+
+    task = Task("x", 60.0, run, at=(time(14, 0), time(17, 0)), zone=NY)
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    # Straight onto the next real slot, with the retry budget untouched for it.
+    assert task.next_wall == datetime(2026, 8, 4, 17, 0, tzinfo=NY)
+    assert task.retries_left == task.max_retries
+
+
 def test_an_interval_task_still_starts_due() -> None:
     task = Task("x", 60.0, lambda: None)
     Scheduler([task], clock=lambda: 1000.0, wall=lambda: datetime(2026, 8, 4, 15, 2, tzinfo=NY))
@@ -501,6 +521,63 @@ def test_recorded_falls_back_to_a_single_write_when_the_open_fails(
 
     scheduler_mod._recorded("fine", lambda: "note")()
     assert entries == [("fine", True, "note")]
+
+
+def _patch_health(
+    monkeypatch: pytest.MonkeyPatch, *, failing: bool, previous_note: str | None
+) -> str:
+    """Stub the health task's collaborators; return the summary its checks produce."""
+    from researchscout.health import HealthCheck, summarize
+
+    detail = "failing repeatedly: topics (429)"
+    checks = [HealthCheck("task_streaks", "fail" if failing else "ok", detail)]
+    previous = None if previous_note is None else SimpleNamespace(note=previous_note)
+    monkeypatch.setattr("researchscout.store.db.session_scope", lambda: nullcontext(None))
+    monkeypatch.setattr("researchscout.health.run_health_checks", lambda session, settings: checks)
+    monkeypatch.setattr("researchscout.store.runs.last_finished", lambda session, task: previous)
+    return summarize(checks)
+
+
+def test_health_raises_on_a_new_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    import researchscout.scheduler as scheduler_mod
+
+    note = _patch_health(monkeypatch, failing=True, previous_note=None)
+    with pytest.raises(RuntimeError, match="task_streaks=fail"):
+        scheduler_mod._health(Settings())
+    assert "topics" in note
+
+
+def test_health_repeats_an_unchanged_failure_quietly(monkeypatch: pytest.MonkeyPatch) -> None:
+    import researchscout.scheduler as scheduler_mod
+
+    note = _patch_health(monkeypatch, failing=True, previous_note=None)
+    _patch_health(monkeypatch, failing=True, previous_note=note)
+    assert scheduler_mod._health(Settings()) == "still failing: " + note
+
+
+def test_health_stays_quiet_behind_its_own_suppressed_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import researchscout.scheduler as scheduler_mod
+
+    note = _patch_health(monkeypatch, failing=True, previous_note=None)
+    _patch_health(monkeypatch, failing=True, previous_note="still failing: " + note)
+    assert scheduler_mod._health(Settings()) == "still failing: " + note
+
+
+def test_health_raises_again_when_the_failure_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    import researchscout.scheduler as scheduler_mod
+
+    _patch_health(monkeypatch, failing=True, previous_note="task_streaks=fail(something else)")
+    with pytest.raises(RuntimeError, match="task_streaks=fail"):
+        scheduler_mod._health(Settings())
+
+
+def test_health_returns_the_plain_summary_when_all_ok(monkeypatch: pytest.MonkeyPatch) -> None:
+    import researchscout.scheduler as scheduler_mod
+
+    note = _patch_health(monkeypatch, failing=False, previous_note=None)
+    assert scheduler_mod._health(Settings()) == note
 
 
 def test_the_heartbeat_ticks_around_tasks() -> None:
