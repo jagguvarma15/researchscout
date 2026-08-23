@@ -38,6 +38,9 @@ interface Props {
   /* compact renders the tighter row regardless of the reader's density preference -
      the reading list defaults to it because a queue wants more items per screen. */
   density?: 'full' | 'compact';
+  /* The list's own top score: retrieval scores are small absolute numbers, so the meter
+     reads relative within the list it sits in, not against an imaginary 1.0. */
+  signalMax?: number;
 }
 
 const {
@@ -47,6 +50,7 @@ const {
   morph = true,
   dismissible = false,
   density = 'full',
+  signalMax = 1,
 } = Astro.props;
 
 // Venue when known, otherwise the arXiv comment ("14 pages, accepted at ...").
@@ -111,7 +115,15 @@ const keywords = (paper.keywords ?? []).slice(0, 3);
     }
   </p>
   <p class="tags">
-    {paper.score !== null && <SignalMark score={paper.score} />}
+    {
+      paper.score !== null && (
+        <SignalMark
+          score={paper.score}
+          max={signalMax}
+          label="momentum, relative within this list"
+        />
+      )
+    }
     {
       badges.primary && (
         <span class="badge badge-primary" title={categoryName(badges.primary)}>
