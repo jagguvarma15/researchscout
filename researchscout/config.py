@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # the service is busy. The model shares this machine with Postgres and the API.
     llm_max_concurrency: int = 2
     llm_queue_timeout_seconds: float = 20.0
+    # Per-request client behavior: how long one completion may take before the client gives
+    # up, and how many times it retries a failed request first. One retry rides out a
+    # transient per-minute limit; retrying a spent daily quota is pure waste, so this stays
+    # low (the openai default is 2, i.e. three requests per 429).
+    llm_timeout_sec: float = 120.0
+    llm_max_retries: int = 1
     # Chat rate limiting (in-process fixed window).
     # Web search fallback (arXiv + Semantic Scholar cards on not-found answers). Default
     # ON deliberately (a documented deviation like the guardrail): user-triggered, zero
