@@ -71,3 +71,25 @@ def test_build_digest_post_checks_citations(monkeypatch: pytest.MonkeyPatch) -> 
 def test_build_digest_empty_window(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(digest_mod, "list_papers", lambda *a, **k: [])
     assert build_digest(None, FakeLLM("unused"), days=7) is None
+
+
+class _DeadLLM(LLM):
+    model = "fake"
+
+    def complete(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+        raise RuntimeError("Error code: 429 - Rate limit exceeded: free-models-per-day")
+
+
+def test_build_digest_survives_a_dead_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    papers = [_paper("arxiv:2401.00001", age_days=1)]
+    monkeypatch.setattr(digest_mod, "list_papers", lambda *a, **k: papers)
+    monkeypatch.setattr(digest_mod, "_latest_citations", lambda *a: 0.0)
+    monkeypatch.setattr(digest_mod, "_breakthrough_boost", lambda *a: 0.0)
+
+    digest = build_digest(None, _DeadLLM(), days=7, k=5)
+
+    assert digest is not None
+    assert digest.llm_ok is False
+    assert digest.body.startswith("The digest model was unavailable")
+    assert "1. [arxiv:2401.00001] Paper arxiv:2401.00001" in digest.body
+    assert digest.cited == ["arxiv:2401.00001"]
