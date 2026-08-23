@@ -26,6 +26,10 @@ const {
   density = 'full',
 } = Astro.props;
 
+// Retrieval scores are small absolute numbers; every meter in this list reads against the
+// list's own strongest paper.
+const signalMax = Math.max(...papers.map((paper) => paper.score ?? 0), 0) || 1;
+
 // The API returns papers newest-first; fold them into one group per publication
 // day so the list reads as a timeline.
 const groups: { date: string; papers: PaperSummary[] }[] = [];
@@ -66,6 +70,7 @@ function formatDayHeading(iso: string): string {
             morph={morph}
             dismissible={dismissible}
             density={density}
+            signalMax={signalMax}
           />
         ))}
       </ul>
