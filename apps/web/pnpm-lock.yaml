@@ -25,6 +25,9 @@ importers:
       '@fontsource-variable/inter':
         specifier: ^5.2.8
         version: 5.2.8
+      '@fontsource-variable/newsreader':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@sentry/browser':
         specifier: ^10.70.0
         version: 10.70.0
@@ -568,6 +571,9 @@ packages:
 
   '@fontsource-variable/inter@5.2.8':
     resolution: {integrity: sha512-kOfP2D+ykbcX/P3IFnokOhVRNoTozo5/JxhAIVYLpea/UBmCQ/YWPBfWIDuBImXX/15KH+eKh4xpEUyS2sQQGQ==}
+
+  '@fontsource-variable/newsreader@5.3.0':
+    resolution: {integrity: sha512-rrzYi43qMpbzwuFtf9OkWH8sxAPVPcQQQEwXpPtwaKYeJ8yVg5aLs5kawmo1f2Q1t1M38TLmEKCkGVDsYwgdFw==}
 
   '@iconify-json/lucide@1.2.116':
     resolution: {integrity: sha512-mbwPmiUXaZyLMSeQOxiTqz2fmZikD9qiGnMBiev47UUNY9uGCEgMg9iUYwaJzCtJTDtAIyK4vokfIpqsVorgSw==}
@@ -3410,6 +3416,8 @@ snapshots:
   '@exodus/bytes@1.15.1': {}
 
   '@fontsource-variable/inter@5.2.8': {}
+
+  '@fontsource-variable/newsreader@5.3.0': {}
 
   '@iconify-json/lucide@1.2.116':
     dependencies:
