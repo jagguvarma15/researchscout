@@ -32,6 +32,7 @@ def test_digests_index(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 200
     items = response.json()["items"]
     assert items[0]["slug"] == "2026-w28"
+    assert items[0]["item_count"] == 1
     assert "body" not in items[0]
 
 
@@ -41,6 +42,7 @@ def test_digest_detail(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["body"].startswith("Big week")
+    assert body["item_count"] == 1
     assert body["items"][0]["paper_id"] == "arxiv:2401.00001"
 
 
