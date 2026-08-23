@@ -41,6 +41,13 @@ try {
   process.exit(1);
 }
 
+// The serif is not an island but the same class of silent failure applies: a dropped
+// import would fall back to Georgia everywhere without failing the build.
+if (!css.includes('Newsreader')) {
+  console.error('verify-styles: Newsreader @font-face missing from the built CSS.');
+  process.exit(1);
+}
+
 const missing = SENTINELS.filter(([, selector]) => !css.includes(selector));
 if (missing.length > 0) {
   console.error(
