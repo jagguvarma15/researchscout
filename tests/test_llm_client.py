@@ -27,3 +27,20 @@ def test_the_client_carries_the_attribution_headers(monkeypatch: pytest.MonkeyPa
     llm = OpenAICompatLLM(base_url="http://localhost:9/v1", model="m", api_key="k")
     assert llm._client.default_headers.get("X-Title") == "ResearchScout"
     assert "HTTP-Referer" in llm._client.default_headers
+
+
+def test_the_client_honors_the_timeout_and_retry_settings(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("LANGSMITH_TRACING", raising=False)
+    monkeypatch.setenv("RS_LLM_TIMEOUT_SEC", "7.5")
+    monkeypatch.setenv("RS_LLM_MAX_RETRIES", "0")
+    llm = OpenAICompatLLM(base_url="http://localhost:9/v1", model="m", api_key="k")
+    assert llm._client.timeout == 7.5
+    assert llm._client.max_retries == 0
+
+
+def test_the_client_retries_once_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The openai default of 2 turns every daily-cap 429 into three spent requests."""
+    monkeypatch.delenv("LANGSMITH_TRACING", raising=False)
+    monkeypatch.delenv("RS_LLM_MAX_RETRIES", raising=False)
+    llm = OpenAICompatLLM(base_url="http://localhost:9/v1", model="m", api_key="k")
+    assert llm._client.max_retries == 1
