@@ -55,13 +55,21 @@ class OpenAICompatLLM(LLM):
         self.base_url = base_url or settings.llm_base_url
         self.model = model or settings.llm_model
         self._api_key = api_key or settings.llm_api_key
+        self._timeout = settings.llm_timeout_sec
+        self._max_retries = settings.llm_max_retries
 
     @cached_property
     def _client(self) -> Any:
         from openai import OpenAI
 
         return _maybe_trace(
-            OpenAI(base_url=self.base_url, api_key=self._api_key, default_headers=_CLIENT_HEADERS)
+            OpenAI(
+                base_url=self.base_url,
+                api_key=self._api_key,
+                default_headers=_CLIENT_HEADERS,
+                timeout=self._timeout,
+                max_retries=self._max_retries,
+            )
         )
 
     def complete(self, system: str, user: str, *, temperature: float = 0.2) -> str:
