@@ -19,6 +19,7 @@
 import { Icon } from 'astro-icon/components';
 
 import SaveButton from './SaveButton.svelte';
+import SignalMark from './SignalMark.astro';
 import { type PaperSummary } from '../lib/api';
 import { renderMathHTML } from '../lib/math';
 import { morphName } from '../lib/morph';
@@ -62,11 +63,6 @@ const badges = { primary, rest: restCats.slice(0, 3), more: Math.max(0, restCats
 // Human-readable keywords when enrichment has run; the category codes are the fallback,
 // so the row carries one chip strip either way, never two.
 const keywords = (paper.keywords ?? []).slice(0, 3);
-
-const signal =
-  paper.score !== null
-    ? { pct: Math.round(Math.min(Math.max(paper.score, 0), 1) * 100), text: paper.score.toFixed(2) }
-    : null;
 ---
 
 <li
@@ -115,17 +111,7 @@ const signal =
     }
   </p>
   <p class="tags">
-    {
-      signal && (
-        <span
-          class="sig"
-          title={`Signal ${signal.text} — momentum from citations and discussion, 0 to 1`}
-        >
-          <span class="meter" aria-hidden="true"><i style={`width:${signal.pct}%`}></i></span>
-          <span class="val">{signal.text}</span>
-        </span>
-      )
-    }
+    {paper.score !== null && <SignalMark score={paper.score} />}
     {
       badges.primary && (
         <span class="badge badge-primary" title={categoryName(badges.primary)}>
@@ -383,9 +369,11 @@ const signal =
     -webkit-line-clamp: 1;
     line-clamp: 1;
   }
-  /* Compact keeps the meter and drops its numeric twin - the shape carries the reading. */
-  :global(html[data-density='compact']) .sig .val,
-  .compact .sig .val {
+  /* Compact keeps the meter and drops its numeric twin - the shape carries the reading.
+     The mark's elements live in SignalMark's scope, so they are reached globally from
+     this component's own .tags container. */
+  :global(html[data-density='compact']) .tags :global(.sig .val),
+  .compact .tags :global(.sig .val) {
     display: none;
   }
   @media (max-width: 40rem) {
