@@ -714,7 +714,7 @@ def topics_build(
     embedder = default_embedder()
     llm = OpenAICompatLLM()
     with session_scope() as session:
-        topics = build_topics(
+        build = build_topics(
             session,
             embedder,
             llm,
@@ -722,9 +722,14 @@ def topics_build(
             threshold=settings.cluster_distance_threshold,
             algo=settings.cluster_algo,
         )
-        replace_topics(session, topics)
-    typer.secho(f"built {len(topics)} topic(s)", fg=typer.colors.GREEN)
-    for topic in topics:
+        replace_topics(session, build.topics)
+    typer.secho(f"built {len(build.topics)} topic(s)", fg=typer.colors.GREEN)
+    if build.fallback_labels:
+        typer.secho(
+            f"labels degraded: {build.llm_labels} llm, {build.fallback_labels} keyword-fallback",
+            fg=typer.colors.YELLOW,
+        )
+    for topic in build.topics:
         typer.echo(f"  {topic.score:7.3f}  {topic.size:>3}  {topic.label}")
 
 
