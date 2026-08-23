@@ -1,12 +1,19 @@
 ---
-import { Icon } from 'astro-icon/components';
 import EmptyState from '../../components/EmptyState.astro';
 import PageIntro from '../../components/PageIntro.astro';
 import Base from '../../layouts/Base.astro';
 import { catalogMessage, fetchDigests, formatDate } from '../../lib/api';
+import { issueNumber } from '../../lib/format';
 import { morphName } from '../../lib/morph';
 
 const result = await fetchDigests();
+
+// Weekly issues carry a serif numeral spine; the daily reports' date slugs have no issue
+// numbering, so their spine is the date itself.
+function spineFor(slug: string, periodEnd: string): string {
+  const issue = issueNumber(slug);
+  return issue === null ? formatDate(periodEnd) : `No. ${issue}`;
+}
 ---
 
 <Base title="Digests">
@@ -31,6 +38,7 @@ const result = await fetchDigests();
         {result.data.map((digest) => (
           <li>
             <a class="entry" href={`/digests/${digest.slug}`}>
+              <span class="spine">{spineFor(digest.slug, digest.period_end)}</span>
               <span class="text">
                 <span class="title" transition:name={morphName('digest', digest.slug)}>
                   {digest.title}
@@ -39,7 +47,11 @@ const result = await fetchDigests();
                   {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
                 </span>
               </span>
-              <Icon class="chevron" name="lucide:chevron-right" aria-hidden="true" />
+              {digest.item_count > 0 && (
+                <span class="count">
+                  {digest.item_count} paper{digest.item_count === 1 ? '' : 's'}
+                </span>
+              )}
             </a>
           </li>
         ))}
@@ -53,27 +65,39 @@ const result = await fetchDigests();
     list-style: none;
     margin: 0;
     padding: 0;
+    max-width: 52rem;
   }
   .list li {
     border-bottom: 1px solid var(--line);
   }
   .entry {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
+    display: grid;
+    grid-template-columns: 5.5rem 1fr auto;
+    align-items: baseline;
+    gap: 0.4rem 1rem;
     padding: 1.1rem 0;
     color: var(--ink);
     text-decoration: none;
   }
+  /* The issue numeral is the archive's spine: serif, quiet, scannable in a column. */
+  .spine {
+    font-family: var(--font-serif);
+    font-size: 1.25rem;
+    font-weight: 450;
+    color: var(--muted);
+    white-space: nowrap;
+  }
   .text {
-    flex: 1;
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
+    min-width: 0;
   }
   .title {
-    font-weight: 600;
-    line-height: 1.4;
+    font-family: var(--font-serif);
+    font-size: var(--text-lg);
+    font-weight: 500;
+    line-height: var(--leading-snug);
     transition: color var(--dur-fast) var(--ease-out);
   }
   .entry:hover .title {
@@ -81,9 +105,22 @@ const result = await fetchDigests();
   }
   .meta {
     color: var(--muted);
-    font-size: 0.85rem;
+    font-size: 0.7rem;
+    font-weight: var(--weight-bold);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
   }
-  .entry :global(.chevron) {
+  .count {
     color: var(--muted);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+  }
+  @media (max-width: 40rem) {
+    .entry {
+      grid-template-columns: 4rem 1fr;
+    }
+    .count {
+      grid-column: 2;
+    }
   }
 </style>
