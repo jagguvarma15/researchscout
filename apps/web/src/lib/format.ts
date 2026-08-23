@@ -27,3 +27,10 @@ export function weightsLabel(open: boolean | null): string {
   if (open === null) return 'unknown';
   return open ? 'open' : 'closed';
 }
+
+/** The ISO week number out of a weekly digest slug ("2026-w16" -> 16); null for the
+ * daily reports' date slugs, which carry no issue numbering. */
+export function issueNumber(slug: string): number | null {
+  const match = /-w(\d+)$/.exec(slug);
+  return match ? Number(match[1]) : null;
+}
