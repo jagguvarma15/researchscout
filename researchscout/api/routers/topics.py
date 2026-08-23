@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from researchscout.api.deps import get_session
-from researchscout.api.schemas import TopicDetail, TopicList, TopicPaper
+from researchscout.api.schemas import TopicDetail, TopicHistoryPoint, TopicList, TopicPaper
 from researchscout.store.models import TopicRow
 from researchscout.store.topics import get_topic, list_topics
 
@@ -23,6 +23,7 @@ def _detail(row: TopicRow) -> TopicDetail:
         score=row.score,
         size=row.size,
         trend=row.trend,
+        history=[TopicHistoryPoint.model_validate(point) for point in row.history or []],
         papers=[TopicPaper.model_validate(paper) for paper in row.papers],
     )
 
