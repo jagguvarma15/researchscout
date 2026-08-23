@@ -21,9 +21,11 @@ const AXE_SOURCE = readFileSync(
   'utf8'
 );
 
-// One page per archetype: the feed, a simple list, both catalogue shapes, the profile
-// column, and the prose page with the live table.
-const PAGES = ['/', '/saved', '/models', '/benchmarks', '/profile', '/about'];
+// One page per archetype: the feed, the simple lists, both catalogue shapes, the trend
+// cards, the issue archive, the profile column, and the prose page with the live table.
+// The detail archetypes (paper article, digest issue, topic page) join at runtime with a
+// live id each - see discoverDetails.
+const PAGES = ['/', '/saved', '/for-you', '/topics', '/digests', '/models', '/benchmarks', '/profile', '/about'];
 const WIDTHS = [
   { name: 'phone', viewport: { width: 390, height: 844 } },
   { name: 'desktop', viewport: { width: 1280, height: 800 } },
@@ -122,12 +124,38 @@ async function auditPage(browser, viewportName, viewport, path) {
   }
 }
 
+// One live id per detail archetype, read through the site's own proxy; with the API down
+// the audit covers the static routes and says what it skipped.
+async function discoverDetails() {
+  const probes = [
+    ['/api/papers?limit=1', (body) => body.items?.[0]?.id, (id) => `/papers/${id}`],
+    ['/api/digests', (body) => body.items?.[0]?.slug, (slug) => `/digests/${slug}`],
+    ['/api/topics', (body) => body.items?.[0]?.id, (id) => `/topics/${id}`],
+  ];
+  const paths = [];
+  for (const [probe, pick, toPath] of probes) {
+    try {
+      const response = await fetch(`${BASE}${probe}`);
+      if (!response.ok) continue;
+      const key = pick(await response.json());
+      if (key !== undefined && key !== null) paths.push(toPath(key));
+    } catch {
+      // API down
+    }
+  }
+  return paths;
+}
+
 let browser;
 try {
   await waitForServer();
+  const details = await discoverDetails();
+  if (details.length < 3) {
+    console.log(`note: only ${details.length}/3 detail pages discovered - is the API up?`);
+  }
   browser = await chromium.launch();
   for (const { name, viewport } of WIDTHS) {
-    for (const path of PAGES) {
+    for (const path of [...PAGES, ...details]) {
       await auditPage(browser, name, viewport, path);
     }
   }
