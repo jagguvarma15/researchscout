@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from researchscout.config import Settings
+from researchscout.llm.errors import is_quota_note
 from researchscout.schedule import parse_times
 from researchscout.store.models import PaperRow, RawItemRow, SignalRow
 from researchscout.store.runs import last_ok_finish, open_runs_older_than, recent_finished_by_task
@@ -59,8 +60,14 @@ def check_pipeline_runs(session: Session, settings: Settings, now: datetime) -> 
 
 
 def check_task_streaks(session: Session) -> HealthCheck:
-    """Tasks whose recent finishes are all failures fail here; a single miss only warns."""
+    """Tasks whose recent finishes are all failures fail here; a single miss only warns.
+
+    A streak made entirely of rate-limit failures also only warns: an exhausted quota is a
+    known operating state on the free tier, not an incident, and the damage it could hide
+    (a stale corpus) has its own failing check in ``check_corpus_freshness``.
+    """
     failing: list[str] = []
+    degraded: list[str] = []
     warning: list[str] = []
     for task, runs in recent_finished_by_task(session, per_task=_STREAK_LEN).items():
         if task in ("scheduler", "health") or not runs:
@@ -68,13 +75,22 @@ def check_task_streaks(session: Session) -> HealthCheck:
             # checks — counting either would latch an old verdict into a new failure.
             continue
         if len(runs) >= _STREAK_LEN and all(not run.ok for run in runs):
-            failing.append(f"{task} ({runs[0].note or 'no note'})")
+            entry = f"{task} ({runs[0].note or 'no note'})"
+            if all(is_quota_note(run.note or "") for run in runs):
+                degraded.append(entry)
+            else:
+                failing.append(entry)
         elif not runs[0].ok:
             warning.append(task)
     if failing:
         return HealthCheck("task_streaks", "fail", "failing repeatedly: " + "; ".join(failing))
+    parts = []
+    if degraded:
+        parts.append("quota-limited: " + "; ".join(degraded))
     if warning:
-        return HealthCheck("task_streaks", "warn", "last run failed: " + ", ".join(warning))
+        parts.append("last run failed: " + ", ".join(warning))
+    if parts:
+        return HealthCheck("task_streaks", "warn", "; ".join(parts))
     return HealthCheck("task_streaks", "ok", "no failing streaks")
 
 
