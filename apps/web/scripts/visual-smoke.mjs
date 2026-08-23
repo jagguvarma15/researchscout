@@ -189,6 +189,62 @@ async function shootPrefs(browser) {
   await context.close();
 }
 
+// One live id per detail archetype, read through the site's own proxy. With the API down
+// the static routes still shoot their empty states and the details are skipped by name.
+async function discoverDetails() {
+  const probes = [
+    ['paper', '/api/papers?limit=1', (body) => body.items?.[0]?.id, (id) => `/papers/${id}`],
+    ['digest', '/api/digests', (body) => body.items?.[0]?.slug, (slug) => `/digests/${slug}`],
+    ['topic', '/api/topics', (body) => body.items?.[0]?.id, (id) => `/topics/${id}`],
+  ];
+  const found = {};
+  for (const [name, probe, pick, toPath] of probes) {
+    try {
+      const response = await fetch(`${BASE}${probe}`);
+      if (!response.ok) continue;
+      const key = pick(await response.json());
+      if (key !== undefined && key !== null) found[name] = toPath(key);
+    } catch {
+      // API down - the caller reports what was skipped.
+    }
+  }
+  return found;
+}
+
+// The redesigned reading and exploration surfaces: list pages at both widths, and the
+// editorial detail pages in light and dark - the serif and the accent-mix marks must hold
+// in every theme.
+async function shootSurfaces(browser, details) {
+  const shots = [
+    ['desktop-topics', '/topics', { width: 1280, height: 900 }, null],
+    ['phone-topics', '/topics', { width: 390, height: 844 }, null],
+    ['desktop-digests', '/digests', { width: 1280, height: 800 }, null],
+    ['phone-digests', '/digests', { width: 390, height: 844 }, null],
+    ['desktop-foryou', '/for-you', { width: 1280, height: 800 }, null],
+    ['desktop-paper', details.paper, { width: 1280, height: 900 }, null],
+    ['desktop-paper-dark', details.paper, { width: 1280, height: 900 }, 'dark'],
+    ['desktop-digest-issue', details.digest, { width: 1280, height: 900 }, null],
+    ['desktop-digest-issue-dark', details.digest, { width: 1280, height: 900 }, 'dark'],
+    ['desktop-topic-detail', details.topic, { width: 1280, height: 900 }, null],
+  ];
+  for (const [name, path, viewport, theme] of shots) {
+    if (!path) {
+      console.log(`skipped ${name}: no live id (API down or empty)`);
+      continue;
+    }
+    const context = await browser.newContext({ viewport });
+    if (theme) {
+      await context.addInitScript((value) => localStorage.setItem('rs-theme', value), theme);
+    }
+    const page = await context.newPage();
+    await page.goto(`${BASE}${path}`, { waitUntil: 'load' });
+    await page.waitForTimeout(900);
+    await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: false });
+    await context.close();
+    console.log(`captured ${name}`);
+  }
+}
+
 mkdirSync(OUT, { recursive: true });
 const server = startServer();
 try {
@@ -200,6 +256,7 @@ try {
   }
   await shootPrefs(browser);
   console.log('captured desktop-prefs and desktop-profile (dark, ocean, large, compact)');
+  await shootSurfaces(browser, await discoverDetails());
   await browser.close();
 } finally {
   server.kill();
