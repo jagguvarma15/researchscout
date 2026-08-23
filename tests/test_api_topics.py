@@ -19,9 +19,7 @@ class FakeTopicRow:
         {"built_at": "2026-08-16T00:00:00+00:00", "size": 9},
         {"built_at": "2026-08-23T00:00:00+00:00", "size": 14},
     ]
-    papers: list[dict[str, Any]] = [
-        {"paper_id": "arxiv:2608.11402", "title": "T", "score": 0.84}
-    ]
+    papers: list[dict[str, Any]] = [{"paper_id": "arxiv:2608.11402", "title": "T", "score": 0.84}]
 
 
 def _client() -> TestClient:
