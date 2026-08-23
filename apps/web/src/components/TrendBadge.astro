@@ -48,12 +48,11 @@ const arrow =
     background: var(--accent-soft);
     color: var(--accent-ink);
   }
+  /* Steady and fading share the quiet register; the down glyph carries the difference.
+     No opacity dim - muted text at reduced opacity fails the contrast floor. */
   .trend-steady,
   .trend-fading {
     border: 1px solid var(--line);
     color: var(--muted);
-  }
-  .trend-fading {
-    opacity: 0.7;
   }
 </style>
