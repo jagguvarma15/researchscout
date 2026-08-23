@@ -51,7 +51,12 @@ function formatDayHeading(iso: string): string {
 {
   groups.map((group) => (
     <section class:list={['day', { compact: density === 'compact' }]}>
-      <h2 class="day-heading">{formatDayHeading(group.date)}</h2>
+      <h2 class="day-heading">
+        {formatDayHeading(group.date)}
+        <span class="day-count">
+          {' · '}{group.papers.length} paper{group.papers.length === 1 ? '' : 's'}
+        </span>
+      </h2>
       <ul class="feed">
         {group.papers.map((paper) => (
           <PaperRow
@@ -135,8 +140,13 @@ function formatDayHeading(iso: string): string {
     border-bottom: 1px solid var(--line);
     color: var(--muted);
     font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--track-caps-wide);
+  }
+  /* The count informs without competing: same size, plain weight. */
+  .day-count {
+    font-weight: 400;
+    letter-spacing: var(--track-caps);
   }
   .feed {
     list-style: none;
