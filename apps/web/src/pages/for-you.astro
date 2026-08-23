@@ -6,6 +6,11 @@ import Base from '../layouts/Base.astro';
 import { catalogMessage, fetchForYou } from '../lib/api';
 
 const result = await fetchForYou(Astro.locals.accessToken);
+
+// Meters read relative within this list; the personalization scores are not on a 0-1 scale.
+const signalMax = result.ok
+  ? Math.max(...result.data.map((paper) => paper.score ?? 0), 0) || 1
+  : 1;
 ---
 
 <Base title="For you">
@@ -29,7 +34,7 @@ const result = await fetchForYou(Astro.locals.accessToken);
     ) : (
       <ul class="feed">
         {result.data.map((paper) => (
-          <PaperRow paper={paper}>
+          <PaperRow paper={paper} signalMax={signalMax}>
             <Fragment slot="extra">
               {paper.reason && <span class="pill reason">{paper.reason}</span>}
             </Fragment>
