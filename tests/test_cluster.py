@@ -146,12 +146,133 @@ def test_build_topics_excludes_the_outlier_pool(monkeypatch: pytest.MonkeyPatch)
         days=30,
         threshold=0.5,
         algo="hdbscan",
-    )
+    ).topics
     assert len(topics) == 1
     assert topics[0].size == 2
     assert {member.paper_id for member in topics[0].members} == {"arxiv:1", "arxiv:2"}
     norm = sum(value * value for value in topics[0].centroid) ** 0.5
     assert norm == pytest.approx(1.0)
+
+
+class _QuotaError(Exception):
+    status_code = 429
+
+
+class _CountingLLM(LLM):
+    """Counts completions; a script of replies/exceptions drives failure scenarios."""
+
+    model = "fake"
+
+    def __init__(self, script: list[str | Exception] | None = None) -> None:
+        self.calls = 0
+        self._script = script
+
+    def complete(self, system: str, user: str, *, temperature: float = 0.2) -> str:
+        self.calls += 1
+        if not self._script:
+            return "Label\nSummary."
+        step = self._script.pop(0)
+        if isinstance(step, Exception):
+            raise step
+        return step
+
+
+def _patch_three_clusters(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Three two-paper clusters whose summed scores rank them 1, 2, 0."""
+    rows = [
+        ("arxiv:1", "alpha one", [1.0, 0.0]),
+        ("arxiv:2", "alpha two", [0.99, 0.01]),
+        ("arxiv:3", "beta one", [0.0, 1.0]),
+        ("arxiv:4", "beta two", [0.01, 0.99]),
+        ("arxiv:5", "gamma one", [0.5, 0.5]),
+        ("arxiv:6", "gamma two", [0.51, 0.49]),
+    ]
+    scores = {
+        "arxiv:1": 1.0,
+        "arxiv:2": 1.0,
+        "arxiv:3": 5.0,
+        "arxiv:4": 5.0,
+        "arxiv:5": 3.0,
+        "arxiv:6": 3.0,
+    }
+    keywords = {
+        0: ["alpha", "one", "two", "extra"],
+        1: ["beta", "one", "two"],
+        2: ["gamma", "one"],
+    }
+    monkeypatch.setattr(cluster_mod, "window_vectors", lambda *a, **k: rows)
+    monkeypatch.setattr(
+        cluster_mod, "cluster_labels", lambda v, *, threshold, algo: [0, 0, 1, 1, 2, 2]
+    )
+    monkeypatch.setattr(
+        cluster_mod, "breakthrough", lambda s, pid: SimpleNamespace(total=scores[pid])
+    )
+    monkeypatch.setattr(cluster_mod, "cluster_keywords", lambda docs, **k: keywords)
+
+
+def _build(llm: LLM, *, max_topics: int = 12) -> cluster_mod.TopicBuild:
+    return build_topics(
+        None,  # type: ignore[arg-type]
+        SimpleNamespace(model_id="m"),  # type: ignore[arg-type]
+        llm,
+        days=30,
+        threshold=0.5,
+        max_topics=max_topics,
+    )
+
+
+def test_build_topics_labels_only_the_ranked_survivors(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_three_clusters(monkeypatch)
+    llm = _CountingLLM()
+    build = _build(llm, max_topics=2)
+    assert llm.calls == 2
+    assert build.llm_labels == 2
+    assert build.fallback_labels == 0
+    assert [topic.score for topic in build.topics] == [10.0, 6.0]
+
+
+def test_a_label_failure_falls_back_to_keywords_without_latching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_three_clusters(monkeypatch)
+    llm = _CountingLLM([RuntimeError("boom"), RuntimeError("boom"), RuntimeError("boom")])
+    build = _build(llm)
+    assert llm.calls == 3  # a non-quota failure keeps trying the next cluster
+    assert build.llm_labels == 0
+    assert build.fallback_labels == 3
+    labels = [topic.label for topic in build.topics]
+    assert labels == ["beta, one, two", "gamma, one", "alpha, one, two"]
+    assert all(topic.summary is None for topic in build.topics)
+
+
+def test_the_first_quota_error_stops_all_later_label_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_three_clusters(monkeypatch)
+    llm = _CountingLLM([_QuotaError("Error code: 429")])
+    build = _build(llm)
+    assert llm.calls == 1
+    assert build.llm_labels == 0
+    assert build.fallback_labels == 3
+
+
+def test_degradation_counts_split_llm_and_fallback_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_three_clusters(monkeypatch)
+    llm = _CountingLLM(["Label One\nSummary.", _QuotaError("Error code: 429")])
+    build = _build(llm)
+    assert llm.calls == 2
+    assert build.llm_labels == 1
+    assert build.fallback_labels == 2
+    assert build.topics[0].label == "Label One"
+
+
+def test_missing_keywords_fall_back_to_the_placeholder(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_three_clusters(monkeypatch)
+    monkeypatch.setattr(cluster_mod, "cluster_keywords", lambda docs, **k: {})
+    build = _build(_CountingLLM([_QuotaError("Error code: 429")]))
+    assert [topic.label for topic in build.topics] == ["Untitled topic"] * 3
 
 
 def test_unit_centroid_is_normalized() -> None:
