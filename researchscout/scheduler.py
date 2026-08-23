@@ -42,6 +42,7 @@ from zoneinfo import ZoneInfo
 
 from researchscout import observe
 from researchscout.config import Settings
+from researchscout.llm.errors import is_quota_status
 from researchscout.schedule import describe, next_run, parse_times
 
 if TYPE_CHECKING:
@@ -162,11 +163,13 @@ class Scheduler:
             # The loop swallows the failure by design, so this is the one place a task
             # error can reach the error reporter (a no-op when reporting is off).
             observe.capture_exception(exc)
-            if task.at and task.retries_left > 0:
+            if task.at and task.retries_left > 0 and not is_quota_status(exc):
                 # Re-arm within the day rather than concede the slot: arXiv being down at
                 # half past midnight should cost half an hour, not twenty-four. Capped at
                 # the next real slot so a retry can only ever move work earlier, and the
-                # budget resets whenever a run succeeds or the slot rolls over.
+                # budget resets whenever a run succeeds or the slot rolls over. A bare 429
+                # concedes instead: a spent daily quota does not come back in half an hour,
+                # and retrying it only stacks failed rows into a streak.
                 task.retries_left -= 1
                 wall = self._wall()
                 slot = next_run(task.at, wall, task.zone)
@@ -500,7 +503,10 @@ def _digest(settings: Settings) -> str:
     with session_scope() as session:
         upsert_digest(session, result)
     logger.info("digest %s: %d papers, %d cited", result.slug, len(result.items), len(result.cited))
-    return f"{result.slug}: {len(result.items)} papers, {len(result.cited)} cited"
+    note = f"{result.slug}: {len(result.items)} papers, {len(result.cited)} cited"
+    if not result.llm_ok:
+        note += "; prose fallback (llm unavailable)"
+    return note
 
 
 def _topics(settings: Settings) -> str:
@@ -510,7 +516,7 @@ def _topics(settings: Settings) -> str:
     from researchscout.store.topics import replace_topics
 
     with session_scope() as session:
-        topics = build_topics(
+        build = build_topics(
             session,
             _embedder(),
             OpenAICompatLLM(),
@@ -518,9 +524,12 @@ def _topics(settings: Settings) -> str:
             threshold=settings.cluster_distance_threshold,
             algo=settings.cluster_algo,
         )
-        replace_topics(session, topics)
-    logger.info("built %d topic(s)", len(topics))
-    return f"{len(topics)} topic(s)"
+        replace_topics(session, build.topics)
+    note = f"{len(build.topics)} topic(s)"
+    if build.fallback_labels:
+        note += f"; labels: {build.llm_labels} llm, {build.fallback_labels} keyword-fallback"
+    logger.info("built %s", note)
+    return note
 
 
 def _report(settings: Settings) -> str:
@@ -580,17 +589,39 @@ def _catalog(settings: Settings) -> str:
     return note
 
 
+# A repeated health failure is suppressed by note comparison. Both sides are cut below the
+# ledger's 400-character cap, minus room for the prefix, so truncation alone can never make
+# an unchanged failure read as new.
+_STILL_FAILING = "still failing: "
+_NOTE_COMPARE_LEN = 380
+
+
+def _same_failure(previous: str, note: str) -> bool:
+    stripped = previous.removeprefix(_STILL_FAILING)
+    return stripped[:_NOTE_COMPARE_LEN] == note[:_NOTE_COMPARE_LEN]
+
+
 def _health(settings: Settings) -> str:
-    """Self-check the pipeline and corpus; fail loudly on any fail."""
+    """Self-check the pipeline and corpus; fail loudly on any NEW failure.
+
+    The raise is what reaches the error reporter, and one event per state change is signal
+    where one every thirty minutes is noise: an unchanged failing summary repeats quietly
+    in the ledger instead, and any changed summary raises again.
+    """
     from researchscout.health import overall_ok, run_health_checks, summarize
     from researchscout.store.db import session_scope
+    from researchscout.store.runs import last_finished
 
     with session_scope() as session:
         checks = run_health_checks(session, settings)
+        previous = last_finished(session, "health")
+        previous_note = previous.note if previous is not None else None
     note = summarize(checks)
-    if not overall_ok(checks):
-        raise RuntimeError(note)
-    return note
+    if overall_ok(checks):
+        return note
+    if previous_note is not None and _same_failure(previous_note, note):
+        return _STILL_FAILING + note
+    raise RuntimeError(note)
 
 
 def _record_safely(name: str, started: datetime, *, ok: bool, note: str = "") -> None:
