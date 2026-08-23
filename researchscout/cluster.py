@@ -8,14 +8,18 @@ now" — the clustering the product has always promised but never had.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 from sqlalchemy.orm import Session
 
 from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
+from researchscout.llm.errors import is_quota_error
 from researchscout.score import breakthrough
 from researchscout.store.topics import window_vectors
+
+logger = logging.getLogger(__name__)
 
 _LABEL_SYSTEM = (
     "You label clusters of AI/ML research papers. Given discriminative keywords and "
@@ -43,6 +47,15 @@ class Topic:
     members: list[Member]
     # Unit-mean member embedding: how the store matches a rebuilt topic to its previous self.
     centroid: list[float] = field(default_factory=list)
+
+
+@dataclass
+class TopicBuild:
+    """A build's topics plus how their labels were made — the ledger note's raw material."""
+
+    topics: list[Topic]
+    llm_labels: int = 0
+    fallback_labels: int = 0
 
 
 def cluster_labels(
@@ -138,6 +151,13 @@ def representative_order(vectors: list[list[float]]) -> list[int]:
     return [int(i) for i in np.argsort(similarity)[::-1]]
 
 
+def _keyword_label(keywords: list[str] | None) -> str:
+    """Deterministic label from the cluster's own c-TF-IDF terms (top three, comma-joined)."""
+    if not keywords:
+        return "Untitled topic"
+    return ", ".join(keywords[:3])
+
+
 def label_topic(
     llm: LLM, titles: list[str], keywords: list[str] | None = None
 ) -> tuple[str, str | None]:
@@ -166,17 +186,22 @@ def build_topics(
     max_topics: int = 12,
     label_titles: int = 4,
     algo: str = "agglomerative",
-) -> list[Topic]:
+) -> TopicBuild:
     """Cluster the window's embedded papers, score and label each cluster, momentum-first.
 
     Labels come from c-TF-IDF keywords plus the ``label_titles`` most representative
     (nearest-centroid) member titles, so the prompt stays small and on-center regardless of
     cluster size. Under hdbscan the ``-1`` outlier pool is excluded — those papers have no
     cohort, and one giant pseudo-topic of misfits would be worse than none.
+
+    Clusters are ranked before any labeling, so at most ``max_topics`` prompts go to the
+    model per build; a label failure falls back to the cluster's own keywords, and the first
+    quota error stops asking for the rest of the build — a spent daily cap answers every
+    later call the same way.
     """
     rows = window_vectors(session, days=days, model_id=embedder.model_id)
     if not rows:
-        return []
+        return TopicBuild([])
 
     labels = cluster_labels([vector for _, _, vector in rows], threshold=threshold, algo=algo)
     groups: dict[int, list[tuple[str, str, list[float]]]] = {}
@@ -190,16 +215,38 @@ def build_topics(
         {cluster: [title for _, title, _ in members] for cluster, members in eligible.items()}
     )
 
-    topics: list[Topic] = []
+    candidates: list[tuple[int, list[tuple[str, str, list[float]]], list[Member]]] = []
     for cluster, members in eligible.items():
-        typical = representative_order([vector for _, _, vector in members])
-        typical_titles = [members[i][1] for i in typical[:label_titles]]
         scored = sorted(
             (Member(pid, title, breakthrough(session, pid).total) for pid, title, _ in members),
             key=lambda member: member.score,
             reverse=True,
         )
-        label, summary = label_topic(llm, typical_titles, keywords.get(cluster))
+        candidates.append((cluster, members, scored))
+    candidates.sort(key=lambda entry: sum(member.score for member in entry[2]), reverse=True)
+    del candidates[max_topics:]
+
+    topics: list[Topic] = []
+    llm_labels = fallback_labels = 0
+    llm_available = True
+    for cluster, members, scored in candidates:
+        typical = representative_order([vector for _, _, vector in members])
+        typical_titles = [members[i][1] for i in typical[:label_titles]]
+        words = keywords.get(cluster)
+        summary: str | None = None
+        if llm_available:
+            try:
+                label, summary = label_topic(llm, typical_titles, words)
+                llm_labels += 1
+            except Exception as exc:  # noqa: BLE001 - the keyword label is the safe floor
+                logger.warning("topic label failed; keyword fallback", exc_info=True)
+                if is_quota_error(exc):
+                    llm_available = False
+                label = _keyword_label(words)
+                fallback_labels += 1
+        else:
+            label = _keyword_label(words)
+            fallback_labels += 1
         topics.append(
             Topic(
                 label=label,
@@ -211,5 +258,4 @@ def build_topics(
             )
         )
 
-    topics.sort(key=lambda topic: topic.score, reverse=True)
-    return topics[:max_topics]
+    return TopicBuild(topics, llm_labels, fallback_labels)
