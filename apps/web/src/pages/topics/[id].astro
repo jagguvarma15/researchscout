@@ -1,0 +1,196 @@
+---
+// The topic page: the endpoint has existed since the topics API landed, with no page
+// consuming it. The payload carries id, title, and score per member, so members render
+// as a ranked list in the digest register - full feed rows would need the endpoint to
+// serve complete paper summaries.
+import { Icon } from 'astro-icon/components';
+import EmptyState from '../../components/EmptyState.astro';
+import PageIntro from '../../components/PageIntro.astro';
+import SignalMark from '../../components/SignalMark.astro';
+import TrendBadge from '../../components/TrendBadge.astro';
+import Base from '../../layouts/Base.astro';
+import { fetchTopic, formatDate } from '../../lib/api';
+import { renderMathHTML } from '../../lib/math';
+import { sparklineGeometry } from '../../lib/sparkline';
+
+const rawId = Astro.params.id ?? '';
+const topicId = /^\d+$/.test(rawId) ? Number(rawId) : null;
+const topic = topicId === null ? null : await fetchTopic(topicId);
+if (topic === null) {
+  Astro.response.status = 404;
+}
+
+const spark = topic ? sparklineGeometry(topic.history.map((point) => point.size), 640, 120, 8) : null;
+const firstBuilt = topic?.history[0]?.built_at ?? null;
+const lastBuilt = topic?.history[topic.history.length - 1]?.built_at ?? null;
+const memberMax = topic ? Math.max(...topic.papers.map((paper) => paper.score), 0) : 0;
+---
+
+<Base title={topic?.label ?? 'Not found'}>
+  {
+    topic === null ? (
+      <Fragment>
+        <PageIntro title="Topic not found" />
+        <EmptyState
+          icon="lucide:file-question"
+          message={`No topic stored under ${rawId}.`}
+          action={{ href: '/topics', label: 'Back to the trends' }}
+        />
+      </Fragment>
+    ) : (
+      <article>
+        <h1 class="t-label">{topic.label}</h1>
+        <p class="t-badges">
+          <TrendBadge trend={topic.trend} />
+          <span class="badge" title="Breakthrough momentum, summed over members">
+            {topic.score.toFixed(1)}
+          </span>
+          <span class="badge">
+            {topic.size} paper{topic.size === 1 ? '' : 's'}
+          </span>
+        </p>
+        {spark && (
+          <figure class="history">
+            <svg
+              class="chart"
+              width="640"
+              height="120"
+              viewBox="0 0 640 120"
+              role="img"
+              aria-label={`Cluster size across ${topic.history.length} builds`}
+            >
+              <title>
+                {topic.history.map((point) => point.size).join(', ')} papers across the last
+                {' '}{topic.history.length} builds
+              </title>
+              <line x1="8" y1="112" x2="632" y2="112" />
+              <path d={spark.area} />
+              <polyline points={spark.line} />
+              <circle cx={spark.end.x} cy={spark.end.y} r="4" />
+            </svg>
+            {firstBuilt && lastBuilt && (
+              <figcaption class="chart-caption">
+                <span>{formatDate(firstBuilt)}</span>
+                <span>{formatDate(lastBuilt)}</span>
+              </figcaption>
+            )}
+          </figure>
+        )}
+        {topic.summary && <p class="t-summary">{topic.summary}</p>}
+        <h2 class="members-title">Members, momentum first</h2>
+        <ol class="members">
+          {topic.papers.map((paper) => (
+            <li>
+              <a href={`/papers/${paper.paper_id}`} set:html={renderMathHTML(paper.title)} />
+              <SignalMark
+                score={paper.score}
+                max={memberMax}
+                label="momentum, relative within this topic"
+              />
+            </li>
+          ))}
+        </ol>
+        <p class="back">
+          <a class="btn btn-ghost" href="/topics">
+            <Icon name="lucide:chevron-left" aria-hidden="true" />
+            Back to the trends
+          </a>
+        </p>
+      </article>
+    )
+  }
+</Base>
+
+<style>
+  .t-label {
+    margin: 0;
+    font-size: var(--text-xl);
+    letter-spacing: var(--track-tight);
+    line-height: var(--leading-tight);
+  }
+  .t-badges {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.6rem 0 0;
+  }
+  .history {
+    margin: var(--space-5) 0 0;
+    max-width: 40rem;
+  }
+  .chart {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+  .chart line {
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+  .chart polyline {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .chart path {
+    fill: var(--accent);
+    opacity: 0.08;
+  }
+  .chart circle {
+    fill: var(--accent);
+    stroke: var(--surface);
+    stroke-width: 2;
+  }
+  .chart-caption {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    margin-top: 0.3rem;
+  }
+  .t-summary {
+    margin: var(--space-4) 0 0;
+    max-width: 60ch;
+  }
+  .members-title {
+    margin: var(--space-6) 0 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--track-caps-wide);
+    text-transform: uppercase;
+  }
+  .members {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .members li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.75rem;
+    padding: 0.8rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .members a {
+    flex: 1;
+    min-width: 12rem;
+    font-weight: var(--weight-medium);
+    font-size: 0.95rem;
+    line-height: 1.4;
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .members a:hover {
+    color: var(--accent);
+  }
+  .back {
+    margin: var(--space-5) 0 0;
+  }
+</style>
