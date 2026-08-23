@@ -58,6 +58,15 @@ function truncate(text: string, max = 60): string {
 const primary = paper.primary_category;
 const restCats = paper.categories.filter((cat) => cat !== primary);
 const badges = { primary, rest: restCats.slice(0, 3), more: Math.max(0, restCats.length - 3) };
+
+// Human-readable keywords when enrichment has run; the category codes are the fallback,
+// so the row carries one chip strip either way, never two.
+const keywords = (paper.keywords ?? []).slice(0, 3);
+
+const signal =
+  paper.score !== null
+    ? { pct: Math.round(Math.min(Math.max(paper.score, 0), 1) * 100), text: paper.score.toFixed(2) }
+    : null;
 ---
 
 <li
@@ -98,7 +107,8 @@ const badges = { primary, rest: restCats.slice(0, 3), more: Math.max(0, restCats
     }
     {
       paper.citation_count > 0 && (
-        <span class="badge badge-cite">
+        <span class="cites">
+          {' · '}
           {paper.citation_count} citation{paper.citation_count === 1 ? '' : 's'}
         </span>
       )
@@ -106,21 +116,33 @@ const badges = { primary, rest: restCats.slice(0, 3), more: Math.max(0, restCats
   </p>
   <p class="tags">
     {
+      signal && (
+        <span
+          class="sig"
+          title={`Signal ${signal.text} — momentum from citations and discussion, 0 to 1`}
+        >
+          <span class="meter" aria-hidden="true"><i style={`width:${signal.pct}%`}></i></span>
+          <span class="val">{signal.text}</span>
+        </span>
+      )
+    }
+    {
       badges.primary && (
         <span class="badge badge-primary" title={categoryName(badges.primary)}>
           {badges.primary}
         </span>
       )
     }
+    {keywords.map((word) => <span class="kw">{word}</span>)}
     {
-      badges.rest.map((cat) => (
-        <span class="badge" title={categoryName(cat)}>
-          {cat}
-        </span>
-      ))
+      keywords.length === 0 &&
+        badges.rest.map((cat) => (
+          <span class="badge" title={categoryName(cat)}>
+            {cat}
+          </span>
+        ))
     }
-    {badges.more > 0 && <span class="badge">+{badges.more}</span>}
-    {paper.score !== null && <span class="badge badge-score">{paper.score.toFixed(3)}</span>}
+    {keywords.length === 0 && badges.more > 0 && <span class="badge">+{badges.more}</span>}
     <slot name="extra" />
     {
       paper.pdf_url && (
@@ -225,11 +247,14 @@ const badges = { primary, rest: restCats.slice(0, 3), more: Math.max(0, restCats
     align-items: flex-start;
     gap: 0.5rem;
   }
+  /* The title wins the row by contrast: a step up and tighter, while everything under it
+     drops to the caption size - hierarchy from difference, not from size alone. */
   .title {
     flex: 1;
-    font-weight: 600;
-    font-size: 1.05rem;
-    line-height: 1.4;
+    font-weight: var(--weight-semibold);
+    font-size: 1.08rem;
+    letter-spacing: var(--track-tight);
+    line-height: var(--leading-snug);
     color: var(--ink);
     text-decoration: none;
     transition: color var(--dur-fast) var(--ease-out);
@@ -245,18 +270,12 @@ const badges = { primary, rest: restCats.slice(0, 3), more: Math.max(0, restCats
   }
   .meta {
     color: var(--muted);
-    font-size: 0.85rem;
+    font-size: var(--text-xs);
     margin: 0.4rem 0 0;
   }
-  .note {
+  .note,
+  .cites {
     color: var(--muted);
-  }
-  .meta .badge {
-    margin-left: 0.5rem;
-    vertical-align: 0.1em;
-  }
-  .badge-cite {
-    background: var(--surface-2);
   }
   .tags {
     display: flex;
@@ -268,6 +287,46 @@ const badges = { primary, rest: restCats.slice(0, 3), more: Math.max(0, restCats
   .badge-primary {
     background: var(--accent-soft);
     color: var(--accent-ink);
+  }
+  /* Extracted keywords read as subject matter, not classification codes: chip shape,
+     ink text, no border. */
+  .kw {
+    display: inline-block;
+    padding: 0.12rem 0.6rem;
+    border-radius: var(--radius-full);
+    background: var(--surface-2);
+    color: var(--ink);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+    white-space: nowrap;
+  }
+  /* The signal mark: a small meter with the value beside it. The track is the accent at
+     low mix over the surface - same hue as the fill, so the pair reads as one instrument
+     in every theme and accent family. */
+  .sig {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    white-space: nowrap;
+  }
+  .meter {
+    position: relative;
+    width: 36px;
+    height: 4px;
+    overflow: hidden;
+    border-radius: var(--radius-full);
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  }
+  .meter i {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: inherit;
+    background: var(--accent);
+  }
+  .sig .val {
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
   }
   /* Pushed to the far end of the tag row, away from the category badges, with the two
      actions spaced enough not to read as one control. */
@@ -349,6 +408,11 @@ const badges = { primary, rest: restCats.slice(0, 3), more: Math.max(0, restCats
   .compact .abstract {
     -webkit-line-clamp: 1;
     line-clamp: 1;
+  }
+  /* Compact keeps the meter and drops its numeric twin - the shape carries the reading. */
+  :global(html[data-density='compact']) .sig .val,
+  .compact .sig .val {
+    display: none;
   }
   @media (max-width: 40rem) {
     /* The quick link would otherwise be pushed onto a line of its own by the badges. */
