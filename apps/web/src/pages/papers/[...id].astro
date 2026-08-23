@@ -5,6 +5,7 @@ import EmptyState from '../../components/EmptyState.astro';
 import PageIntro from '../../components/PageIntro.astro';
 import PdfReader from '../../components/PdfReader.svelte';
 import SaveButton from '../../components/SaveButton.svelte';
+import SignalMark from '../../components/SignalMark.astro';
 import Telemetry from '../../components/Telemetry.svelte';
 import Base from '../../layouts/Base.astro';
 import {
@@ -92,13 +93,23 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
           <h1 transition:name={morphName('paper-title', paper.id)} set:html={renderMathHTML(paper.title)} />
           <SaveButton client:load paperId={paper.id} {saved} />
         </div>
-        <p class="meta">
-          {formatDate(paper.published_at)}
-          {paper.venue && ` · ${paper.venue}`}
-          {paper.citation_count > 0 &&
-            ` · ${paper.citation_count} citation${paper.citation_count === 1 ? '' : 's'}`}
-          {' · '}
-          <code>{paper.id}</code>
+        <div class="meta-band">
+          <span class="pair"><b>Published</b>{formatDate(paper.published_at)}</span>
+          {paper.venue && (
+            <span class="pair">
+              <b>Venue</b>
+              {paper.venue}
+            </span>
+          )}
+          {paper.citation_count > 0 && (
+            <span class="pair">
+              <b>Citations</b>
+              {paper.citation_count.toLocaleString('en-US')}
+            </span>
+          )}
+          <span class="pair"><b>ID</b><code>{paper.id}</code></span>
+        </div>
+        <p class="tags cats">
           {orderedCategories.map((cat, index) => (
             <span
               class={index === 0 && paper.primary_category ? 'badge badge-primary' : 'badge'}
@@ -108,26 +119,13 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
             </span>
           ))}
         </p>
-        <p class="authors">
-          {paper.authors
-            .map((author) =>
-              author.affiliation ? `${author.name} (${author.affiliation})` : author.name,
-            )
-            .join(', ')}
-        </p>
         {paper.comment && <p class="comment">{paper.comment}</p>}
-        <p class="abstract" set:html={renderMathHTML(paper.abstract)} />
-        {
-          paper.keywords && paper.keywords.length > 0 && (
-            <p class="tags">
-              {paper.keywords.map((keyword) => (
-                <a class="badge" href={`/?q=${encodeURIComponent(keyword)}`}>
-                  {keyword}
-                </a>
-              ))}
-            </p>
-          )
-        }
+        {paper.score !== null && (
+          <div class="sig-block">
+            <SignalMark score={paper.score} />
+            <span class="sig-legend">Signal — momentum from citations and discussion, 0 to 1</span>
+          </div>
+        )}
         <p class="links">
           {paper.pdf_url && (
             <button class="btn btn-primary" type="button" data-open-reader>
@@ -155,6 +153,30 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
         <div class="cite-row">
           <CiteActions client:load bibtex={bibtex} url={Astro.url.href} />
         </div>
+        <h2 class="a-label">Abstract</h2>
+        <p class="abstract" set:html={renderMathHTML(paper.abstract)} />
+        <h2 class="a-label">Authors</h2>
+        <p class="authors">
+          {paper.authors.map((author, index) => (
+            <Fragment>
+              {index > 0 && ', '}
+              <b>{author.name}</b>
+              {author.affiliation && <span class="affil"> ({author.affiliation})</span>}
+            </Fragment>
+          ))}
+        </p>
+        {paper.keywords && paper.keywords.length > 0 && (
+          <Fragment>
+            <h2 class="a-label">Keywords</h2>
+            <p class="tags">
+              {paper.keywords.map((keyword) => (
+                <a class="badge" href={`/?q=${encodeURIComponent(keyword)}`}>
+                  {keyword}
+                </a>
+              ))}
+            </p>
+          </Fragment>
+        )}
         {paper.pdf_url && (
           <PdfReader
             client:load
@@ -201,9 +223,7 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
                     href={`/papers/${hit.id}`}
                     set:html={renderMathHTML(hit.title)}
                   />
-                  {hit.score !== null && (
-                    <span class="badge badge-score">{hit.score.toFixed(3)}</span>
-                  )}
+                  {hit.score !== null && <SignalMark score={hit.score} />}
                 </li>
               ))}
             </ul>
@@ -220,48 +240,97 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
     align-items: flex-start;
     gap: 0.5rem;
   }
+  /* The reading surface: serif display title, editorial abstract. The title keeps its
+     morph name - a font change does not affect the view transition. */
   h1 {
     flex: 1;
-    font-size: var(--text-xl);
-    line-height: 1.3;
-    letter-spacing: -0.01em;
+    font-family: var(--font-serif);
+    font-size: var(--text-2xl);
+    font-weight: 500;
+    line-height: var(--leading-tight);
+    letter-spacing: var(--track-tight);
     margin: 0;
+    text-wrap: balance;
   }
-  .meta {
+  /* Labeled pairs instead of a run-on dot line: each fact announces itself. */
+  .meta-band {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.4rem;
+    align-items: baseline;
+    margin: 0.9rem 0 0;
+    font-size: var(--text-xs);
+  }
+  .meta-band .pair b {
     color: var(--muted);
-    font-size: 0.85rem;
-    margin: 0.6rem 0 0;
+    font-size: 0.68rem;
+    font-weight: var(--weight-bold);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    margin-right: 0.4rem;
   }
-  .meta code {
-    font-size: 0.8rem;
+  .meta-band code {
+    font-size: 0.75rem;
     background: var(--surface-2);
     border-radius: 6px;
     padding: 0.05rem 0.4rem;
     overflow-wrap: anywhere;
   }
-  .meta .badge {
-    margin-left: 0.5rem;
-    vertical-align: 0.1em;
+  .cats {
+    margin-top: 0.6rem;
   }
   .badge-primary {
     background: var(--accent-soft);
     color: var(--accent-ink);
   }
   .comment {
-    margin: 0.35rem 0 0;
+    margin: 0.5rem 0 0;
     color: var(--muted);
     font-size: 0.85rem;
     font-style: italic;
   }
-  .authors {
-    color: var(--muted);
-    font-size: 0.92rem;
-    margin: 0.6rem 0 0;
+  .sig-block {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0.9rem 0 0;
   }
+  .sig-legend {
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
+  /* The small uppercase section label, same recipe as the related-section headings. */
+  .a-label {
+    margin: var(--space-6) 0 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--track-caps-wide);
+    text-transform: uppercase;
+  }
+  .authors {
+    font-size: var(--text-sm);
+    max-width: 70ch;
+    margin: 0.9rem 0 0;
+  }
+  .authors b {
+    font-weight: var(--weight-medium);
+  }
+  .authors .affil {
+    color: var(--muted);
+  }
+  /* The abstract is the lede: serif, a step up, relaxed leading, full ink - set to be
+     read, not skimmed. No drop cap; abstracts open with "We propose". */
   .abstract {
     white-space: pre-line;
-    margin: 1.1rem 0 0;
-    line-height: 1.65;
+    margin: 0.9rem 0 0;
+    max-width: 68ch;
+    font-family: var(--font-serif);
+    font-size: 1.0625rem;
+    line-height: var(--leading-relaxed);
   }
   .tags {
     display: flex;
@@ -275,13 +344,12 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
   .tags a:hover {
     background: var(--surface-2);
   }
+  /* The action bar sits under the meta, before the read - act before you scroll. */
   .links {
     display: flex;
     flex-wrap: wrap;
     gap: 0.6rem;
-    margin: 1.5rem 0 0;
-    padding-top: var(--space-5);
-    border-top: 1px solid var(--line);
+    margin: 1.1rem 0 0;
   }
   .links .back {
     margin-left: auto;
@@ -294,6 +362,11 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
     }
     .links .back {
       margin-left: 0;
+    }
+    /* The labeled pairs stack in twos on a phone; a tighter column gap keeps the band
+       from reading as separate lines. */
+    .meta-band {
+      gap: 0.35rem 1rem;
     }
   }
   .cite-row {
