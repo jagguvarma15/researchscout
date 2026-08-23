@@ -483,6 +483,27 @@ svg[data-icon] {
   font-variant-numeric: tabular-nums;
 }
 
+/* A numeric table cell with a thin relative bar under its number: the number stays the
+   record, the bar is the at-a-glance distribution. Right-anchored to match right-aligned
+   numerals; callers set the width inline from their own maximum. */
+.barcell {
+  position: relative;
+}
+.barcell .bnum {
+  position: relative;
+  z-index: 1;
+}
+.barcell .dbar {
+  position: absolute;
+  right: 0.6rem; /* the .data-table cell's own right padding */
+  bottom: 0.3rem;
+  height: 3px;
+  max-width: calc(100% - 1.2rem);
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.55;
+}
+
 /* The overlay veil: a bg-tinted surface, not a translucent black. The blur can drop a
    frame while a sheet animates beside it - iOS and headless captures both show it - and
    when that happens a black scrim reads as raw transparency over the page. The tint
