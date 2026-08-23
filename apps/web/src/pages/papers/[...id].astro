@@ -39,12 +39,17 @@ let related: PaperSummary[] = [];
 // Models the catalogue says came out of this paper. Usually none: most papers are not a model
 // release, and the section is simply absent when that is so.
 let models: AiModel[] = [];
+// The paper's own signal on the feed's scale, read off the search self-hit - the detail
+// endpoint serves no score, but the related-papers query already retrieves this paper.
+let signalScore: number | null = null;
 if (paper !== null) {
   const [hits, catalogue] = await Promise.all([
     fetchPapers({ q: paper.title }),
     fetchModels({ paperId: paper.id }),
   ]);
-  related = (hits.ok ? hits.data.items : []).filter((hit) => hit.id !== paper.id).slice(0, 4);
+  const hitItems = hits.ok ? hits.data.items : [];
+  signalScore = hitItems.find((hit) => hit.id === paper.id)?.score ?? null;
+  related = hitItems.filter((hit) => hit.id !== paper.id).slice(0, 4);
   // A failed catalogue read costs this section, never the paper: the reason for the failure
   // belongs on /models, where somebody went looking for models.
   models = catalogue.ok ? catalogue.data.items : [];
@@ -120,9 +125,9 @@ const bibtex = paper === null ? '' : bibtexFor(paper);
           ))}
         </p>
         {paper.comment && <p class="comment">{paper.comment}</p>}
-        {paper.score !== null && (
+        {signalScore !== null && (
           <div class="sig-block">
-            <SignalMark score={paper.score} />
+            <SignalMark score={signalScore} />
             <span class="sig-legend">Signal — momentum from citations and discussion, 0 to 1</span>
           </div>
         )}
