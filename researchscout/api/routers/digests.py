@@ -24,6 +24,7 @@ def digests_index(session: Annotated[Session, Depends(get_session)]) -> DigestLi
                 title=row.title,
                 period_start=row.period_start,
                 period_end=row.period_end,
+                item_count=len(row.items or []),
             )
             for row in list_digests(session)
         ]
@@ -41,6 +42,7 @@ def digest_detail(slug: str, session: Annotated[Session, Depends(get_session)]) 
         title=row.title,
         period_start=row.period_start,
         period_end=row.period_end,
+        item_count=len(row.items or []),
         body=row.body,
         items=[DigestItem.model_validate(item) for item in row.items],
     )
