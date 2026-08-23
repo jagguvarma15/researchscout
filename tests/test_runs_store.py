@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from researchscout.store.runs import (
+    last_finished,
     last_ok_finish,
     open_runs_older_than,
     recent_runs,
@@ -75,6 +76,18 @@ def test_open_runs_older_than_finds_the_hung_task(session: Session) -> None:
     record_task_started(session, "digest", started_at=_at(0.001))
     hung = open_runs_older_than(session, cutoff=_at(0.25))
     assert [run.task for run in hung] == ["topics"]
+
+
+def test_last_finished_takes_any_outcome_but_never_an_open_row(session: Session) -> None:
+    record_run(session, "health", started_at=_at(1), finished_at=_at(1), ok=True, note="all ok")
+    record_run(session, "health", started_at=_at(0.5), finished_at=_at(0.5), ok=False, note="bad")
+    record_task_started(session, "health", started_at=_at(0.001))
+
+    last = last_finished(session, "health")
+    assert last is not None
+    assert last.ok is False
+    assert last.note == "bad"
+    assert last_finished(session, "no-such-task") is None
 
 
 def test_last_ok_finish_ignores_failures(session: Session) -> None:
