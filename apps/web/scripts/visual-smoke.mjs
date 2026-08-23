@@ -226,6 +226,9 @@ async function shootSurfaces(browser, details) {
     ['desktop-digest-issue', details.digest, { width: 1280, height: 900 }, null],
     ['desktop-digest-issue-dark', details.digest, { width: 1280, height: 900 }, 'dark'],
     ['desktop-topic-detail', details.topic, { width: 1280, height: 900 }, null],
+    ['desktop-benchmarks', '/benchmarks', { width: 1280, height: 1100 }, null],
+    ['desktop-benchmarks-dark', '/benchmarks', { width: 1280, height: 1100 }, 'dark'],
+    ['desktop-models-sorted', '/models?sort=downloads', { width: 1280, height: 900 }, null],
   ];
   for (const [name, path, viewport, theme] of shots) {
     if (!path) {
