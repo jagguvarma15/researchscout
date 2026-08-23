@@ -134,6 +134,56 @@ def test_task_streaks_fail_on_three_and_warn_on_one(session: Session) -> None:
     assert "health" not in check.detail
 
 
+_QUOTA_NOTE = "Error code: 429 - Rate limit exceeded: free-models-per-day"
+
+
+@pytest.mark.integration
+def test_task_streaks_warn_when_the_whole_streak_is_quota(session: Session) -> None:
+    now = datetime.now(UTC)
+    for offset in (3, 2, 1):
+        record_run(
+            session,
+            "topics",
+            started_at=now - timedelta(hours=offset),
+            finished_at=now - timedelta(hours=offset),
+            ok=False,
+            note=_QUOTA_NOTE,
+        )
+    session.commit()
+
+    check = check_task_streaks(session)
+    assert check.status == "warn"
+    assert "quota-limited" in check.detail
+    assert "topics" in check.detail
+
+
+@pytest.mark.integration
+def test_a_quota_streak_does_not_mask_a_real_failure(session: Session) -> None:
+    now = datetime.now(UTC)
+    for offset in (3, 2, 1):
+        record_run(
+            session,
+            "topics",
+            started_at=now - timedelta(hours=offset),
+            finished_at=now - timedelta(hours=offset),
+            ok=False,
+            note=_QUOTA_NOTE,
+        )
+        record_run(
+            session,
+            "digest",
+            started_at=now - timedelta(hours=offset),
+            finished_at=now - timedelta(hours=offset),
+            ok=False,
+            note="llm down",
+        )
+    session.commit()
+
+    check = check_task_streaks(session)
+    assert check.status == "fail"
+    assert "digest" in check.detail
+
+
 @pytest.mark.integration
 def test_hung_runs_surface_open_rows(session: Session) -> None:
     now = datetime.now(UTC)
