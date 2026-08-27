@@ -9,7 +9,12 @@ import researchscout.sources.arxiv as arxiv
 from researchscout.schema import Paper
 from researchscout.sources import enabled_sources, get_source
 from researchscout.sources.arxiv import ArxivSource, _entry_payload, _normalize_payload
-from researchscout.sources.base import describe_sources, registered_sources, retry_wait
+from researchscout.sources.base import (
+    _load_config,
+    describe_sources,
+    registered_sources,
+    retry_wait,
+)
 from researchscout.useragent import USER_AGENT
 
 FIXTURE = Path(__file__).parent / "fixtures" / "arxiv_query.atom"
@@ -93,6 +98,9 @@ def test_enabled_sources_respects_config(tmp_path: Path, monkeypatch: pytest.Mon
     assert all(s.name != "arxiv" for s in enabled_sources())
 
     cfg.write_text("sources:\n  arxiv:\n    enabled: true\n    kind: content\n")
+    # Rewriting the file mid-test is the thing production never does; clear the cache the
+    # way a restart would.
+    _load_config.cache_clear()
     assert "arxiv" in [s.name for s in enabled_sources("content")]
 
 
