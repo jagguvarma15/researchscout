@@ -35,9 +35,74 @@ export interface Highlight {
 }
 
 const PREFIX = 'rs-highlights:';
+// The stored shape: { v, savedAt, items }. Bare arrays predate the envelope and still load;
+// the next save rewrites them, so old papers migrate the moment they are touched again.
+const VERSION = 1;
+// One key per paper with no other bound would grow monotonically with reading history until
+// the origin quota refuses every save. The sweep below drops papers not highlighted in half
+// a year, then everything beyond the newest fifty - generous enough that an active reader
+// never notices, small enough that the quota stays out of reach.
+const MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
+const MAX_PAPERS = 50;
+const MAX_ITEMS = 200;
+const MAX_RECTS = 50;
 
 function key(paperId: string): string {
   return `${PREFIX}${paperId}`;
+}
+
+function cleanRect(value: unknown): HighlightRect | null {
+  const rect = value as Partial<HighlightRect> | null;
+  if (typeof rect !== 'object' || rect === null) return null;
+  const { x, y, w, h } = rect;
+  for (const n of [x, y, w, h]) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return null;
+  }
+  return { x: x as number, y: y as number, w: w as number, h: h as number };
+}
+
+// Stored values are untrusted input the way the chat transcript's are: the shape filter
+// caps every field so nothing pathological (hand-edited or half-written) reaches the
+// reader's rendering or its per-item text listing.
+function cleanHighlight(value: unknown): Highlight | null {
+  const item = value as Partial<Highlight> | null;
+  if (typeof item !== 'object' || item === null) return null;
+  if (typeof item.id !== 'string' || item.id.length === 0 || item.id.length > 64) return null;
+  if (typeof item.page !== 'number' || !Number.isInteger(item.page)) return null;
+  if (item.page < 1 || item.page > 10_000) return null;
+  if (typeof item.color !== 'string' || item.color.length > 32) return null;
+  if (typeof item.text !== 'string' || item.text.length > 2_000) return null;
+  if (!Array.isArray(item.rects)) return null;
+  const rects = item.rects
+    .slice(0, MAX_RECTS)
+    .map(cleanRect)
+    .filter((rect): rect is HighlightRect => rect !== null);
+  return { id: item.id, page: item.page, color: item.color, text: item.text, rects };
+}
+
+function cleanItems(value: unknown): Highlight[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .slice(0, MAX_ITEMS)
+    .map(cleanHighlight)
+    .filter((item): item is Highlight => item !== null);
+}
+
+function parseStored(raw: string): { savedAt: number; items: Highlight[] } | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  // The pre-envelope shape: a bare array, age unknown - treated as saved just now, so a
+  // legacy paper gets a full grace period rather than being swept on sight.
+  if (Array.isArray(parsed)) return { savedAt: Date.now(), items: cleanItems(parsed) };
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const envelope = parsed as { v?: unknown; savedAt?: unknown; items?: unknown };
+  if (envelope.v !== VERSION) return null;
+  const savedAt = typeof envelope.savedAt === 'number' ? envelope.savedAt : Date.now();
+  return { savedAt, items: cleanItems(envelope.items) };
 }
 
 /**
@@ -48,17 +113,11 @@ function key(paperId: string): string {
  * list and reading carries on.
  */
 export function loadHighlights(paperId: string): Highlight[] {
+  sweepOnce();
   try {
     const raw = localStorage.getItem(key(paperId));
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(
-      (item): item is Highlight =>
-        typeof item?.id === 'string' &&
-        typeof item?.page === 'number' &&
-        Array.isArray(item?.rects),
-    );
+    return parseStored(raw)?.items ?? [];
   } catch {
     return [];
   }
@@ -66,12 +125,72 @@ export function loadHighlights(paperId: string): Highlight[] {
 
 /** Returns whether the write landed, so the reader can say so rather than silently lose it. */
 export function saveHighlights(paperId: string, items: Highlight[]): boolean {
+  sweepOnce();
   try {
     if (items.length === 0) localStorage.removeItem(key(paperId));
-    else localStorage.setItem(key(paperId), JSON.stringify(items));
+    else {
+      localStorage.setItem(
+        key(paperId),
+        JSON.stringify({ v: VERSION, savedAt: Date.now(), items: items.slice(0, MAX_ITEMS) }),
+      );
+    }
     return true;
   } catch {
     return false;
+  }
+}
+
+let swept = false;
+
+function sweepOnce(): void {
+  if (swept) return;
+  swept = true;
+  sweepHighlights();
+}
+
+/**
+ * Drop highlight keys nobody will come back for: papers untouched for half a year, then
+ * everything beyond the newest fifty. Runs once per page load, lazily, from the first
+ * storage call - a visitor who never opens the reader pays nothing.
+ */
+export function sweepHighlights(): void {
+  let keys: string[];
+  try {
+    if (typeof localStorage.length !== 'number' || typeof localStorage.key !== 'function') {
+      return;
+    }
+    keys = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const name = localStorage.key(i);
+      if (name?.startsWith(PREFIX)) keys.push(name);
+    }
+  } catch {
+    return;
+  }
+  const kept: { name: string; savedAt: number }[] = [];
+  for (const name of keys) {
+    try {
+      const stored = parseStored(localStorage.getItem(name) ?? '');
+      if (stored === null || stored.items.length === 0) {
+        localStorage.removeItem(name);
+        continue;
+      }
+      if (Date.now() - stored.savedAt > MAX_AGE_MS) {
+        localStorage.removeItem(name);
+        continue;
+      }
+      kept.push({ name, savedAt: stored.savedAt });
+    } catch {
+      // One unreadable key must not stop the sweep of the rest.
+    }
+  }
+  kept.sort((a, b) => b.savedAt - a.savedAt);
+  for (const { name } of kept.slice(MAX_PAPERS)) {
+    try {
+      localStorage.removeItem(name);
+    } catch {
+      // Same stance: best effort.
+    }
   }
 }
 
