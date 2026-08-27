@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime
+from functools import lru_cache
 from typing import Any, ClassVar, Literal
 
 import yaml
@@ -110,7 +111,11 @@ def registered_sources() -> list[type[Source]]:
     return [_REGISTRY[name] for name in sorted(_REGISTRY)]
 
 
+@lru_cache(maxsize=1)
 def _load_config() -> dict[str, Any]:
+    # Cached like load_providers: this is reached from the public sources endpoint and from
+    # every Source construction, and the file only changes with a deploy. Tests that rewrite
+    # the YAML clear the cache (the conftest fixture does it alongside get_settings).
     path = get_settings().sources_config_path
     if not path.exists():
         return {}
