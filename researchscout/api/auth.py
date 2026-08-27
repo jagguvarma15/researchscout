@@ -37,7 +37,9 @@ _BEARER = {"WWW-Authenticate": "Bearer"}
 _DISCOVERY_TIMEOUT = 10.0
 
 
-@dataclass
+# Frozen because the local-mode instance below is returned by reference to every request;
+# a mutable identity shared across concurrent requests would corrupt all of them at once.
+@dataclass(frozen=True)
 class User:
     sub: str
     username: str
