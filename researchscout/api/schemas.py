@@ -83,6 +83,13 @@ class RelatedPapers(BaseModel):
     similar: list[PaperSummary]
 
 
+class ChatTurn(BaseModel):
+    """One prior exchange turn, sent back by the client for conversation context."""
+
+    role: Literal["user", "assistant"]
+    text: str = Field(min_length=1, max_length=2000)
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     k: int = Field(default=8, ge=1, le=50)
@@ -92,6 +99,14 @@ class AskRequest(BaseModel):
     # schema default stays "llm" so existing clients and the CLI are byte-identical; the
     # chat drawer opts into fast explicitly.
     mode: Literal["fast", "llm"] = "llm"
+    # The conversation so far, newest last. LLM answers weave it into the one model call
+    # (never a separate rewrite request - the daily quota is small) and use the previous
+    # user turn to sharpen retrieval for short follow-ups; fast answers stay single-shot
+    # by design, so they accept and ignore it.
+    history: list[ChatTurn] = Field(default_factory=list, max_length=8)
+    # Scope retrieval to one stored paper ("ask about this paper"). The freshness window
+    # is lifted for the pinned paper - its age is irrelevant when it was chosen by hand.
+    paper_id: str | None = Field(default=None, max_length=200)
 
 
 class UsedPaper(BaseModel):
@@ -528,6 +543,20 @@ class ScheduleGroup(BaseModel):
     next_run: datetime | None
 
 
+class AskStats(BaseModel):
+    """Ask/chat metrics over a recent window: how often Scout answers, and how fast."""
+
+    days: int
+    asked: int
+    found_rate: float | None
+    fast_p50_ms: int | None
+    fast_p95_ms: int | None
+    llm_p50_ms: int | None
+    llm_p95_ms: int | None
+    # Recent questions that found nothing - the corpus-gap list.
+    notfound: list[str] = []
+
+
 class SystemStatus(BaseModel):
     """What is deployed and whether it is fetching - the deploy-verify payload."""
 
@@ -549,6 +578,8 @@ class SystemStatus(BaseModel):
     health: list[HealthCheckInfo] = []
     last_health_run: SchedulerRun | None = None
     schedule: list[ScheduleGroup] = []
+    # Ask/chat usage over the last week (None when nothing was asked).
+    ask: AskStats | None = None
 
 
 class NotableModelInfo(BaseModel):
