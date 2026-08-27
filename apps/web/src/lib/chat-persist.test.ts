@@ -33,13 +33,15 @@ function seed(envelope: unknown) {
 }
 
 function envelope(messages: unknown[], savedAt = Date.now()) {
-  return { v: 1, savedAt, messages };
+  return { v: 2, savedAt, messages };
 }
 
 beforeEach(() => {
   store = new Map();
   vi.stubGlobal('localStorage', memoryStorage());
   emptyInMemory();
+  // The signed-out default: no owner tag on the document.
+  delete document.documentElement.dataset.owner;
 });
 
 describe('conversation persistence', () => {
@@ -150,9 +152,52 @@ describe('conversation persistence', () => {
     restoreConversation();
     expect(chat.messages).toHaveLength(0);
 
-    seed({ v: 1, savedAt: Date.now(), messages: [{ role: 'wizard', text: 'x' }] });
+    seed({ v: 2, savedAt: Date.now(), messages: [{ role: 'wizard', text: 'x' }] });
     restoreConversation();
     expect(chat.messages).toHaveLength(0);
+  });
+
+  it('drops a pre-owner envelope', () => {
+    // v1 predates the owner tag, so on a shared browser it could belong to anyone.
+    seed({ v: 1, savedAt: Date.now(), messages: [{ role: 'user', text: 'x' }] });
+    restoreConversation();
+    expect(chat.messages).toHaveLength(0);
+  });
+
+  it('round-trips under the signed-in account that wrote it', () => {
+    document.documentElement.dataset.owner = 'tag-a';
+    chat.messages.push({ role: 'user', text: 'mine' });
+    persistNow();
+    emptyInMemory();
+
+    restoreConversation();
+    expect(chat.messages).toHaveLength(1);
+    expect(chat.messages[0].text).toBe('mine');
+  });
+
+  it('removes a different account transcript instead of restoring it', () => {
+    document.documentElement.dataset.owner = 'tag-a';
+    chat.messages.push({ role: 'user', text: 'account a asked this' });
+    persistNow();
+    emptyInMemory();
+
+    document.documentElement.dataset.owner = 'tag-b';
+    restoreConversation();
+    expect(chat.messages).toHaveLength(0);
+    // Removed, not merely skipped: it must not linger for whoever signs in next.
+    expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('treats a signed-out visitor as a different owner than any account', () => {
+    document.documentElement.dataset.owner = 'tag-a';
+    chat.messages.push({ role: 'user', text: 'account a asked this' });
+    persistNow();
+    emptyInMemory();
+
+    delete document.documentElement.dataset.owner;
+    restoreConversation();
+    expect(chat.messages).toHaveLength(0);
+    expect(localStorage.getItem(KEY)).toBeNull();
   });
 
   it('clear removes both the thread and the stored copy', () => {
