@@ -47,6 +47,9 @@ class PaperFacets:
     #: with what is actually on the page. Deliberately not applied under ``q``: a paper you
     #: dismissed from the feed should still be findable when you go looking for it.
     exclude: list[str] | None = None
+    #: Restrict to exactly these paper ids ("ask about this paper"). Compiled like every
+    #: other facet, so both retrieval legs and the chunk leg all honor the pin.
+    only: list[str] | None = None
 
 
 def _escape_like(value: str) -> str:
@@ -141,6 +144,8 @@ def facets_where(facets: PaperFacets) -> ColumnElement[bool] | None:
         clauses.append(PaperRow.citation_count >= facets.min_citations)
     if facets.exclude:
         clauses.append(PaperRow.id.not_in(facets.exclude))
+    if facets.only:
+        clauses.append(PaperRow.id.in_(facets.only))
     if not clauses:
         return None
     return and_(*clauses)
