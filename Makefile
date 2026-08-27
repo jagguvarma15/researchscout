@@ -113,6 +113,9 @@ seed: ## ingest ~25 recent cs.LG papers and index them
 digest: ## build and publish this week's digest (needs the LLM up)
 	uv run scout digest
 
+eval: ## score retrieval against the labeled query set (the manual gate for retrieval changes)
+	uv run scout eval retrieval -k 10
+
 scheduler: ## run the refresh loop in the foreground (Ctrl-C to stop)
 	uv run scout serve scheduler
 
