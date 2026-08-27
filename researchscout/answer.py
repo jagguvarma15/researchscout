@@ -18,7 +18,52 @@ from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
 from researchscout.retrieve.search import ScoredPaper, retrieve
 from researchscout.store.chunks import best_chunk_texts
+from researchscout.store.facets import PaperFacets
 from researchscout.trace import trace_span
+
+# One prior exchange turn as (role, text), role "user" or "assistant". A plain tuple rather
+# than the API's ChatTurn model: schemas.py imports from this module, so the dependency can
+# only point that way.
+Turn = tuple[str, str]
+
+# How much conversation reaches the prompt: the last few turns, each clipped, so history
+# never crowds the papers out of the context window.
+_HISTORY_TURNS = 6
+_HISTORY_TURN_CHARS = 500
+# A follow-up this short ("what about video?") rarely stands alone; retrieval borrows the
+# previous user turn. Deterministic on purpose - a rewrite model call would double the cost
+# of every chat message against a small daily quota.
+_SHORT_QUESTION_WORDS = 6
+# A hand-pinned paper's age is irrelevant, so the pin lifts the freshness window.
+_PINNED_WINDOW_DAYS = 3650
+
+
+def _retrieval_query(question: str, history: list[Turn] | None) -> str:
+    """The text retrieval runs on: short follow-ups borrow the previous user turn."""
+    if history and len(question.split()) < _SHORT_QUESTION_WORDS:
+        last_user = next((text for role, text in reversed(history) if role == "user"), None)
+        if last_user:
+            return f"{last_user} {question}"
+    return question
+
+
+def _history_block(history: list[Turn] | None) -> str:
+    """The conversation-so-far prompt block, or empty without history."""
+    if not history:
+        return ""
+    lines = [
+        f"{'Reader' if role == 'user' else 'Scout'}: {text[:_HISTORY_TURN_CHARS]}"
+        for role, text in history[-_HISTORY_TURNS:]
+    ]
+    return "Conversation so far:\n" + "\n".join(lines) + "\n\n"
+
+
+def _pin_facets(paper_id: str | None, days: int | None) -> PaperFacets | None:
+    """Facets scoping retrieval to one paper, or None when nothing is pinned."""
+    if paper_id is None:
+        return None
+    return PaperFacets(days=days if days is not None else _PINNED_WINDOW_DAYS, only=[paper_id])
+
 
 _SYSTEM_PROMPT = (
     "You are a research assistant for AI, computer science, and adjacent technical fields. "
@@ -153,6 +198,7 @@ def answer_fast(
     *,
     k: int = 8,
     days: int | None = None,
+    paper_id: str | None = None,
     timings: dict[str, float] | None = None,
 ) -> FastAnswer:
     """A deterministic extractive answer with no LLM call: papers, matches, excerpts.
@@ -173,6 +219,7 @@ def answer_fast(
             question,
             k=k,
             days=days,
+            facets=_pin_facets(paper_id, days),
             use_rerank=settings.ask_fast_rerank,
             query_vector=query_vector,
             timings=timings,
@@ -278,14 +325,27 @@ def _retrieve_for(
     k: int,
     days: int | None,
     agentic: bool,
+    paper_id: str | None = None,
     query_vector: list[float] | None = None,
 ) -> list[ScoredPaper]:
-    """Agentic multi-hop retrieval when asked, otherwise the single-shot hybrid search."""
-    if agentic:
+    """Agentic multi-hop retrieval when asked, otherwise the single-shot hybrid search.
+
+    A paper pin overrides agentic: decomposing a question about one hand-chosen paper into
+    sub-searches would wander off the pin, and the pin already is the retrieval answer.
+    """
+    if agentic and paper_id is None:
         from researchscout.agentic import agentic_retrieve
 
         return agentic_retrieve(session, embedder, llm, question, k=k, days=days)
-    return retrieve(session, embedder, question, k=k, days=days, query_vector=query_vector)
+    return retrieve(
+        session,
+        embedder,
+        question,
+        k=k,
+        days=days,
+        facets=_pin_facets(paper_id, days),
+        query_vector=query_vector,
+    )
 
 
 def answer_stream(
@@ -297,6 +357,8 @@ def answer_stream(
     k: int = 8,
     days: int | None = None,
     agentic: bool = False,
+    history: list[Turn] | None = None,
+    paper_id: str | None = None,
 ) -> Iterator[StreamMeta | StreamDelta | Answer]:
     """Streaming variant of :func:`answer`: meta first, then deltas, then the final Answer.
 
@@ -306,15 +368,17 @@ def answer_stream(
     with trace_span(
         "ask", question=question, k=k, days=days, streaming=True, agentic=agentic
     ) as span:
-        query_vector = None if agentic else embedder.embed_query(question)
+        search_text = _retrieval_query(question, history)
+        query_vector = None if agentic else embedder.embed_query(search_text)
         used = _retrieve_for(
             session,
             embedder,
             llm,
-            question,
+            search_text,
             k=k,
             days=days,
             agentic=agentic,
+            paper_id=paper_id,
             query_vector=query_vector,
         )
         span["retrieved"] = len(used)
@@ -326,7 +390,9 @@ def answer_stream(
             return
 
         quotes = _excerpts_for(session, embedder, question, used, query_vector)
-        user_prompt = f"Question: {question}\n\nPapers:\n{_context(used, quotes)}"
+        user_prompt = (
+            f"{_history_block(history)}Question: {question}\n\nPapers:\n{_context(used, quotes)}"
+        )
         parts: list[str] = []
         for delta in llm.stream(_SYSTEM_PROMPT, user_prompt):
             parts.append(delta)
@@ -348,18 +414,22 @@ def answer(
     k: int = 8,
     days: int | None = None,
     agentic: bool = False,
+    history: list[Turn] | None = None,
+    paper_id: str | None = None,
 ) -> Answer:
     """Retrieve recent papers and synthesize a grounded, cited answer."""
     with trace_span("ask", question=question, k=k, days=days, agentic=agentic) as span:
-        query_vector = None if agentic else embedder.embed_query(question)
+        search_text = _retrieval_query(question, history)
+        query_vector = None if agentic else embedder.embed_query(search_text)
         used = _retrieve_for(
             session,
             embedder,
             llm,
-            question,
+            search_text,
             k=k,
             days=days,
             agentic=agentic,
+            paper_id=paper_id,
             query_vector=query_vector,
         )
         span["retrieved"] = len(used)
@@ -369,7 +439,9 @@ def answer(
             )
 
         quotes = _excerpts_for(session, embedder, question, used, query_vector)
-        user_prompt = f"Question: {question}\n\nPapers:\n{_context(used, quotes)}"
+        user_prompt = (
+            f"{_history_block(history)}Question: {question}\n\nPapers:\n{_context(used, quotes)}"
+        )
         text = llm.complete(_SYSTEM_PROMPT, user_prompt)
         span["model"] = llm.model
 
