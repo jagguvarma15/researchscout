@@ -165,6 +165,10 @@ export async function completeLogin(currentUrl: URL, pkce: string): Promise<Sess
 export function carryOver(previous: Session, next: Session): Session {
   return {
     ...next,
+    // A refresh grant may come back without an id_token, in which case the freshly minted
+    // session has empty identity fields; the caller is still the same person.
+    sub: next.sub || previous.sub,
+    username: next.username || previous.username,
     refreshToken: next.refreshToken ?? previous.refreshToken,
     approved: previous.approved ?? false,
   };
