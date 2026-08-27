@@ -16,6 +16,7 @@ import StaleBanner from '../components/StaleBanner.svelte';
 import TermsGate from '../components/TermsGate.svelte';
 import ThemeToggle from '../components/ThemeToggle.svelte';
 import { fetchAccount, type Account } from '../lib/api';
+import { ownerTag } from '../lib/owner';
 import { THEME_SCRIPT } from '../lib/theme-script.js';
 
 // CSS anchors. Astro's client build deletes the styles of Svelte components that never
@@ -67,13 +68,16 @@ const account =
       ? await fetchAccount(Astro.locals.accessToken)
       : null;
 const termsOutstanding = account !== null && !account.terms_accepted;
+// Stamped on <html> so client-side storage (the Scout transcript) can scope itself to the
+// signed-in account without ever seeing the sub; signed-out renders carry no tag.
+const owner = ownerTag(user?.sub);
 // When this page was built. A public page can be served from the edge cache long after, and
 // the banner below is how the reader finds out.
 const renderedAt = new Date().toISOString();
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-owner={owner || undefined}>
   <head>
     <meta charset="utf-8" />
     {/* viewport-fit=cover hands over the safe-area insets on notched phones; the overlays
