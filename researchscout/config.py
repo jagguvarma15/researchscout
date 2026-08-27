@@ -59,6 +59,12 @@ class Settings(BaseSettings):
     # the service is busy. The model shares this machine with Postgres and the API.
     llm_max_concurrency: int = 2
     llm_queue_timeout_seconds: float = 20.0
+    # Concurrent forward passes through the local sentence-transformers models (the embedder
+    # and the cross-encoder share one pool). The API runs sync endpoints on a threadpool of
+    # dozens, plus the scheduler thread: without a cap they can all be inside one model at
+    # once, and the transient tensor allocations multiply until the box swaps. Blocking
+    # rather than a 503: a pass is milliseconds, and the scheduler has no HTTP semantics.
+    embed_max_concurrency: int = 2
     # Per-request client behavior: how long one completion may take before the client gives
     # up, and how many times it retries a failed request first. One retry rides out a
     # transient per-minute limit; retrying a spent daily quota is pure waste, so this stays
