@@ -196,6 +196,17 @@ export interface ScheduleGroup {
   next_run: string | null;
 }
 
+export interface AskStats {
+  days: number;
+  asked: number;
+  found_rate: number | null;
+  fast_p50_ms: number | null;
+  fast_p95_ms: number | null;
+  llm_p50_ms: number | null;
+  llm_p95_ms: number | null;
+  notfound: string[];
+}
+
 export interface SystemStatus {
   version: string;
   build_sha: string | null;
@@ -209,6 +220,8 @@ export interface SystemStatus {
   health: HealthCheckInfo[];
   last_health_run: SchedulerRun | null;
   schedule: ScheduleGroup[];
+  // Ask/chat usage over the last week; null when nothing was asked (or an older API).
+  ask?: AskStats | null;
 }
 
 export async function fetchSystemStatus(): Promise<SystemStatus | null> {
