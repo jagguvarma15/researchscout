@@ -174,6 +174,16 @@ const published =
               PDF
             </a>
           )}
+          <button
+            class="btn btn-ghost"
+            type="button"
+            data-ask-scout
+            data-paper-id={paper.id}
+            data-paper-title={stripMath(paper.title)}
+          >
+            <Icon name="lucide:message-circle" aria-hidden="true" />
+            Ask Scout
+          </button>
           <a class="btn btn-ghost back" href="/">
             <Icon name="lucide:chevron-left" aria-hidden="true" />
             Back to the feed
