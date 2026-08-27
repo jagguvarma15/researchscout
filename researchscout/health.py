@@ -169,6 +169,26 @@ def check_storage(session: Session, settings: Settings, now: datetime) -> Health
     return HealthCheck("storage", "ok", detail)
 
 
+def check_auth_posture(settings: Settings) -> HealthCheck:
+    """Is the identity configuration coherent for how this install is deployed?
+
+    A service token means the API sits behind a fronting site with real accounts, and in
+    that posture an empty OIDC issuer silently collapses every caller onto the built-in
+    local user - one shared profile, reading list and rate-limit bucket for everyone.
+    That misconfiguration ran in production undetected; this check keeps it loud.
+    """
+    if settings.service_token and not settings.oidc_issuer:
+        return HealthCheck(
+            "auth_posture",
+            "warn",
+            "RS_SERVICE_TOKEN is set but RS_OIDC_ISSUER is empty: "
+            "every caller shares the built-in local account",
+        )
+    if settings.oidc_issuer:
+        return HealthCheck("auth_posture", "ok", "OIDC issuer configured")
+    return HealthCheck("auth_posture", "ok", "local single-user install")
+
+
 def run_health_checks(
     session: Session,
     settings: Settings,
@@ -183,6 +203,7 @@ def run_health_checks(
         check_corpus_freshness(session, settings, now),
         check_hung_runs(session, now),
         check_storage(session, settings, now),
+        check_auth_posture(settings),
     ]
 
 
