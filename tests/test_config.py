@@ -15,6 +15,7 @@ def test_defaults() -> None:
     assert s.foryou_mmr_lambda == 1.0
     assert s.foryou_explore_slots == 0
     assert s.chunk_retrieval is False
+    assert s.embed_max_concurrency == 2
 
 
 def test_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
