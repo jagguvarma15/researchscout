@@ -11,6 +11,7 @@ from functools import cached_property
 from typing import Any
 
 from researchscout.embed.base import Embedder
+from researchscout.modelgate import model_slot
 
 _BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
@@ -52,11 +53,15 @@ class LocalEmbedder(Embedder):
         return SentenceTransformer(self.model_id, device=device, backend=self._backend)
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        vectors = self._model.encode(texts, normalize_embeddings=True)
+        # This instance is a process-wide singleton called from the request threadpool and
+        # the scheduler at once; the slot keeps concurrent passes bounded.
+        with model_slot():
+            vectors = self._model.encode(texts, normalize_embeddings=True)
         return [vector.tolist() for vector in vectors]
 
     def embed_query(self, text: str) -> list[float]:
-        vector = self._model.encode(
-            query_prefix_for(self.model_id) + text, normalize_embeddings=True
-        )
+        with model_slot():
+            vector = self._model.encode(
+                query_prefix_for(self.model_id) + text, normalize_embeddings=True
+            )
         return list(vector.tolist())
