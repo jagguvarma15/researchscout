@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 
 from researchscout import __version__
@@ -25,10 +27,21 @@ from researchscout.api.routers import (
     webimport,
 )
 from researchscout.api.service_auth import service_token_middleware
+from researchscout.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
     """Build the API app: routers under ``/v1``, liveness probe at ``/healthz``."""
+    settings = get_settings()
+    if settings.service_token and not settings.oidc_issuer:
+        # The same condition health.check_auth_posture warns on, repeated at startup so the
+        # deploy log carries it even before the first status read.
+        logger.warning(
+            "RS_SERVICE_TOKEN is set but RS_OIDC_ISSUER is empty: "
+            "every caller shares the built-in local account"
+        )
     app = FastAPI(title="ResearchScout API", version=__version__)
     # Before routing: with RS_SERVICE_TOKEN set, only callers carrying it get past the door.
     app.middleware("http")(service_token_middleware)
