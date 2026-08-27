@@ -120,6 +120,54 @@ def test_profile_clusters_empty_without_saves_or_interests(
     )
 
 
+def test_profile_clusters_never_reads_events_when_flag_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    saved = [("arxiv:a", "A", datetime.now(UTC), [1.0, 0.0])]
+    monkeypatch.setattr(personalize_mod, "saved_vectors", lambda s, u, m: saved)
+
+    def _forbidden(*args: object, **kwargs: object) -> list[object]:
+        raise AssertionError("positive_event_vectors must not run with RS_FORYOU_EVENTS off")
+
+    monkeypatch.setattr(personalize_mod, "positive_event_vectors", _forbidden)
+    clusters = profile_clusters(
+        None,  # type: ignore[arg-type]
+        StubEmbedder({}),
+        "local",
+        [],
+        k=1,
+        half_life_days=75.0,
+    )
+    assert len(clusters) == 1
+
+
+def test_profile_clusters_blends_events_at_reduced_weight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RS_FORYOU_EVENTS", "true")
+    now = datetime.now(UTC)
+    monkeypatch.setattr(
+        personalize_mod, "saved_vectors", lambda s, u, m: [("arxiv:s", "Saved", now, [1.0, 0.0])]
+    )
+    monkeypatch.setattr(
+        personalize_mod,
+        "positive_event_vectors",
+        lambda s, u, m: [("arxiv:e", "Opened", now, [0.0, 1.0])],
+    )
+    clusters = profile_clusters(
+        None,  # type: ignore[arg-type]
+        StubEmbedder({}),
+        "local",
+        [],
+        k=2,
+        half_life_days=75.0,
+    )
+    reasons = {cluster.reason for cluster in clusters}
+    # The opened paper anchors its own cluster, but a same-cluster save would outweigh it:
+    # the event weight is a fraction of a save's.
+    assert reasons == {"Close to your saved paper: Saved", "Like a paper you read: Opened"}
+
+
 DIM = 384
 
 
@@ -230,3 +278,44 @@ def test_v2_names_reasons_and_fills_explore_slots(
     by_id = {item.paper.id: item for item in results}
     assert by_id["arxiv:2"].reason == "Close to your saved paper: Saved Vision Paper"
     assert by_id["arxiv:3"].reason == "Rising outside your usual topics"
+
+
+@pytest.mark.integration
+def test_events_flag_filters_dismissed_papers(
+    session: Session, set_setting: Callable[[str, str], None]
+) -> None:
+    from researchscout.schema import Author, Paper
+    from researchscout.store.events import EventInput, append_events
+    from researchscout.store.papers import upsert_paper
+    from researchscout.store.saved import save_paper
+    from researchscout.store.vectors import upsert_embedding
+
+    def _paper(pid: str, title: str) -> Paper:
+        return Paper(
+            id=pid,
+            external_ids={"arxiv": pid.split(":")[1]},
+            title=title,
+            abstract="x",
+            authors=[Author(name="A")],
+            categories=["cs.LG"],
+            published_at=datetime.now(UTC) - timedelta(days=1),
+            source="arxiv",
+        )
+
+    embedder = MockEmbedder({})
+    upsert_paper(session, _paper("arxiv:1", "Saved Anchor"))
+    upsert_paper(session, _paper("arxiv:2", "Fresh Match"))
+    upsert_paper(session, _paper("arxiv:3", "Dismissed Match"))
+    for pid in ("arxiv:1", "arxiv:2", "arxiv:3"):
+        upsert_embedding(session, pid, embedder.model_id, _onehot(1))
+    save_paper(session, "local", "arxiv:1")
+    append_events(session, "local", [EventInput(event="dismiss", paper_id="arxiv:3")])
+    session.flush()
+
+    set_setting("RS_FORYOU_CENTROIDS", "1")
+    results = personalized_papers(session, embedder, [], user_sub="local", k=10, days=30)
+    assert {item.paper.id for item in results} == {"arxiv:1", "arxiv:2", "arxiv:3"}
+
+    set_setting("RS_FORYOU_EVENTS", "true")
+    results = personalized_papers(session, embedder, [], user_sub="local", k=10, days=30)
+    assert {item.paper.id for item in results} == {"arxiv:1", "arxiv:2"}
