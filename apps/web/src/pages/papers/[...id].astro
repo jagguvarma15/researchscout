@@ -11,7 +11,7 @@ import Base from '../../layouts/Base.astro';
 import {
   fetchModels,
   fetchPaper,
-  fetchPapers,
+  fetchRelated,
   fetchSaved,
   type AiModel,
   type PaperSummary,
@@ -33,26 +33,31 @@ if (paper !== null) {
   saved = savedResult.ok && savedResult.data.some((p) => p.id === paper.id);
 }
 
-// Related papers ride the hybrid search with the title as the query — no new backend.
-let related: PaperSummary[] = [];
+// The real neighborhood: citation-graph references and citers plus embedding neighbors,
+// one endpoint. The detail response carries the paper's own momentum in score, so the
+// title-as-query self-search this page once ran is gone.
+let relatedSections: { title: string; items: PaperSummary[] }[] = [];
 // Models the catalogue says came out of this paper. Usually none: most papers are not a model
 // release, and the section is simply absent when that is so.
 let models: AiModel[] = [];
-// The paper's own signal on the feed's scale, read off the search self-hit - the detail
-// endpoint serves no score, but the related-papers query already retrieves this paper.
-let signalScore: number | null = null;
-// Retrieval scores are small absolute numbers; the page's meters read relative within
-// this paper's own neighborhood - the self-hit and its related work.
+const signalScore: number | null = paper?.score ?? null;
+// Momentum totals are small absolute numbers; the page's meters read relative within this
+// paper's own neighborhood - itself and its related work.
 let signalMax = 1;
 if (paper !== null) {
-  const [hits, catalogue] = await Promise.all([
-    fetchPapers({ q: paper.title }),
+  const [related, catalogue] = await Promise.all([
+    fetchRelated(paper.id),
     fetchModels({ paperId: paper.id }),
   ]);
-  const hitItems = hits.ok ? hits.data.items : [];
-  signalScore = hitItems.find((hit) => hit.id === paper.id)?.score ?? null;
-  signalMax = Math.max(...hitItems.map((hit) => hit.score ?? 0), 0) || 1;
-  related = hitItems.filter((hit) => hit.id !== paper.id).slice(0, 4);
+  if (related !== null) {
+    relatedSections = [
+      { title: 'Cited by', items: related.cited_by },
+      { title: 'References', items: related.references },
+      { title: 'Similar papers', items: related.similar },
+    ].filter((section) => section.items.length > 0);
+  }
+  const neighborhood = relatedSections.flatMap((section) => section.items);
+  signalMax = Math.max(...neighborhood.map((hit) => hit.score ?? 0), signalScore ?? 0) || 1;
   // A failed catalogue read costs this section, never the paper: the reason for the failure
   // belongs on /models, where somebody went looking for models.
   models = catalogue.ok ? catalogue.data.items : [];
@@ -236,11 +241,11 @@ const published =
             <a class="all-models" href="/models">Every model in the catalogue</a>
           </section>
         )}
-        {related.length > 0 && (
+        {relatedSections.map((section) => (
           <section class="related">
-            <h2 class="related-title">Related papers</h2>
+            <h2 class="related-title">{section.title}</h2>
             <ul>
-              {related.map((hit) => (
+              {section.items.map((hit) => (
                 <li>
                   <a
                     class="related-link"
@@ -258,7 +263,7 @@ const published =
               ))}
             </ul>
           </section>
-        )}
+        ))}
       </article>
     )
   }
