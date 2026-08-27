@@ -57,7 +57,14 @@ let discovered: Promise<oidc.Configuration> | null = null;
 
 function configuration(): Promise<oidc.Configuration> {
   // Discovery is one network round trip; cache the promise for the life of the process.
-  discovered ??= oidc.discovery(new URL(`https://${domain}`), clientId, clientSecret);
+  // A failure must not stick, though: caching a rejected promise would wedge sign-in until
+  // the process restarts over one transient provider blip at boot.
+  discovered ??= oidc.discovery(new URL(`https://${domain}`), clientId, clientSecret).catch(
+    (error: unknown) => {
+      discovered = null;
+      throw error;
+    },
+  );
   return discovered;
 }
 
