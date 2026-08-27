@@ -290,3 +290,20 @@ def test_answer_fast_never_false_negatives_on_unknowable_evidence(
     monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: [])
     empty = answer_mod.answer_fast(None, _StubEmbedder(), "q")
     assert not empty.found and empty.best_relevance is None
+
+
+def test_pinned_fast_ask_bypasses_the_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    from researchscout.answer import answer_fast
+
+    # Cosine evidence far below RS_ASK_MIN_SIMILARITY: an open ask would report not-found,
+    # a pinned one must still show the paper the reader chose.
+    hit = _scored_rel("arxiv:2401.00001", relevance=None, distance=0.5)
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: [hit])
+    open_ask = answer_fast(None, _StubEmbedder(), "what does this introduce?")
+    assert open_ask.found is False
+
+    pinned = answer_fast(
+        None, _StubEmbedder(), "what does this introduce?", paper_id="arxiv:2401.00001"
+    )
+    assert pinned.found is True
+    assert [entry.id for entry in pinned.entries] == ["arxiv:2401.00001"]
