@@ -117,3 +117,16 @@ def test_local_mode_identity_is_local(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RS_OIDC_ISSUER", "")
     user = auth_mod.require_user(Request({"type": "http", "headers": []}))
     assert (user.sub, user.username) == ("local", "local")
+
+
+def test_local_mode_identity_is_immutable(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The local user is one instance shared by reference across every request in the
+    # process; a successful assignment here would corrupt all of them at once.
+    from dataclasses import FrozenInstanceError
+
+    from fastapi import Request
+
+    monkeypatch.setenv("RS_OIDC_ISSUER", "")
+    user = auth_mod.require_user(Request({"type": "http", "headers": []}))
+    with pytest.raises(FrozenInstanceError):
+        user.username = "someone-else"  # type: ignore[misc]
