@@ -32,6 +32,40 @@ export const chat = $state({
   asked: false,
 });
 
+// The "ask about this paper" pin: questions go retrieval-scoped to one paper until the
+// reader clears the chip. Deliberately not persisted - a pin is a moment's intent, and
+// restoring it silently would make tomorrow's unrelated question answer about old context.
+export const scope = $state({
+  paperId: null as string | null,
+  title: null as string | null,
+});
+
+export function setScope(paperId: string, title: string): void {
+  scope.paperId = paperId;
+  scope.title = title;
+}
+
+export function clearScope(): void {
+  scope.paperId = null;
+  scope.title = null;
+}
+
+// How much conversation the backend sees; mirrors the API's max_length on history.
+const HISTORY_TURNS = 6;
+const HISTORY_TURN_CHARS = 2000;
+
+function buildHistory(): { role: 'user' | 'assistant'; text: string }[] {
+  // Snapshot BEFORE the new question is pushed. Only turns with text survive: a card-only
+  // fast answer still carries its rendered text, but an errored or empty turn says nothing.
+  return chat.messages
+    .filter((message) => message.text.trim().length > 0 && !message.error)
+    .slice(-HISTORY_TURNS)
+    .map((message) => ({
+      role: message.role,
+      text: message.text.slice(0, HISTORY_TURN_CHARS),
+    }));
+}
+
 let controller: AbortController | null = null;
 
 const STORAGE_KEY = 'rs-scout-chat';
@@ -111,9 +145,14 @@ export async function ask(
   question: string,
   mode: 'fast' | 'llm',
   dictionary: KeywordCount[] | null = null,
+  options: { deep?: boolean } = {},
 ): Promise<void> {
   if (chat.busy) return;
-  chat.messages.push({ role: 'user', text: mode === 'llm' ? `/ai ${question}` : question });
+  // History snapshots before the new turns join the thread; fast mode sends none (the
+  // backend ignores it there by design, so the bytes would say nothing).
+  const history = mode === 'llm' ? buildHistory() : [];
+  const label = options.deep ? `/deep ${question}` : mode === 'llm' ? `/ai ${question}` : question;
+  chat.messages.push({ role: 'user', text: label });
   chat.asked = true;
   chat.busy = true;
   controller = new AbortController();
@@ -135,7 +174,13 @@ export async function ask(
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ question, mode }),
+      body: JSON.stringify({
+        question,
+        mode,
+        ...(options.deep ? { agentic: true } : {}),
+        ...(history.length > 0 ? { history } : {}),
+        ...(scope.paperId ? { paper_id: scope.paperId } : {}),
+      }),
       signal: controller.signal,
     });
     if (response.status === 401) {
