@@ -111,3 +111,45 @@ def test_status_on_an_empty_corpus(session: Session) -> None:
     assert body["build_sha"] is None  # a source checkout carries no stamp
     assert body["pipeline_due_at"] is None  # interval schedule: no slot to be due
     assert body["scheduler_started_at"] is None
+
+
+def test_status_reports_ask_usage(session: Session) -> None:
+    from researchscout.store.ask_metrics import record_ask
+
+    # Quiet deployment: no questions means no ask block at all.
+    body = _client(session).get("/v1/system/status").json()
+    assert body["ask"] is None
+
+    record_ask(
+        session,
+        mode="fast",
+        surface="chat",
+        question="what beats transformers?",
+        retrieved=3,
+        best_relevance=0.9,
+        found=True,
+        retrieve_ms=50,
+        rerank_ms=None,
+        llm_ms=None,
+        total_ms=120,
+    )
+    record_ask(
+        session,
+        mode="fast",
+        surface="chat",
+        question="obscure thing nobody wrote about",
+        retrieved=0,
+        best_relevance=0.1,
+        found=False,
+        retrieve_ms=40,
+        rerank_ms=None,
+        llm_ms=None,
+        total_ms=90,
+    )
+    session.commit()
+
+    body = _client(session).get("/v1/system/status").json()
+    assert body["ask"]["asked"] == 2
+    assert body["ask"]["found_rate"] == pytest.approx(0.5)
+    assert body["ask"]["fast_p50_ms"] is not None
+    assert body["ask"]["notfound"] == ["obscure thing nobody wrote about"]
