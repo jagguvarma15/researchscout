@@ -46,3 +46,20 @@ describe('commandHint', () => {
     expect(commandHint('')).toBeNull();
   });
 });
+
+describe('deep command', () => {
+  it('parses /deep with its question', () => {
+    expect(parseInput('/deep how do state space models scale?')).toEqual({
+      kind: 'deep',
+      question: 'how do state space models scale?',
+    });
+  });
+
+  it('returns an empty question for a bare /deep', () => {
+    expect(parseInput('/deep')).toEqual({ kind: 'deep', question: '' });
+  });
+
+  it('names /deep in the hint', () => {
+    expect(commandHint('/')).toContain('/deep');
+  });
+});
