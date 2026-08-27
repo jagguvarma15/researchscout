@@ -19,6 +19,21 @@ def _fresh_settings() -> Iterator[None]:
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_sources_config() -> Iterator[None]:
+    """Give every test its own view of the sources registry file.
+
+    ``_load_config`` caches the parsed YAML the way ``get_settings`` caches the environment,
+    and the API-sources tests each point it at a fresh temp file - same reasoning, same
+    both-sides clear.
+    """
+    from researchscout.sources.base import _load_config
+
+    _load_config.cache_clear()
+    yield
+    _load_config.cache_clear()
+
+
 @pytest.fixture
 def set_setting(monkeypatch: pytest.MonkeyPatch) -> Callable[[str, str], None]:
     """Change an ``RS_*`` variable part-way through a test and have it be seen.
