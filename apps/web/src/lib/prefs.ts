@@ -165,6 +165,9 @@ export const FEED_SORTS: readonly FeedSort[] = ['newest', 'citations', 'activity
 export const FEED_DAYS: readonly FeedDays[] = ['7', '14', '30', 'all'];
 export const FEED_TOPICS: readonly FeedTopic[] = ['nlp', 'cv', 'rl'];
 
+// Deliberately device-level, not scoped to the signed-in account (unlike the Scout
+// transcript, which carries an owner tag): the cookie holds three enum preferences with no
+// personal data and nothing another account could learn from, the same class as rs-theme.
 export const FEED_DEFAULTS_COOKIE = 'rs-feed-defaults';
 
 /**
