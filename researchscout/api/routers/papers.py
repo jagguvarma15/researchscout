@@ -6,9 +6,8 @@ from dataclasses import replace
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from researchscout.api.auth import User, optional_user
 from researchscout.api.deps import get_embedder, get_session
