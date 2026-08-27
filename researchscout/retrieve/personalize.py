@@ -24,6 +24,8 @@ from researchscout.embed.base import Embedder
 from researchscout.retrieve.search import _DEFAULT_HALF_LIFE_DAYS, _recency_weight
 from researchscout.schema import Paper
 from researchscout.score import breakthrough_many
+from researchscout.store.account import dismissed_papers
+from researchscout.store.events import dismissed_event_paper_ids, positive_event_vectors
 from researchscout.store.papers import get_papers
 from researchscout.store.saved import saved_vectors
 from researchscout.store.topics import window_vectors
@@ -31,6 +33,10 @@ from researchscout.store.topics import window_vectors
 # A paper this dissimilar to every centroid counts as "outside" the profile for exploration.
 _EXPLORE_SIMILARITY_CEILING = 0.5
 _EXPLORE_REASON = "Rising outside your usual topics"
+
+# What a click/dwell/open is worth relative to a save. Opening a paper is curiosity, saving
+# it is a commitment; the profile should lean on the stronger statement.
+_EVENT_WEIGHT = 0.3
 
 
 @dataclass(frozen=True)
@@ -83,8 +89,10 @@ def profile_clusters(
 ) -> list[InterestCluster]:
     """Time-decayed saved papers plus interest keywords, clustered into up to ``k`` centroids.
 
-    Every centroid carries the reason of its heaviest member — the saved paper or interest
-    keyword that anchors it — which is what the feed shows as "why this paper".
+    Every centroid carries the reason of its heaviest member — the saved paper, opened paper
+    or interest keyword that anchors it — which is what the feed shows as "why this paper".
+    With ``RS_FORYOU_EVENTS`` on, papers the reader recently clicked, dwelled on or opened
+    join the profile at a fraction of a save's weight, decayed on the same half-life.
     """
     now = datetime.now(UTC)
     weighted: list[tuple[list[float], float, str]] = []
@@ -92,6 +100,13 @@ def profile_clusters(
         age_days = max((now - saved_at).total_seconds() / 86400.0, 0.0)
         weight = 0.5 ** (age_days / half_life_days)
         weighted.append((vector, weight, f"Close to your saved paper: {title}"))
+    if get_settings().foryou_events:
+        for _paper_id, title, engaged_at, vector in positive_event_vectors(
+            session, user_sub, embedder.model_id
+        ):
+            age_days = max((now - engaged_at).total_seconds() / 86400.0, 0.0)
+            weight = _EVENT_WEIGHT * 0.5 ** (age_days / half_life_days)
+            weighted.append((vector, weight, f"Like a paper you read: {title}"))
     for interest in interests:
         cleaned = interest.strip()
         if cleaned:
@@ -164,7 +179,12 @@ def personalized_papers(
     days: int,
     half_life_days: float = _DEFAULT_HALF_LIFE_DAYS,
 ) -> list[PersonalizedPaper]:
-    """Window papers by profile similarity x recency x breakthrough; empty on cold start."""
+    """Window papers by profile similarity x recency x breakthrough; empty on cold start.
+
+    With ``RS_FORYOU_EVENTS`` on, papers the reader has dismissed (the bounded working set
+    plus the event log's full memory) never surface here — a dismissal is the clearest
+    negative the log holds, and a personalized feed that re-recommends it reads as deaf.
+    """
     settings = get_settings()
     if settings.foryou_centroids >= 1 and user_sub is not None:
         clusters = profile_clusters(
@@ -181,6 +201,11 @@ def personalized_papers(
     if not clusters:
         return []
 
+    excluded: set[str] = set()
+    if settings.foryou_events and user_sub is not None:
+        excluded = set(dismissed_event_paper_ids(session, user_sub))
+        excluded.update(dismissed_papers(session, user_sub))
+
     rows = window_vectors(session, days=days, model_id=embedder.model_id)
     if not rows:
         return []
@@ -190,7 +215,7 @@ def personalized_papers(
     entries: list[_Entry] = []
     for paper_id, _title, vector in rows:
         paper = papers.get(paper_id)
-        if paper is None:
+        if paper is None or paper_id in excluded:
             continue
         similarities = [_cosine(cluster.centroid, vector) for cluster in clusters]
         best = max(range(len(similarities)), key=similarities.__getitem__)
