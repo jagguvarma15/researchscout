@@ -26,7 +26,10 @@
     ask as askScout,
     chat,
     clearConversation,
+    clearScope,
     runWebSearch,
+    scope,
+    setScope,
     stopStreaming,
   } from '../lib/chat-state.svelte';
   import type { KeywordCount } from '../lib/chat-types';
@@ -46,7 +49,7 @@
   }
 
   type Entry =
-    | { kind: 'ask'; label: string; question: string }
+    | { kind: 'ask'; label: string; question: string; deep?: boolean }
     | { kind: 'web'; label: string; query: string }
     | { kind: 'paper'; label: string; href: string; score: number | null }
     | { kind: 'search'; label: string; href: string }
@@ -112,6 +115,14 @@
     }
     if (parsed.kind === 'ai' && parsed.question) {
       return { kind: 'ask', label: `Ask the AI: "${parsed.question}"`, question: parsed.question };
+    }
+    if (parsed.kind === 'deep' && parsed.question) {
+      return {
+        kind: 'ask',
+        label: `Deep research: "${parsed.question}"`,
+        question: parsed.question,
+        deep: true,
+      };
     }
     return null;
   }
@@ -394,7 +405,9 @@
       if (chat.busy) return;
       query = '';
       rememberSearch(entry.question);
-      void askScout(entry.question, intent === 'command' ? 'llm' : 'fast', dictionary);
+      void askScout(entry.question, intent === 'command' ? 'llm' : 'fast', dictionary, {
+        deep: entry.deep,
+      });
       // The thread replaces the list on the next frame; land on the fresh question even if
       // the reader had scrolled up through the transcript.
       requestAnimationFrame(scrollToLatest);
@@ -427,6 +440,20 @@
   }
 
   function onDocumentClick(event: MouseEvent) {
+    // The "Ask Scout about this paper" affordance lives on pages this component never
+    // renders; delegation is how the pin reaches here. Handled before the outside-close
+    // check, or pressing the button would shut the panel it means to open.
+    const target = event.target instanceof Element ? event.target : null;
+    const opener = target?.closest('[data-ask-scout]');
+    if (opener instanceof HTMLElement) {
+      const paperId = opener.dataset.paperId;
+      if (paperId) {
+        setScope(paperId, opener.dataset.paperTitle ?? paperId);
+        show();
+        inputEl?.focus();
+        return;
+      }
+    }
     // Outside-ness is judged on the composed path, snapshotted at dispatch: by the time
     // the click bubbles here, choosing an entry has already cleared the query and Svelte
     // may have re-rendered the row away, so containment-at-handler-time would read a
@@ -497,6 +524,13 @@
 
   {#if open}
     <div class="panel" class:closing id="omnibox-panel">
+      {#if scope.paperId}
+        <p class="scope">
+          <span class="scope-label">Asking about</span>
+          <span class="scope-title">{scope.title}</span>
+          <button type="button" class="scope-clear" onclick={clearScope}>Clear</button>
+        </p>
+      {/if}
       <div class="body" bind:this={body}>
         {#if trimmed && suggestions.length > 0}
           <p class="chips" aria-label="Keyword suggestions">
@@ -896,6 +930,43 @@
     border-top: 1px solid var(--line, #e6e1d5);
     color: var(--muted, #5d6570);
     font-size: 0.72rem;
+  }
+  /* The paper pin: a quiet band above the body naming what questions are scoped to. */
+  .scope {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin: 0;
+    padding: 0.45rem 1rem;
+    border-bottom: 1px solid var(--line, #e6e1d5);
+    font-size: 0.72rem;
+  }
+  .scope-label {
+    color: var(--muted, #5d6570);
+    font-weight: var(--weight-semibold, 600);
+    letter-spacing: var(--track-caps, 0.06em);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .scope-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink, #1f2530);
+  }
+  .scope-clear {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: var(--muted, #5d6570);
+    font: inherit;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .scope-clear:hover {
+    color: var(--ink, #1f2530);
   }
   .footnote {
     flex: 1;
