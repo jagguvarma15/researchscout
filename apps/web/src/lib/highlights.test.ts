@@ -13,6 +13,7 @@ import {
   newId,
   rectFromDrag,
   saveHighlights,
+  sweepHighlights,
   toScreenRects,
   type Highlight,
 } from './highlights';
@@ -30,6 +31,10 @@ function memoryStorage() {
     setItem: (k: string, v: string) => void store.set(k, v),
     removeItem: (k: string) => void store.delete(k),
     clear: () => store.clear(),
+    key: (i: number) => [...store.keys()][i] ?? null,
+    get length() {
+      return store.size;
+    },
   };
 }
 
@@ -212,6 +217,94 @@ describe('storage', () => {
     });
     expect(saveHighlights(PAPER, [one])).toBe(false);
     expect(loadHighlights(PAPER)).toEqual([]);
+  });
+
+  it('still reads the pre-envelope bare array and rewrites it on save', () => {
+    store.set(`rs-highlights:${PAPER}`, JSON.stringify([one]));
+    expect(loadHighlights(PAPER)).toEqual([one]);
+
+    saveHighlights(PAPER, [one]);
+    const written = JSON.parse(store.get(`rs-highlights:${PAPER}`) ?? 'null');
+    expect(written.v).toBe(1);
+    expect(typeof written.savedAt).toBe('number');
+    expect(written.items).toEqual([one]);
+  });
+
+  it('drops stored items past the field caps', () => {
+    store.set(
+      `rs-highlights:${PAPER}`,
+      JSON.stringify({
+        v: 1,
+        savedAt: Date.now(),
+        items: [
+          one,
+          { ...one, id: 'b', text: 'x'.repeat(3000) },
+          { ...one, id: 'c', page: 0 },
+          { ...one, id: 'd', page: 2.5 },
+          { ...one, id: 'e', rects: [{ x: 1, y: 2, w: Infinity, h: 4 }] },
+        ],
+      }),
+    );
+    const loaded = loadHighlights(PAPER);
+    expect(loaded.map((item) => item.id)).toEqual(['a', 'e']);
+    // The rect with a non-finite number is dropped; the highlight survives without it.
+    expect(loaded[1].rects).toEqual([]);
+  });
+});
+
+describe('sweep', () => {
+  const one: Highlight = {
+    id: 'a',
+    page: 1,
+    color: 'yellow',
+    text: 'kept',
+    rects: [{ x: 1, y: 2, w: 3, h: 4 }],
+  };
+
+  function seedPaper(paperId: string, savedAt: number) {
+    store.set(`rs-highlights:${paperId}`, JSON.stringify({ v: 1, savedAt, items: [one] }));
+  }
+
+  it('drops papers untouched for half a year and keeps recent ones', () => {
+    seedPaper('arxiv:old.1', Date.now() - 181 * 24 * 60 * 60 * 1000);
+    seedPaper('arxiv:new.1', Date.now() - 1000);
+    sweepHighlights();
+    expect(store.has('rs-highlights:arxiv:old.1')).toBe(false);
+    expect(store.has('rs-highlights:arxiv:new.1')).toBe(true);
+  });
+
+  it('keeps only the newest fifty papers', () => {
+    for (let i = 0; i < 55; i += 1) {
+      seedPaper(`arxiv:2401.${String(i).padStart(5, '0')}`, Date.now() - i * 1000);
+    }
+    sweepHighlights();
+    const remaining = [...store.keys()].filter((name) => name.startsWith('rs-highlights:'));
+    expect(remaining).toHaveLength(50);
+    // The five oldest are the ones that went.
+    expect(store.has('rs-highlights:arxiv:2401.00054')).toBe(false);
+    expect(store.has('rs-highlights:arxiv:2401.00000')).toBe(true);
+  });
+
+  it('removes unreadable and empty keys along the way', () => {
+    store.set('rs-highlights:arxiv:broken', '[{"id":');
+    store.set('rs-highlights:arxiv:empty', JSON.stringify({ v: 1, savedAt: Date.now(), items: [] }));
+    store.set('rs-other-key', 'untouched');
+    sweepHighlights();
+    expect(store.has('rs-highlights:arxiv:broken')).toBe(false);
+    expect(store.has('rs-highlights:arxiv:empty')).toBe(false);
+    expect(store.has('rs-other-key')).toBe(true);
+  });
+
+  it('survives a throwing storage', () => {
+    vi.stubGlobal('localStorage', {
+      get length(): number {
+        throw new Error('denied');
+      },
+      key: () => null,
+      getItem: () => null,
+      removeItem: () => undefined,
+    });
+    expect(() => sweepHighlights()).not.toThrow();
   });
 });
 
