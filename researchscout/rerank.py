@@ -19,6 +19,7 @@ from functools import cached_property, lru_cache
 from typing import Any
 
 from researchscout.config import get_settings
+from researchscout.modelgate import model_slot
 
 
 @dataclass
@@ -56,7 +57,10 @@ class CrossEncoderReranker(Reranker):
     def scores(self, query: str, documents: list[str]) -> list[float]:
         if not documents:
             return []
-        logits = self._model.predict([(query, doc) for doc in documents])
+        # Shared per-process instance; the slot bounds concurrent passes the same way the
+        # embedder's does (both models draw from one pool).
+        with model_slot():
+            logits = self._model.predict([(query, doc) for doc in documents])
         return [_sigmoid(float(logit)) for logit in logits]
 
 
