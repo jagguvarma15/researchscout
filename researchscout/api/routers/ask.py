@@ -53,7 +53,13 @@ def ask(
     if body.mode == "fast":
         timings: dict[str, float] = {}
         fast = answer_fast(
-            session, embedder, body.question, k=body.k, days=body.days, timings=timings
+            session,
+            embedder,
+            body.question,
+            k=body.k,
+            days=body.days,
+            paper_id=body.paper_id,
+            timings=timings,
         )
         record_metrics(
             mode="fast",
@@ -84,6 +90,8 @@ def ask(
                 k=body.k,
                 days=body.days,
                 agentic=body.agentic,
+                history=[(turn.role, turn.text) for turn in body.history],
+                paper_id=body.paper_id,
             )
     except OpenAIError as exc:
         raise HTTPException(status_code=502, detail="LLM backend unavailable") from exc
