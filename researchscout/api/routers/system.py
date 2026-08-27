@@ -22,10 +22,17 @@ from sqlalchemy.orm import Session
 
 from researchscout import __version__
 from researchscout.api.deps import get_session
-from researchscout.api.schemas import HealthCheckInfo, ScheduleGroup, SchedulerRun, SystemStatus
+from researchscout.api.schemas import (
+    AskStats,
+    HealthCheckInfo,
+    ScheduleGroup,
+    SchedulerRun,
+    SystemStatus,
+)
 from researchscout.config import get_settings
 from researchscout.health import run_health_checks
 from researchscout.schedule import next_run, parse_times, previous_run
+from researchscout.store.ask_metrics import ask_summary, recent_notfound
 from researchscout.store.models import PaperRow, SchedulerRunRow
 from researchscout.store.runs import last_started, recent_runs
 
@@ -119,6 +126,21 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
         HealthCheckInfo(name=check.name, status=check.status, detail=check.detail)
         for check in run_health_checks(session, settings)
     ]
+    summary = ask_summary(session)
+    ask = (
+        AskStats(
+            days=summary.days,
+            asked=summary.asked,
+            found_rate=summary.found_rate,
+            fast_p50_ms=summary.fast_p50_ms,
+            fast_p95_ms=summary.fast_p95_ms,
+            llm_p50_ms=summary.llm_p50_ms,
+            llm_p95_ms=summary.llm_p95_ms,
+            notfound=recent_notfound(session),
+        )
+        if summary.asked > 0
+        else None
+    )
     return SystemStatus(
         version=__version__,
         build_sha=settings.build_sha or None,
@@ -132,4 +154,5 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
         health=health,
         last_health_run=_last_health_run(session),
         schedule=_schedule_groups(),
+        ask=ask,
     )
