@@ -69,6 +69,20 @@ class PaperList(BaseModel):
     offset: int = 0
 
 
+class RelatedPapers(BaseModel):
+    """A paper's neighborhood, from the citation graph and the embedding space.
+
+    References and cited_by cover only works stored in this corpus — the graph holds arXiv
+    ids for everything a paper cites, but a related-papers list can only link to pages that
+    exist here. Every entry carries its breakthrough momentum in ``score`` (similar entries
+    are ordered by embedding distance) so the page's signal meters share one scale.
+    """
+
+    references: list[PaperSummary]
+    cited_by: list[PaperSummary]
+    similar: list[PaperSummary]
+
+
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     k: int = Field(default=8, ge=1, le=50)
