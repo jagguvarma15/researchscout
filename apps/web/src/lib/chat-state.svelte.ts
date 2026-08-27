@@ -19,6 +19,11 @@ import type { FastResult, KeywordCount, Message, UsedPaper, WebHit } from './cha
 import { loaderMatches } from './keyword-match';
 import { parseSseFrame, splitSseBuffer, type SseEvent } from './sse';
 
+// Module-scope state in a module that IS evaluated during SSR (Base.astro renders
+// ScoutPanel server-side), where it is shared by every request in the Node process.
+// Cross-request isolation rests on the window guard around the restore call at the bottom
+// of this file: nothing at module scope above it may touch storage, the DOM, or push into
+// this state on the server.
 export const chat = $state({
   messages: [] as Message[],
   busy: false,
@@ -48,6 +53,16 @@ function currentOwner(): string {
 // linkified or used as a citation gate must match; a stored id that does not is dropped.
 const ID_SHAPE = /^[a-z0-9]+:[A-Za-z0-9._/-]{1,80}$/;
 const ARXIV_SHAPE = /^[A-Za-z0-9./-]{1,40}$/;
+
+function trimThread(): void {
+  // The cap must hold for the live array too, not just the persisted copy: the omnibox
+  // never unmounts and the module survives soft navigation, so an untrimmed thread grows
+  // for the life of the tab. Splicing from the front keeps every retained message proxy
+  // valid - a streaming `current` is always at the tail.
+  if (chat.messages.length > MAX_MESSAGES) {
+    chat.messages.splice(0, chat.messages.length - MAX_MESSAGES);
+  }
+}
 
 export function stopStreaming(): void {
   controller?.abort();
@@ -114,6 +129,7 @@ export async function ask(
     current.matched = loaderMatches(question, dictionary);
   }
   chat.messages.push(current);
+  trimThread();
 
   try {
     const response = await fetch('/api/chat', {
@@ -187,6 +203,7 @@ export async function runWebSearch(query: string): Promise<void> {
     webBusy: true,
   });
   chat.messages.push(current);
+  trimThread();
   try {
     const response = await fetch(`/api/search/web?q=${encodeURIComponent(query)}`, {
       signal: controller.signal,
@@ -360,6 +377,7 @@ export function restoreConversation(): void {
   // Plain pushes are fine here: no raw reference is retained, so every later read and
   // mutation goes through the array's proxy.
   chat.messages.push(...cleaned);
+  trimThread();
   chat.asked = true;
 }
 
