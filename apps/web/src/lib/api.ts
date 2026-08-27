@@ -128,6 +128,27 @@ export async function fetchPaper(id: string): Promise<PaperSummary | null> {
   }
 }
 
+// A paper's neighborhood: stored works it references, stored works citing it, and its
+// embedding nearest neighbors. Every entry carries breakthrough momentum in score, the
+// same scale the detail endpoint serves, so one meter normalization covers the page.
+export interface RelatedPapers {
+  references: PaperSummary[];
+  cited_by: PaperSummary[];
+  similar: PaperSummary[];
+}
+
+export async function fetchRelated(id: string): Promise<RelatedPapers | null> {
+  try {
+    const response = await fetch(`${API_URL}/v1/papers/${encodeURIComponent(id)}/related`, {
+      headers: apiHeaders(),
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as RelatedPapers;
+  } catch {
+    return null;
+  }
+}
+
 // A data source as /about lists it. The attribution fields are null together when a source
 // has not declared one in config/sources.yaml, which the page shows rather than hides.
 export interface SourceInfo {
