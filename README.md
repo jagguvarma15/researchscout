@@ -92,6 +92,14 @@ uv run pytest -q -m "not integration"
 Configuration is environment variables (prefix `RS_`) or a local `.env` - copy
 `.env.example` to start. The canonical data model is `researchscout/schema.py`.
 
+Retrieval changes carry a manual gate: run `make eval` (Recall@10 and nDCG@10 over the
+labeled queries in `config/eval_queries.yaml`) before and after any change to retrieval,
+ranking, or the embedding model, against the same corpus both times. The numbers move with
+the corpus, so compare the before/after delta rather than the absolutes, and update
+`config/eval_baseline.md` in the same pull request so the next change has a reference
+point. `scout eval draft` seeds new known-item cases; rewrite the drafted titles into real
+questions before trusting them.
+
 ## Deploying
 
 The public site is the frontend on Vercel plus the backend on Railway - both build from
