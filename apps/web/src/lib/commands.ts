@@ -5,6 +5,7 @@ export type ParsedInput =
   | { kind: 'question'; text: string }
   | { kind: 'web'; query: string }
   | { kind: 'ai'; question: string }
+  | { kind: 'deep'; question: string }
   | { kind: 'unknown'; command: string };
 
 export function parseInput(raw: string): ParsedInput {
@@ -15,10 +16,14 @@ export function parseInput(raw: string): ParsedInput {
   const rest = space === -1 ? '' : trimmed.slice(space + 1).trim();
   if (command === '/web') return { kind: 'web', query: rest };
   if (command === '/ai') return { kind: 'ai', question: rest };
+  if (command === '/deep') return { kind: 'deep', question: rest };
   return { kind: 'unknown', command };
 }
 
 export function commandHint(raw: string): string | null {
   if (!raw.trimStart().startsWith('/')) return null;
-  return 'Commands: /web <query> - quick web search, /ai <question> - ask the AI directly';
+  return (
+    'Commands: /web <query> - quick web search, /ai <question> - ask the AI directly, ' +
+    '/deep <question> - multi-step research (slow, several AI calls)'
+  );
 }
