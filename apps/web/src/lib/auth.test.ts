@@ -83,6 +83,20 @@ describe('token refresh carry-over', () => {
     expect(carried.refreshToken).toBe('rotated');
     expect(carried.approved).toBe(false);
   });
+
+  it('keeps the identity when a refresh grant carries no claims', () => {
+    // A refresh response without an id_token mints a session with empty identity fields;
+    // the caller has not changed, so the previous identity must survive.
+    const carried = auth.carryOver(session, { ...session, sub: '', username: '' });
+    expect(carried.sub).toBe('auth0|abc');
+    expect(carried.username).toBe('ada');
+  });
+
+  it('lets a real re-minted identity win', () => {
+    const carried = auth.carryOver(session, { ...session, sub: 'auth0|xyz', username: 'grace' });
+    expect(carried.sub).toBe('auth0|xyz');
+    expect(carried.username).toBe('grace');
+  });
 });
 
 describe('entry grant', () => {
