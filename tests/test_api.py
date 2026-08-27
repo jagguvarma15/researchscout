@@ -203,9 +203,15 @@ def test_paper_detail_allows_slashes(monkeypatch: pytest.MonkeyPatch) -> None:
         return _paper(pid=paper_id)
 
     monkeypatch.setattr(papers_router, "get_paper", fake_get_paper)
+    # The detail response computes the paper's momentum, and the session here is a stub.
+    monkeypatch.setattr(papers_router, "breakthrough", lambda *a, **k: _NoBoost())
     response = _client().get("/v1/papers/doi:10.1145/3600006.3613165")
     assert response.status_code == 200
     assert seen["id"] == "doi:10.1145/3600006.3613165"
+
+
+class _NoBoost:
+    total = 0.0
 
 
 def test_ask_returns_grounded_answer(monkeypatch: pytest.MonkeyPatch) -> None:
