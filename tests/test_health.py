@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from researchscout.config import Settings
 from researchscout.health import (
+    check_auth_posture,
     check_corpus_freshness,
     check_hung_runs,
     check_pipeline_runs,
@@ -194,10 +195,35 @@ def test_hung_runs_surface_open_rows(session: Session) -> None:
     assert "fulltext" in check.detail
 
 
+def test_auth_posture_warns_on_token_without_issuer() -> None:
+    check = check_auth_posture(Settings(service_token="secret", oidc_issuer=""))
+    assert check.status == "warn"
+    assert "shares the built-in local account" in check.detail
+
+
+def test_auth_posture_ok_with_an_issuer() -> None:
+    check = check_auth_posture(
+        Settings(service_token="secret", oidc_issuer="https://tenant.us.auth0.com/")
+    )
+    assert check.status == "ok"
+
+
+def test_auth_posture_ok_for_a_local_install() -> None:
+    check = check_auth_posture(Settings(service_token="", oidc_issuer=""))
+    assert (check.status, check.detail) == ("ok", "local single-user install")
+
+
 @pytest.mark.integration
 def test_run_health_checks_reports_every_check(session: Session) -> None:
     names = [check.name for check in run_health_checks(session, Settings())]
-    assert names == ["pipeline_runs", "task_streaks", "corpus_freshness", "hung_run", "storage"]
+    assert names == [
+        "pipeline_runs",
+        "task_streaks",
+        "corpus_freshness",
+        "hung_run",
+        "storage",
+        "auth_posture",
+    ]
 
 
 @pytest.mark.integration
