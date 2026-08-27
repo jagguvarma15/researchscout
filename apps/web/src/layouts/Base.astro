@@ -134,7 +134,11 @@ const renderedAt = new Date().toISOString();
           <ThemeToggle client:load />
           {
             user ? (
-              <AvatarMenu client:load username={user.username} avatar={account?.avatar ?? null} />
+              <AvatarMenu
+                client:load
+                username={account?.display_name || user.username}
+                avatar={account?.avatar ?? null}
+              />
             ) : (
               <a class="btn btn-primary signin" href="/login">Sign in</a>
             )
