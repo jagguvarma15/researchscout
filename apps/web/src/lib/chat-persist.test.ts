@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { chat, clearConversation, persistNow, restoreConversation } from './chat-state.svelte';
+import { ask, chat, clearConversation, persistNow, restoreConversation } from './chat-state.svelte';
 
 const KEY = 'rs-scout-chat';
 
@@ -214,5 +214,19 @@ describe('conversation persistence', () => {
   it('stores nothing when the thread is empty', () => {
     persistNow();
     expect(localStorage.getItem(KEY)).toBeNull();
+  });
+
+  it('caps the live thread, not only the stored copy', async () => {
+    // The omnibox never unmounts, so without an in-memory cap a long session grows the
+    // array for the life of the tab while the persisted copy stays at forty.
+    vi.stubGlobal(
+      'fetch',
+      () => Promise.resolve(new Response(null, { status: 503 })) as Promise<Response>,
+    );
+    for (let i = 0; i < 25; i += 1) {
+      await ask(`q${i}`, 'fast');
+    }
+    expect(chat.messages.length).toBeLessThanOrEqual(40);
+    expect(chat.messages[chat.messages.length - 2].text).toBe('q24');
   });
 });
