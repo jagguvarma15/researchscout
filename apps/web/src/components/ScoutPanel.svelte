@@ -13,7 +13,13 @@
   $effect(() => {
     // Track streamed text plus card and web-hit arrivals so the panel keeps the newest
     // content in view; the omnibox owns the scroll container, so it does the scrolling.
-    void chat.messages.map((m) => m.text + (m.results?.length ?? 0) + (m.webHits?.length ?? 0));
+    // Only the last message and the thread length: this effect fires per streamed token,
+    // and touching every message's full text re-concatenated the whole transcript each
+    // time - O(history) garbage per token. Streams and web results only ever mutate the
+    // tail message, so watching it is enough.
+    const last = chat.messages[chat.messages.length - 1];
+    void chat.messages.length;
+    void (last ? last.text.length + (last.results?.length ?? 0) + (last.webHits?.length ?? 0) : 0);
     onactivity();
   });
 </script>
