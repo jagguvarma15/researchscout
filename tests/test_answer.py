@@ -121,6 +121,74 @@ def test_answer_empty_when_no_papers(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.cited == []
 
 
+def test_history_reaches_the_prompt_clipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: [_scored("arxiv:2401.00001")])
+    llm = FakeLLM("[arxiv:2401.00001]")
+    history = [("user", "tell me about state space models"), ("assistant", "s" * 900)]
+    answer(None, _StubEmbedder(), llm, "and for vision?", history=history)
+    assert "Conversation so far:" in llm.last_user
+    assert "Reader: tell me about state space models" in llm.last_user
+    # Each turn is clipped so history never crowds the papers out of the window.
+    assert "s" * 501 not in llm.last_user
+    assert llm.last_user.index("Conversation so far:") < llm.last_user.index("Question:")
+
+
+def test_no_history_leaves_the_prompt_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(answer_mod, "retrieve", lambda *a, **k: [_scored("arxiv:2401.00001")])
+    llm = FakeLLM("[arxiv:2401.00001]")
+    answer(None, _StubEmbedder(), llm, "q")
+    assert llm.last_user.startswith("Question: q")
+
+
+def test_short_followup_borrows_the_previous_user_turn(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, str] = {}
+
+    def fake_retrieve(session: object, embedder: object, query: str, **kwargs: object) -> list:
+        seen["query"] = query
+        return []
+
+    monkeypatch.setattr(answer_mod, "retrieve", fake_retrieve)
+    history = [("user", "diffusion models for protein design"), ("assistant", "answer text")]
+    answer(None, _StubEmbedder(), FakeLLM("unused"), "what about RNA?", history=history)
+    assert seen["query"] == "diffusion models for protein design what about RNA?"
+    # A full question stands alone even mid-conversation.
+    answer(
+        None,
+        _StubEmbedder(),
+        FakeLLM("unused"),
+        "how do diffusion models handle long protein chains?",
+        history=history,
+    )
+    assert seen["query"] == "how do diffusion models handle long protein chains?"
+
+
+def test_paper_pin_scopes_retrieval_and_skips_agentic(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_retrieve(session: object, embedder: object, query: str, **kwargs: object) -> list:
+        seen["facets"] = kwargs.get("facets")
+        return []
+
+    def forbidden_agentic(*args: object, **kwargs: object) -> list:
+        raise AssertionError("a pinned ask must never decompose")
+
+    monkeypatch.setattr(answer_mod, "retrieve", fake_retrieve)
+    monkeypatch.setattr("researchscout.agentic.agentic_retrieve", forbidden_agentic)
+    answer(
+        None,
+        _StubEmbedder(),
+        FakeLLM("unused"),
+        "what does it conclude?",
+        agentic=True,
+        paper_id="arxiv:2401.00001",
+    )
+    facets = seen["facets"]
+    assert facets is not None
+    assert facets.only == ["arxiv:2401.00001"]
+    # The pin lifts the freshness window: a hand-chosen paper's age is irrelevant.
+    assert facets.days is not None and facets.days >= 3650
+
+
 def test_trace_span_logs(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.INFO, logger="researchscout.trace"):
         with trace_span("unit", foo=1) as span:
