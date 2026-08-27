@@ -9,6 +9,7 @@
 // Output: .smoke/*.png (gitignored). The API is optional - pages render their empty states
 // without it; set API_URL/API_SERVICE_TOKEN to point at a live backend for real content.
 
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -19,10 +20,16 @@ const OUT = fileURLToPath(new URL('../.smoke', import.meta.url));
 const PORT = 4399;
 const BASE = `http://127.0.0.1:${PORT}`;
 
+// The transcript is scoped to its account (lib/owner.ts); the built site runs in local
+// no-auth mode, so the seed must carry the local user's tag or the restore discards it and
+// every chat screenshot quietly shows an empty thread.
+const OWNER = createHash('sha256').update('local', 'utf8').digest('base64url').slice(0, 12);
+
 // A conversation shaped exactly like lib/chat-state.svelte.ts persists it: one fast answer
 // with cards and one formatted LLM answer, so both render paths appear in the screenshots.
 const CONVERSATION = {
-  v: 1,
+  v: 2,
+  owner: OWNER,
   savedAt: Date.now(),
   messages: [
     { role: 'user', text: 'attention mechanisms', phase: 'done' },
