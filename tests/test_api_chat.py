@@ -253,3 +253,76 @@ def test_fast_mode_records_ask_metrics(
     assert row["mode"] == "fast" and row["surface"] == "chat"
     assert row["found"] is False and row["best_relevance"] == 0.08
     assert row["llm_ms"] is None and row["total_ms"] >= 0
+
+
+def test_chat_forwards_history_scope_and_agentic(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, object] = {}
+
+    def fake_stream(
+        session: object, embedder: object, llm: object, question: str, **kwargs: object
+    ):
+        seen.update(kwargs)
+        yield StreamMeta(retrieved=0, used=[])
+        yield StreamDelta(text="none")
+        yield Answer(text="none", cited=[], hallucinated=[], used=[])
+
+    monkeypatch.setattr(chat_router, "answer_stream", fake_stream)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda *a, **k: True)
+    client = _client(monkeypatch)
+    response = client.post(
+        "/v1/chat",
+        json={
+            "question": "and for video?",
+            "agentic": True,
+            "history": [
+                {"role": "user", "text": "state space models"},
+                {"role": "assistant", "text": "they replace attention"},
+            ],
+            "paper_id": "arxiv:2401.00001",
+        },
+    )
+    assert response.status_code == 200
+    assert seen["agentic"] is True
+    assert seen["history"] == [
+        ("user", "state space models"),
+        ("assistant", "they replace attention"),
+    ]
+    assert seen["paper_id"] == "arxiv:2401.00001"
+
+
+def test_chat_fast_scopes_to_the_pin(monkeypatch: pytest.MonkeyPatch) -> None:
+    from researchscout.answer import FastAnswer
+
+    seen: dict[str, object] = {}
+
+    def fake_fast(session: object, embedder: object, question: str, **kwargs: object) -> FastAnswer:
+        seen.update(kwargs)
+        return FastAnswer(
+            answer=Answer(text="No papers matched.", cited=[], hallucinated=[], used=[]),
+            found=False,
+            best_relevance=None,
+        )
+
+    monkeypatch.setattr(chat_router, "answer_fast", fake_fast)
+    monkeypatch.setattr(chat_router, "is_research_question", _boom_guardrail)
+    client = _client(monkeypatch)
+    response = client.post(
+        "/v1/chat",
+        json={
+            "question": "what does it conclude?",
+            "mode": "fast",
+            "paper_id": "arxiv:2401.00001",
+            # Fast mode is single-shot by design: history is accepted and never forwarded.
+            "history": [{"role": "user", "text": "earlier turn"}],
+        },
+    )
+    assert response.status_code == 200
+    assert seen["paper_id"] == "arxiv:2401.00001"
+    assert "history" not in seen
+
+
+def test_chat_rejects_an_overlong_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client(monkeypatch)
+    turns = [{"role": "user", "text": f"turn {i}"} for i in range(9)]
+    response = client.post("/v1/chat", json={"question": "q", "history": turns})
+    assert response.status_code == 422
