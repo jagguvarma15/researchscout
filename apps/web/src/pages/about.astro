@@ -304,7 +304,30 @@ const healthChecks = [
                   .
                 </li>
               )}
+              {status?.ask && (
+                <li>
+                  <strong>{status.ask.asked.toLocaleString('en-US')} questions</strong> asked in
+                  the last {status.ask.days} days
+                  {status.ask.found_rate !== null &&
+                    `; ${Math.round(status.ask.found_rate * 100)} percent found papers`}
+                  {status.ask.fast_p50_ms !== null &&
+                    `; quick answers ${status.ask.fast_p50_ms}ms median`}
+                  {status.ask.llm_p50_ms !== null &&
+                    `; AI answers ${(status.ask.llm_p50_ms / 1000).toFixed(1)}s median`}
+                  .
+                </li>
+              )}
             </ul>
+            {status?.ask && status.ask.notfound.length > 0 && (
+              <details class="notfound">
+                <summary>Questions Scout could not answer recently</summary>
+                <ul>
+                  {status.ask.notfound.map((question) => (
+                    <li>{question}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
             {healthChecks.length > 0 && (
               <ul class="checks">
                 {healthChecks.map((check) => (
@@ -436,6 +459,22 @@ const healthChecks = [
   .table-scroll {
     overflow-x: auto;
     margin-top: 1.2rem;
+  }
+  /* The corpus-gap list: collapsed by default - it is a maintenance read, not a headline. */
+  .notfound {
+    max-width: 62ch;
+    margin: 1rem auto 0;
+    font-size: var(--text-sm);
+  }
+  .notfound summary {
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .notfound ul {
+    margin: 0.5rem 0 0;
+    padding-left: 1.2rem;
+    line-height: 1.65;
+    color: var(--muted);
   }
   /* Centered on both axes, to sit with the centered headings and prose above it rather
      than hugging the left edge on its own. `fixed` is what makes the colgroup widths
