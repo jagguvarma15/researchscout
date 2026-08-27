@@ -231,6 +231,12 @@ def answer_fast(
         calibrated = any(item.relevance is not None for item in used)
         floor = settings.ask_min_relevance if calibrated else settings.ask_min_similarity
         found = (best is not None and best >= floor) or (not known and bool(used))
+        if paper_id is not None:
+            # A pinned ask cannot miss: the reader chose the paper, so relevance to it is
+            # their assertion rather than the gate's. Questions with pronouns ("what does
+            # this introduce?") score low against any abstract, and an excerpt from the
+            # right paper beats a refusal to look at it.
+            found = bool(used)
         span["found"] = found
         span["best_relevance"] = best
         if not found:
@@ -243,7 +249,7 @@ def answer_fast(
         kept = [
             (item, rel)
             for item, rel in zip(used, relevances, strict=True)
-            if rel is None or rel >= floor
+            if paper_id is not None or rel is None or rel >= floor
         ][:_FAST_SHOWN]
         keep = [item for item, _ in kept]
         quotes = _excerpts_for(session, embedder, question, keep, query_vector)
