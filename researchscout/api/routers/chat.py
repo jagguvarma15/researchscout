@@ -8,6 +8,12 @@ drawer renders as cards) -> one ``token`` carrying the same content as text -> `
 something matched, or ``meta`` -> ``notfound`` -> empty ``done`` below the relevance floor. The
 generator is synchronous; Starlette drives it from a threadpool, and the request-scoped
 session stays open until the stream finishes.
+
+Conversation ``history`` reaches the LLM path only: it shapes retrieval for short follow-ups
+and joins the one model prompt. Fast mode is single-shot by design — extractive answers have
+no model to resolve context with, and blending stale turn terms into the lexical leg would
+degrade precision unpredictably — so it accepts the field and ignores it. ``paper_id`` scopes
+either mode to one stored paper.
 """
 
 from __future__ import annotations
@@ -115,7 +121,15 @@ def chat(
             # actually bounds how much of the machine the model can take.
             with llm_slot():
                 for event in answer_stream(
-                    session, embedder, llm, body.question, k=body.k, days=body.days
+                    session,
+                    embedder,
+                    llm,
+                    body.question,
+                    k=body.k,
+                    days=body.days,
+                    agentic=body.agentic,
+                    history=[(turn.role, turn.text) for turn in body.history],
+                    paper_id=body.paper_id,
                 ):
                     if isinstance(event, StreamMeta):
                         meta_at = time.perf_counter()
@@ -167,7 +181,15 @@ def _fast_events(session: Session, embedder: Embedder, body: AskRequest) -> Iter
     """The extractive fast path: no LLM, no guardrail (deterministic output needs none)."""
     started = time.perf_counter()
     timings: dict[str, float] = {}
-    fast = answer_fast(session, embedder, body.question, k=body.k, days=body.days, timings=timings)
+    fast = answer_fast(
+        session,
+        embedder,
+        body.question,
+        k=body.k,
+        days=body.days,
+        paper_id=body.paper_id,
+        timings=timings,
+    )
     result = fast.answer
     yield _sse("meta", {"retrieved": len(result.used), "mode": "fast"})
     if not fast.found:
