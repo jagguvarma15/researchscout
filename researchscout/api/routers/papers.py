@@ -8,17 +8,29 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from sqlalchemy import select
+
 from researchscout.api.auth import User, optional_user
 from researchscout.api.deps import get_embedder, get_session
-from researchscout.api.schemas import PaperList, PaperSummary
+from researchscout.api.schemas import PaperList, PaperSummary, RelatedPapers
 from researchscout.embed.base import Embedder
 from researchscout.retrieve.search import retrieve
+from researchscout.schema import Paper
+from researchscout.score import breakthrough, breakthrough_many
 from researchscout.store.account import dismissed_papers
+from researchscout.store.citations import citing_ids_for, references_cached
 from researchscout.store.facets import PaperFacets
-from researchscout.store.papers import count_papers, get_paper, list_papers
+from researchscout.store.models import ExternalIdRow, PaperEmbeddingRow, PaperRow
+from researchscout.store.papers import count_papers, get_paper, get_papers, list_papers
+from researchscout.store.vectors import search as vector_search
 from researchscout.taxonomy import all_subjects, all_topics
 
 router = APIRouter(tags=["papers"])
+
+# How much neighborhood one paper page shows per section. The citation graph can hold far
+# more; a related list past this stops being a recommendation and becomes a bibliography.
+_RELATED_GRAPH_LIMIT = 12
+_RELATED_SIMILAR_LIMIT = 6
 
 
 def _validated(values: list[str] | None, *, axis: Literal["subject", "topic"]) -> list[str] | None:
@@ -104,13 +116,84 @@ def papers_index(
     return PaperList(items=items, total=count_papers(session, facets), limit=limit, offset=offset)
 
 
+def _resolve_arxiv_ids(session: Session, arxiv_ids: list[str]) -> list[str]:
+    """Canonical ids of stored papers behind these arXiv ids (order preserved, misses dropped)."""
+    if not arxiv_ids:
+        return []
+    rows = session.execute(
+        select(ExternalIdRow.value, ExternalIdRow.paper_id).where(
+            ExternalIdRow.scheme == "arxiv", ExternalIdRow.value.in_(arxiv_ids)
+        )
+    ).all()
+    by_arxiv = {value: paper_id for value, paper_id in rows}
+    return [by_arxiv[value] for value in arxiv_ids if value in by_arxiv]
+
+
+@router.get("/papers/{paper_id:path}/related")
+def paper_related(
+    paper_id: str,
+    session: Annotated[Session, Depends(get_session)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
+) -> RelatedPapers:
+    """The paper's neighborhood: stored works it references, stored works citing it, and its
+    embedding nearest neighbors. Registered before the detail route so the ``:path``
+    converter there never swallows the ``/related`` suffix.
+    """
+    paper = get_paper(session, paper_id)
+    if paper is None:
+        raise HTTPException(status_code=404, detail=f"unknown paper id: {paper_id}")
+
+    reference_ids = _resolve_arxiv_ids(session, references_cached(session, paper.id) or [])
+    reference_ids = reference_ids[:_RELATED_GRAPH_LIMIT]
+
+    arxiv = paper.external_ids.get("arxiv")
+    citing_ids = citing_ids_for(session, arxiv)[:_RELATED_GRAPH_LIMIT] if arxiv else []
+
+    vector = session.execute(
+        select(PaperEmbeddingRow.embedding).where(
+            PaperEmbeddingRow.paper_id == paper.id,
+            PaperEmbeddingRow.model_id == embedder.model_id,
+        )
+    ).scalar_one_or_none()
+    similar_ids: list[str] = []
+    if vector is not None:
+        hits = vector_search(
+            session,
+            list(vector),
+            model_id=embedder.model_id,
+            k=_RELATED_SIMILAR_LIMIT + 1,
+            where=PaperRow.id != paper.id,
+        )
+        similar_ids = [hit_id for hit_id, _ in hits[:_RELATED_SIMILAR_LIMIT]]
+
+    every_id = list(dict.fromkeys([*reference_ids, *citing_ids, *similar_ids]))
+    papers = get_papers(session, every_id)
+    boosts = breakthrough_many(session, list(papers))
+
+    def summaries(ids: list[str]) -> list[PaperSummary]:
+        found: list[Paper] = [papers[pid] for pid in ids if pid in papers]
+        return [
+            PaperSummary.from_paper(item, score=boosts[item.id].total or None) for item in found
+        ]
+
+    return RelatedPapers(
+        references=summaries(reference_ids),
+        cited_by=summaries(citing_ids),
+        similar=summaries(similar_ids),
+    )
+
+
 @router.get("/papers/{paper_id:path}")
 def paper_detail(
     paper_id: str,
     session: Annotated[Session, Depends(get_session)],
 ) -> PaperSummary:
-    """One paper by canonical id (``:path`` because ids like DOIs contain slashes)."""
+    """One paper by canonical id (``:path`` because ids like DOIs contain slashes).
+
+    Carries the paper's own breakthrough momentum in ``score`` so the page can draw its
+    signal meter without re-searching for itself.
+    """
     paper = get_paper(session, paper_id)
     if paper is None:
         raise HTTPException(status_code=404, detail=f"unknown paper id: {paper_id}")
-    return PaperSummary.from_paper(paper)
+    return PaperSummary.from_paper(paper, score=breakthrough(session, paper.id).total or None)
