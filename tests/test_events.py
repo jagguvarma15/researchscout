@@ -16,6 +16,15 @@ from researchscout.store.papers import upsert_paper
 
 pytestmark = pytest.mark.integration
 
+# The embeddings column is a fixed vector(384); tests write one-hots of that width.
+_DIM = 384
+
+
+def _onehot(i: int) -> list[float]:
+    vector = [0.0] * _DIM
+    vector[i] = 1.0
+    return vector
+
 
 def _paper(arxiv: str) -> Paper:
     return Paper(
@@ -62,7 +71,7 @@ def test_positive_event_vectors_latest_per_paper_excluding_saved(session: Sessio
 
     for arxiv in ("2401.00001", "2401.00002", "2401.00003"):
         upsert_paper(session, _paper(arxiv))
-        upsert_embedding(session, f"arxiv:{arxiv}", "stub", [1.0, 0.0])
+        upsert_embedding(session, f"arxiv:{arxiv}", "stub", _onehot(1))
     save_paper(session, "local", "arxiv:2401.00003")
     append_events(
         session,
@@ -85,14 +94,14 @@ def test_positive_event_vectors_latest_per_paper_excluding_saved(session: Sessio
     ]
     # One row per paper, with the title and the embedding joined on.
     by_id = {paper_id: (title, vector) for paper_id, title, _, vector in rows}
-    assert by_id["arxiv:2401.00001"] == ("T", [1.0, 0.0])
+    assert by_id["arxiv:2401.00001"] == ("T", _onehot(1))
 
 
 def test_positive_event_vectors_window_and_other_users(session: Session) -> None:
     from researchscout.store.vectors import upsert_embedding
 
     upsert_paper(session, _paper("2401.00001"))
-    upsert_embedding(session, "arxiv:2401.00001", "stub", [1.0, 0.0])
+    upsert_embedding(session, "arxiv:2401.00001", "stub", _onehot(1))
     session.add(
         EventRow(
             user_sub="local",
