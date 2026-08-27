@@ -197,6 +197,11 @@ class Settings(BaseSettings):
     # Feed slots reserved for high-momentum papers outside every centroid (0 = off).
     foryou_explore_slots: int = 0
     foryou_half_life_days: float = 75.0
+    # Blend implicit feedback into the For You profile: papers the reader clicked, dwelled
+    # on or opened count as weak positives (a fraction of a save's weight), and dismissed
+    # papers never surface. Rides the v2 clustering, so it only takes effect with
+    # foryou_centroids >= 1; off keeps the profile to saves and interests exactly as before.
+    foryou_events: bool = False
     # Streaming pipeline: the brew-managed broker, the topic prefix (rs.raw.v1 and the
     # parsed/enriched taps), the worker's consumer group, and its recovery partitions.
     # The consumer batch sizes the lists the batch stages see; taps off skips the two
