@@ -30,9 +30,19 @@ export const chat = $state({
 let controller: AbortController | null = null;
 
 const STORAGE_KEY = 'rs-scout-chat';
-const VERSION = 1;
+// v2 added the owner tag; bumping discarded every pre-owner transcript once, which is the
+// safe direction on a shared browser.
+const VERSION = 2;
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MAX_MESSAGES = 40;
+
+// The account tag Base.astro stamps on <html> (an opaque hash, never the sub). Signed-out
+// visitors share the empty tag - a deliberate limit: without an account there is no identity
+// to scope to, exactly like the theme preference.
+function currentOwner(): string {
+  if (typeof document === 'undefined') return '';
+  return document.documentElement.dataset.owner ?? '';
+}
 
 // Canonical paper ids ("arxiv:2401.12345", "doi:10.1000/x"). Anything restored that will be
 // linkified or used as a citation gate must match; a stored id that does not is dropped.
@@ -286,7 +296,10 @@ export function persistNow(): void {
       return;
     }
     const messages = chat.messages.slice(-MAX_MESSAGES).map(serializeMessage);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ v: VERSION, savedAt: Date.now(), messages }));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ v: VERSION, owner: currentOwner(), savedAt: Date.now(), messages }),
+    );
   } catch {
     // Quota or private mode: the conversation simply does not survive the reload.
   }
@@ -325,8 +338,18 @@ export function restoreConversation(): void {
     return;
   }
   if (typeof parsed !== 'object' || parsed === null) return;
-  const envelope = parsed as { v?: unknown; savedAt?: unknown; messages?: unknown };
+  const envelope = parsed as { v?: unknown; owner?: unknown; savedAt?: unknown; messages?: unknown };
   if (envelope.v !== VERSION) return;
+  if ((envelope.owner ?? '') !== currentOwner()) {
+    // Another account's conversation on a shared browser: remove it rather than merely
+    // skipping it, so it does not linger for whoever signs in next.
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Removal is best-effort; a throwing storage already failed the read path.
+    }
+    return;
+  }
   if (typeof envelope.savedAt !== 'number' || Date.now() - envelope.savedAt > MAX_AGE_MS) return;
   if (!Array.isArray(envelope.messages)) return;
   const cleaned = envelope.messages
