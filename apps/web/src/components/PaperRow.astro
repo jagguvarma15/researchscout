@@ -131,7 +131,13 @@ const keywords = (paper.keywords ?? []).slice(0, 3);
         </span>
       )
     }
-    {keywords.map((word) => <span class="kw">{word}</span>)}
+    {
+      keywords.map((word) => (
+        <a class="kw" href={`/?keyword=${encodeURIComponent(word)}`}>
+          {word}
+        </a>
+      ))
+    }
     {
       keywords.length === 0 &&
         badges.rest.map((cat) => (
@@ -287,7 +293,7 @@ const keywords = (paper.keywords ?? []).slice(0, 3);
     color: var(--accent-ink);
   }
   /* Extracted keywords read as subject matter, not classification codes: chip shape,
-     ink text, no border. */
+     ink text, no border. Links now - each filters the feed to papers sharing the phrase. */
   .kw {
     display: inline-block;
     padding: 0.12rem 0.6rem;
@@ -297,6 +303,11 @@ const keywords = (paper.keywords ?? []).slice(0, 3);
     font-size: var(--text-xs);
     font-weight: var(--weight-medium);
     white-space: nowrap;
+    text-decoration: none;
+  }
+  a.kw:hover {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
   }
   /* The signal mark itself is the global .sig shape; only the compact rule below is
      this component's. */
