@@ -49,9 +49,10 @@ describe('classify', () => {
 });
 
 describe('isKnownCommand', () => {
-  it('accepts the two commands the composer implements', () => {
+  it('accepts the commands the composer implements', () => {
     expect(isKnownCommand('/web protein folding')).toBe(true);
     expect(isKnownCommand('/ai what is new')).toBe(true);
+    expect(isKnownCommand('/deep map the field')).toBe(true);
   });
 
   it('rejects anything else, so the hint line shows instead of sending', () => {
