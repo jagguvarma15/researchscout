@@ -101,6 +101,41 @@ export async function fetchSaved(token?: string | null): Promise<CatalogResult<P
   return result.ok ? { ok: true, data: result.data.items } : result;
 }
 
+// The reading list with its library fields - what /saved renders. fetchSaved above stays
+// for the pages that only need the id set.
+export interface SavedPaperItem extends PaperSummary {
+  status: 'to-read' | 'reading' | 'done';
+  tags: string[];
+  note: string | null;
+  saved_at: string | null;
+}
+
+export interface SavedLibrary {
+  items: SavedPaperItem[];
+  /** Every tag the reader uses, for the chips over the list. */
+  tags: string[];
+}
+
+export interface SavedListParams {
+  status?: string;
+  tag?: string;
+  q?: string;
+  sort?: string;
+}
+
+export async function fetchSavedList(
+  params: SavedListParams,
+  token?: string | null,
+): Promise<CatalogResult<SavedLibrary>> {
+  const search = new URLSearchParams();
+  if (params.status) search.set('status', params.status);
+  if (params.tag) search.set('tag', params.tag);
+  if (params.q) search.set('q', params.q);
+  if (params.sort && params.sort !== 'saved') search.set('sort', params.sort);
+  const query = search.toString();
+  return readCatalog<SavedLibrary>(`/v1/me/saved${query ? `?${query}` : ''}`, token);
+}
+
 export async function fetchForYou(token?: string | null): Promise<CatalogResult<PaperSummary[]>> {
   const result = await readCatalog<{ items: PaperSummary[] }>('/v1/me/feed', token);
   return result.ok ? { ok: true, data: result.data.items } : result;
