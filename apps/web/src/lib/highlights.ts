@@ -31,6 +31,8 @@ export interface Highlight {
   color: string;
   /** Whatever text fell inside the box, so a mark can be listed without rendering the page. */
   text: string;
+  /** The reader's own words about the mark, written in the highlights panel. */
+  note?: string;
   rects: HighlightRect[];
 }
 
@@ -77,7 +79,11 @@ function cleanHighlight(value: unknown): Highlight | null {
     .slice(0, MAX_RECTS)
     .map(cleanRect)
     .filter((rect): rect is HighlightRect => rect !== null);
-  return { id: item.id, page: item.page, color: item.color, text: item.text, rects };
+  const note =
+    typeof item.note === 'string' && item.note.length > 0 && item.note.length <= 2_000
+      ? item.note
+      : undefined;
+  return { id: item.id, page: item.page, color: item.color, text: item.text, note, rects };
 }
 
 function cleanItems(value: unknown): Highlight[] {
@@ -192,6 +198,63 @@ export function sweepHighlights(): void {
       // Same stance: best effort.
     }
   }
+}
+
+// --- flagged server sync ----------------------------------------------------------------
+//
+// localStorage stays the original; when the deployment enables RS_HIGHLIGHTS_SYNC the
+// reader mirrors each paper's marks to the account so they survive a device change and
+// the sweep above. A 404 from either route means the flag is off (or the visitor is
+// signed out on a route that needs an account) - remembered for the page's lifetime so
+// the reader never retries a feature that is not there.
+
+let syncUnavailable = false;
+
+/** The account's synced marks for a paper, or null when sync is off or unreachable. */
+export async function pullHighlights(paperId: string): Promise<Highlight[] | null> {
+  if (syncUnavailable) return null;
+  try {
+    const response = await fetch(`/api/me/highlights/${encodeURIComponent(paperId)}`);
+    if (response.status === 404 || response.status === 401) {
+      syncUnavailable = true;
+      return null;
+    }
+    if (!response.ok) return null;
+    const body = (await response.json()) as { items?: unknown };
+    return cleanItems(body.items);
+  } catch {
+    return null;
+  }
+}
+
+/** Fire-and-forget mirror of a paper's marks; failures cost nothing but the sync. */
+export function pushHighlights(paperId: string, items: Highlight[]): void {
+  if (syncUnavailable) return;
+  void fetch(`/api/me/highlights/${encodeURIComponent(paperId)}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ items: items.slice(0, MAX_ITEMS) }),
+  })
+    .then((response) => {
+      if (response.status === 404 || response.status === 401) syncUnavailable = true;
+    })
+    .catch(() => undefined);
+}
+
+/** Local marks win by id; synced marks this device has never seen join the list. */
+export function mergeHighlights(local: Highlight[], remote: Highlight[]): Highlight[] {
+  const known = new Set(local.map((item) => item.id));
+  return [...local, ...remote.filter((item) => !known.has(item.id))].slice(0, MAX_ITEMS);
+}
+
+/** The marks as a markdown document, for taking notes out of the reader. */
+export function highlightsMarkdown(title: string, items: Highlight[]): string {
+  const lines = [`# Highlights - ${title}`, ''];
+  for (const item of [...items].sort((a, b) => a.page - b.page)) {
+    lines.push(`- p${item.page}: ${item.text ? `"${item.text}"` : 'figure or equation'}`);
+    if (item.note) lines.push(`  - ${item.note}`);
+  }
+  return lines.join('\n') + '\n';
 }
 
 /** Page coordinates to pixels for painting at the current scale. */
