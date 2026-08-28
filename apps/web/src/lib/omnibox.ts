@@ -62,10 +62,10 @@ export function isKnownCommand(raw: string): boolean {
   return parsed.kind === 'web' || parsed.kind === 'ai' || parsed.kind === 'deep';
 }
 
-/** The feed URL for a full search, which is where "search all papers" hands off to. */
+/** The results URL for a full search, which is where "search all papers" hands off to. */
 export function searchUrl(query: string): string {
   const trimmed = query.trim();
-  return trimmed ? `/?q=${encodeURIComponent(trimmed)}` : '/';
+  return trimmed ? `/search?q=${encodeURIComponent(trimmed)}` : '/';
 }
 
 /**
