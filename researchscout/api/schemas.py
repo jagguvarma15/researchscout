@@ -598,6 +598,28 @@ class NotableModelList(BaseModel):
     items: list[NotableModelInfo]
 
 
+class SotaPointInfo(BaseModel):
+    """One frontier advance on a benchmark: when a score became the best recorded."""
+
+    on: date
+    score: float
+    model_name: str
+
+
+class SotaSeriesInfo(BaseModel):
+    id: str
+    name: str
+    scale: str
+    points: list[SotaPointInfo]
+
+
+class TrendsResponse(BaseModel):
+    """The /trends payload: benchmark frontiers over time plus recent notable releases."""
+
+    sota: list[SotaSeriesInfo]
+    releases: list[NotableModelInfo]
+
+
 class HeadlineBenchmarkInfo(BaseModel):
     """One curated benchmark with the best curated-lab score and its holder."""
 
