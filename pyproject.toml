@@ -28,6 +28,8 @@ api = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "pyjwt[crypto]>=2.9",
+    # Web push delivery of new issues (deliver.py); inert until RS_PUSH_ENABLED and keys.
+    "pywebpush>=2.0",
 ]
 # The streaming pipeline. Every import of these lives under researchscout/stream/ and the CLI
 # makes it lazily, so an install without them runs everything except `scout stream` - which is
