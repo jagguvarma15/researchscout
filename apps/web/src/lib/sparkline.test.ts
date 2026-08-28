@@ -36,3 +36,25 @@ describe('sparklineGeometry', () => {
     }
   });
 });
+
+describe('points and stepLineGeometry', () => {
+  it('exposes every reading center in series order', () => {
+    const geo = sparklineGeometry([3, 14], 100, 28, 4);
+    expect(geo?.points).toEqual([
+      { x: 4, y: 24 },
+      { x: 96, y: 4 },
+    ]);
+  });
+
+  it('steps horizontally at the old level before rising', async () => {
+    const { stepLineGeometry } = await import('./sparkline');
+    const geo = stepLineGeometry([3, 14], 100, 28, 4);
+    expect(geo?.path).toBe('M4 24 L96 24 L96 4');
+    expect(geo?.end).toEqual({ x: 96, y: 4 });
+  });
+
+  it('returns null below two points', async () => {
+    const { stepLineGeometry } = await import('./sparkline');
+    expect(stepLineGeometry([42])).toBeNull();
+  });
+});
