@@ -206,6 +206,14 @@ class Settings(BaseSettings):
     # browser exactly as before and 404s the endpoints; on, the reader mirrors each paper's
     # marks to the account so they survive a device change and the local sweep.
     highlights_sync: bool = False
+    # Web push delivery of new digests and reports. Off (the default) keeps the site
+    # pull-only: the subscription endpoints 404 and the scheduler never sends. On requires
+    # a VAPID keypair (openssl or pywebpush can mint one) and a contact subject the push
+    # services may use to reach the operator.
+    push_enabled: bool = False
+    vapid_private_key: str = ""
+    vapid_public_key: str = ""
+    vapid_subject: str = "mailto:ops@example.com"
     # Streaming pipeline: the brew-managed broker, the topic prefix (rs.raw.v1 and the
     # parsed/enriched taps), the worker's consumer group, and its recovery partitions.
     # The consumer batch sizes the lists the batch stages see; taps off skips the two
