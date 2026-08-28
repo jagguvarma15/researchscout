@@ -64,6 +64,7 @@ def papers_index(
     topic: Annotated[list[str] | None, Query()] = None,
     author: Annotated[str | None, Query(max_length=100)] = None,
     venue: Annotated[str | None, Query(max_length=100)] = None,
+    keyword: Annotated[list[str] | None, Query()] = None,
     min_citations: Annotated[int | None, Query(ge=0)] = None,
     sort: Annotated[Literal["newest", "citations", "activity"], Query()] = "newest",
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -96,6 +97,7 @@ def papers_index(
         topics=_validated(topic, axis="topic"),
         author=author,
         venue=venue,
+        keywords=keyword or None,
         min_citations=min_citations,
     )
     if q:
