@@ -1,21 +1,29 @@
-"""Bluesky discussion signals via the unauthenticated searchPosts endpoint.
+"""Bluesky discussion signals via searchPosts, authenticated when credentials exist.
 
 Post engagement around arXiv links is the fastest social read on a paper now that academic
 posting has moved here. Each fetch snapshots the ``since`` window with ``q=domain:arxiv.org``
-sorted newest-first (the window is cut client-side — the server rejects since/until filters
-unauthenticated): the arXiv id comes from the post's external-link embed (a dict lookup, not
-text scraping) with the post text as a fallback, engagement is aggregated per paper, and two
-observations attach to papers already in the store — ``social_mention`` (likes + reposts +
-quotes) and ``discussion`` (reply counts).
+sorted newest-first: the arXiv id comes from the post's external-link embed (a dict lookup,
+not text scraping) with the post text as a fallback, engagement is aggregated per paper, and
+two observations attach to papers already in the store — ``social_mention`` (likes + reposts
++ quotes) and ``discussion`` (reply counts).
+
+Since 2026-08 the search requires authentication everywhere, so the connector logs in with
+an app password (``identifier``/``app_password`` in sources.yaml, or the
+``BLUESKY_IDENTIFIER``/``BLUESKY_APP_PASSWORD`` environment) via
+``com.atproto.server.createSession`` and sends the Bearer token, refreshing once on a 401.
+Authenticated calls accept ``since``, so the window is filtered server-side and the
+1-per-second pacing the anonymous burst cap demanded is dropped. Without credentials the
+walk behaves exactly as it always did — unauthenticated, client-side window cut, paced —
+which currently 403s and is why the source ships disabled.
 
 Operational facts (probed live 2026-07-28): the search must hit ``api.bsky.app`` — the
-documented ``public.api.bsky.app`` host returns 403 for searchPosts; unauthenticated bursts
-cap at ~10 requests before a short 403, so pages are paced at ~1 request/second. Aggregator
-bots would dominate mention counts and are excluded by handle (configurable in sources.yaml).
+documented ``public.api.bsky.app`` host returns 403 for searchPosts. Aggregator bots would
+dominate mention counts and are excluded by handle (configurable in sources.yaml).
 """
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from datetime import UTC, datetime
@@ -29,6 +37,7 @@ from researchscout.sources.base import HealthStatus, RawItem, Source, register, 
 from researchscout.useragent import default_headers
 
 _SEARCH = "https://api.bsky.app/xrpc/app.bsky.feed.searchPosts"
+_SESSION = "https://bsky.social/xrpc/com.atproto.server.createSession"
 _REQUEST_TIMEOUT = 30.0
 _PAGE_SIZE = 100
 _MAX_PAGES = 8
@@ -48,6 +57,40 @@ _ARXIV_RE = re.compile(
 class BlueskySource(Source):
     name = "bluesky"
     kind = "signal"
+
+    # The session token for this connector instance; None until the first login.
+    _token: str | None = None
+
+    def _credentials(self) -> tuple[str, str] | None:
+        cfg = source_config(self.name)
+        identifier = str(cfg.get("identifier") or os.environ.get("BLUESKY_IDENTIFIER") or "")
+        password = str(cfg.get("app_password") or os.environ.get("BLUESKY_APP_PASSWORD") or "")
+        if identifier and password:
+            return identifier, password
+        return None
+
+    def _login(self) -> str | None:
+        """Create a session with the app password; None without credentials."""
+        credentials = self._credentials()
+        if credentials is None:
+            return None
+        resp = httpx.post(
+            _SESSION,
+            json={"identifier": credentials[0], "password": credentials[1]},
+            headers=default_headers(),
+            timeout=_REQUEST_TIMEOUT,
+        )
+        resp.raise_for_status()
+        token = str(resp.json().get("accessJwt") or "")
+        self._token = token or None
+        return self._token
+
+    def _headers(self) -> dict[str, str]:
+        headers = default_headers()
+        token = self._token or self._login()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        return headers
 
     def _excluded_accounts(self) -> set[str]:
         configured = source_config(self.name).get("exclude_accounts")
@@ -93,10 +136,12 @@ class BlueskySource(Source):
         return None
 
     def _posts(self, since: datetime) -> list[dict[str, Any]]:
-        # The server rejects every since/until filter shape unauthenticated (probed live), so
-        # sort=latest streams newest-first and the window is cut client-side: the first post
-        # older than ``since`` ends the walk. Naive datetimes (the CLI) are read as UTC.
+        # sort=latest streams newest-first. Authenticated, the server filters the window via
+        # ``since``; unauthenticated it rejects every since/until shape (probed live), so
+        # the window is cut client-side either way - the first post older than ``since``
+        # ends the walk. Naive datetimes (the CLI) are read as UTC.
         window_start = since if since.tzinfo else since.replace(tzinfo=UTC)
+        authed = self._credentials() is not None
         posts: list[dict[str, Any]] = []
         cursor: str | None = None
         for _page in range(_MAX_PAGES):
@@ -105,15 +150,27 @@ class BlueskySource(Source):
                 "sort": "latest",
                 "limit": _PAGE_SIZE,
             }
+            if authed:
+                params["since"] = window_start.isoformat().replace("+00:00", "Z")
             if cursor:
                 params["cursor"] = cursor
             resp = httpx.get(
                 _SEARCH,
                 params=params,
-                headers=default_headers(),
+                headers=self._headers() if authed else default_headers(),
                 timeout=_REQUEST_TIMEOUT,
                 follow_redirects=True,
             )
+            if authed and resp.status_code == 401:
+                # The session expired mid-walk; one fresh login, one retry, then judge.
+                self._token = None
+                resp = httpx.get(
+                    _SEARCH,
+                    params=params,
+                    headers=self._headers(),
+                    timeout=_REQUEST_TIMEOUT,
+                    follow_redirects=True,
+                )
             if resp.status_code in (403, 429) and posts:
                 break  # burst cap mid-walk: a partial snapshot beats an error
             resp.raise_for_status()
@@ -129,7 +186,8 @@ class BlueskySource(Source):
             cursor = payload.get("cursor")
             if exhausted or not cursor or not page_posts:
                 break
-            time.sleep(_PAGE_DELAY_SEC)  # unauthenticated burst cap: ~10 requests, then 403
+            if not authed:
+                time.sleep(_PAGE_DELAY_SEC)  # unauthenticated burst cap: ~10 requests, then 403
         return posts
 
     def fetch(self, since: datetime, cursor: str | None) -> tuple[list[RawItem], str | None]:
@@ -194,10 +252,11 @@ class BlueskySource(Source):
 
     def health(self) -> HealthStatus:
         try:
+            headers = self._headers() if self._credentials() else default_headers()
             resp = httpx.get(
                 _SEARCH,
                 params={"q": "domain:arxiv.org", "limit": 1},
-                headers=default_headers(),
+                headers=headers,
                 timeout=_REQUEST_TIMEOUT,
                 follow_redirects=True,
             )
