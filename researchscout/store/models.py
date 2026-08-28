@@ -179,6 +179,19 @@ class SavedPaperRow(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class PushSubscriptionRow(Base):
+    """One browser's web push subscription (migration 0032); the endpoint is the identity."""
+
+    __tablename__ = "push_subscriptions"
+    __table_args__ = (Index("ix_push_subscriptions_user", "user_sub"),)
+
+    endpoint: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_sub: Mapped[str] = mapped_column(ForeignKey("users.sub", ondelete="CASCADE"))
+    # The browser's p256dh and auth keys, exactly as PushSubscription.toJSON gives them.
+    keys: Mapped[dict[str, str]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class UserHighlightRow(Base):
     """One synced reader highlight (migration 0031); localStorage stays the original."""
 
