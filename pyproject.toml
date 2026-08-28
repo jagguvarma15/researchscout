@@ -72,6 +72,8 @@ dev = [
     # Same reasoning for the observe extra: the tests exercise the enabled paths.
     "sentry-sdk[fastapi]>=2.0",
     "langsmith>=0.4",
+    # And for push delivery: the deliver tests stub the send but import the client.
+    "pywebpush>=2.0",
 ]
 
 [build-system]
