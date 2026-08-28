@@ -622,6 +622,76 @@ class ScoreColumn:
     scale: str
 
 
+@dataclass(frozen=True)
+class SotaPoint:
+    """One frontier advance: the day a score became the best recorded on a benchmark."""
+
+    on: date_type
+    score: float
+    model_name: str
+
+
+@dataclass(frozen=True)
+class SotaSeries:
+    """A benchmark's frontier over time - only the points that raised the best-so-far."""
+
+    id: str
+    name: str
+    scale: str
+    points: list[SotaPoint]
+
+
+def sota_series(session: Session, config: ProviderConfig) -> list[SotaSeries]:
+    """The configured benchmarks' state of the art over time, for the trends charts.
+
+    Every dated result competes (not only the curated labs - the frontier is the frontier),
+    walked in date order keeping each score that beat everything before it. Benchmarks with
+    fewer than two frontier points are skipped: a single reading has no shape to draw.
+    """
+    wanted = list(config.benchmarks)
+    if not wanted:
+        return []
+    rows = session.execute(
+        select(
+            BenchmarkResultRow.benchmark_id,
+            BenchmarkResultRow.model_name,
+            BenchmarkResultRow.score,
+            BenchmarkResultRow.measured_on,
+            BenchmarkRow.name.label("benchmark_name"),
+            BenchmarkRow.score_scale,
+        )
+        .join(BenchmarkRow, BenchmarkRow.id == BenchmarkResultRow.benchmark_id)
+        .where(
+            BenchmarkResultRow.benchmark_id.in_(wanted),
+            BenchmarkResultRow.measured_on.is_not(None),
+        )
+        .order_by(BenchmarkResultRow.benchmark_id, BenchmarkResultRow.measured_on)
+    ).all()
+    grouped: dict[str, SotaSeries] = {}
+    frontier: dict[str, float] = {}
+    for row in rows:
+        series = grouped.get(row.benchmark_id)
+        if series is None:
+            series = SotaSeries(
+                id=row.benchmark_id,
+                name=row.benchmark_name,
+                scale=row.score_scale,
+                points=[],
+            )
+            grouped[row.benchmark_id] = series
+        best = frontier.get(row.benchmark_id)
+        if best is None or row.score > best:
+            frontier[row.benchmark_id] = row.score
+            series.points.append(
+                SotaPoint(on=row.measured_on, score=row.score, model_name=row.model_name)
+            )
+    return [
+        grouped[benchmark_id]
+        for benchmark_id in wanted
+        if benchmark_id in grouped and len(grouped[benchmark_id].points) >= 2
+    ]
+
+
 def provider_leaders(
     session: Session, config: ProviderConfig
 ) -> tuple[list[ProviderEntry], list[ScoreColumn]]:
