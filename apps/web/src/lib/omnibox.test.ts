@@ -62,8 +62,8 @@ describe('isKnownCommand', () => {
 });
 
 describe('searchUrl', () => {
-  it('encodes the query', () => {
-    expect(searchUrl('a b&c')).toBe('/?q=a%20b%26c');
+  it('encodes the query and lands on the results page', () => {
+    expect(searchUrl('a b&c')).toBe('/search?q=a%20b%26c');
   });
 
   it('falls back to the bare feed when there is nothing to search for', () => {
