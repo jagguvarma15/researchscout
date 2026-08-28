@@ -635,3 +635,29 @@ def test_a_scheduler_with_nothing_fetching_papers_says_so(
     with caplog.at_level("WARNING", logger="researchscout.scheduler"):
         build_tasks(Settings(scheduler_batch_pipeline=True))
     assert caplog.messages == []
+
+
+def test_announce_stays_silent_and_safe(monkeypatch: pytest.MonkeyPatch) -> None:
+    from researchscout.config import get_settings
+    from researchscout.scheduler import _announce
+
+    called: list[str] = []
+
+    def forbidden(**kwargs: object) -> int:
+        called.append("sent")
+        return 1
+
+    monkeypatch.setattr("researchscout.deliver.notify_new_issue", forbidden)
+    # Off (the default): the seam is never reached.
+    _announce(get_settings(), title="Digest", url="/digests/x")
+    assert called == []
+
+    # On: it is reached, and a delivery failure never escapes to fail the publish.
+    monkeypatch.setenv("RS_PUSH_ENABLED", "true")
+    get_settings.cache_clear()
+
+    def blowing_up(**kwargs: object) -> int:
+        raise RuntimeError("push service down")
+
+    monkeypatch.setattr("researchscout.deliver.notify_new_issue", blowing_up)
+    _announce(get_settings(), title="Digest", url="/digests/x")
