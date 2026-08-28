@@ -42,6 +42,10 @@ class PaperFacets:
     author: str | None = None
     venue: str | None = None
     min_citations: int | None = None
+    #: Extracted keywords (papers.keywords); values within the axis widen like categories.
+    #: Matching is exact against the stored phrase - the chips that link here carry stored
+    #: values, so nothing needs normalizing on the way in.
+    keywords: list[str] | None = None
     #: Paper ids to leave out entirely. This is what dismissing a paper does, and it is applied
     #: here rather than by dropping rows after the query so that ``total`` and the pager agree
     #: with what is actually on the page. Deliberately not applied under ``q``: a paper you
@@ -142,6 +146,10 @@ def facets_where(facets: PaperFacets) -> ColumnElement[bool] | None:
         clauses.append(PaperRow.venue.ilike(pattern, escape="\\"))
     if facets.min_citations is not None:
         clauses.append(PaperRow.citation_count >= facets.min_citations)
+    if facets.keywords:
+        # The JSONB any-element operator, same shape as the categories overlap; migration
+        # 0029's default-opclass GIN serves it.
+        clauses.append(PaperRow.keywords.op("?|")(cast(sorted(facets.keywords), ARRAY(TEXT))))
     if facets.exclude:
         clauses.append(PaperRow.id.not_in(facets.exclude))
     if facets.only:
