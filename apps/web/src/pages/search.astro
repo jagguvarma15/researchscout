@@ -1,0 +1,200 @@
+---
+import { Icon } from 'astro-icon/components';
+import EmptyState from '../components/EmptyState.astro';
+import FilterSidebar from '../components/FilterSidebar.svelte';
+import PageIntro from '../components/PageIntro.astro';
+import PaperRow from '../components/PaperRow.astro';
+import Telemetry from '../components/Telemetry.svelte';
+import Base from '../layouts/Base.astro';
+import { catalogMessage, fetchPapers, fetchSaved, type PaperSummary } from '../lib/api';
+
+// The results page: ranked hits for one query, with the same facet vocabulary as the feed.
+// A search without a query is just the feed, so it goes there.
+const params = Astro.url.searchParams;
+const q = params.get('q') ?? '';
+if (!q) {
+  return Astro.redirect('/');
+}
+
+const daysParam = params.get('days') ?? '';
+const year = params.get('year') ?? '';
+const month = params.get('month') ?? '';
+const author = params.get('author') ?? '';
+const venue = params.get('venue') ?? '';
+const minCitations = params.get('min_citations') ?? '';
+const sortParam = params.get('sort') ?? '';
+const category = params.getAll('category');
+const subject = params.getAll('subject');
+const topicParam = params.getAll('topic');
+const keyword = params.getAll('keyword');
+
+const [result, savedResult] = await Promise.all([
+  fetchPapers({
+    q,
+    days: daysParam,
+    year,
+    month,
+    author,
+    venue,
+    minCitations,
+    sort: sortParam,
+    category,
+    subject,
+    topic: topicParam,
+    keyword,
+  }),
+  fetchSaved(Astro.locals.accessToken),
+]);
+const items = result.ok ? result.data.items : null;
+const failure = result.ok ? null : result.failure;
+const savedIds = new Set(savedResult.ok ? savedResult.data.map((p) => p.id) : []);
+const rankOf = new Map((items ?? []).map((paper, index) => [paper.id, index]));
+// Retrieval scores are small absolute numbers; the meters read relative within this list.
+const signalMax = Math.max(...(items ?? []).map((hit) => hit.score ?? 0), 0) || 1;
+
+// Which query terms each hit actually contains - the reader's why-this-result line.
+const TOKEN = /[a-z0-9]+/g;
+function matchedTerms(paper: PaperSummary): string[] {
+  const haystack = `${paper.title} ${paper.abstract}`.toLowerCase();
+  const out: string[] = [];
+  for (const token of new Set(q.toLowerCase().match(TOKEN) ?? [])) {
+    if (token.length > 2 && haystack.includes(token)) out.push(token);
+    if (out.length === 4) break;
+  }
+  return out;
+}
+
+const filterCount = [
+  ...category,
+  ...subject,
+  ...topicParam,
+  ...keyword,
+  daysParam,
+  year,
+  author,
+  venue,
+  minCitations,
+].filter(Boolean).length;
+---
+
+<Base title={`Search: ${q}`}>
+  <PageIntro title="Search" lede={`Papers ranked against "${q}", best match first.`} />
+
+  <div class="toolbar">
+    <button class="btn btn-ghost" type="button" data-open-filters aria-haspopup="dialog">
+      <Icon name="lucide:sliders-horizontal" aria-hidden="true" />
+      Filters
+      {filterCount > 0 && <span class="filter-count">{filterCount}</span>}
+    </button>
+    {
+      items !== null && (
+        <span class="summary">
+          {items.length === 0
+            ? 'No results'
+            : `Top ${items.length} result${items.length === 1 ? '' : 's'}`}
+        </span>
+      )
+    }
+    <a class="btn btn-ghost clear" href="/">
+      <Icon name="lucide:x" aria-hidden="true" />
+      Clear search
+    </a>
+  </div>
+
+  {
+    items === null ? (
+      <EmptyState
+        kind="error"
+        icon="lucide:cloud-off"
+        message={failure ? catalogMessage(failure, 'search') : 'Search is unavailable right now.'}
+        action={{ href: Astro.url.pathname + Astro.url.search, label: 'Retry' }}
+      />
+    ) : items.length === 0 ? (
+      <EmptyState
+        icon="lucide:search-x"
+        message={`Nothing in the library matches "${q}".`}
+        hint="Try fewer or broader terms, or ask Scout - the /web command searches beyond the library."
+        action={{ href: '/', label: 'Back to the feed' }}
+      />
+    ) : (
+      <ul class="feed">
+        {items.map((paper, index) => (
+          <PaperRow
+            paper={paper}
+            signalMax={signalMax}
+            rank={index}
+            saved={savedIds.has(paper.id)}
+          >
+            <Fragment slot="extra">
+              {matchedTerms(paper).map((term) => (
+                <span class="hit">{term}</span>
+              ))}
+            </Fragment>
+          </PaperRow>
+        ))}
+      </ul>
+    )
+  }
+
+  <Telemetry client:idle surface="search" enabled={Astro.locals.user !== null} />
+  <FilterSidebar
+    client:load
+    initial={{
+      subjects: subject,
+      topics: topicParam,
+      categories: category,
+      days: daysParam,
+      year,
+      month,
+      sort: sortParam,
+      minCitations,
+      author,
+      venue,
+    }}
+  />
+</Base>
+
+<style>
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--line);
+  }
+  .filter-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    padding: 0 0.25rem;
+    border-radius: var(--radius-full);
+    background: var(--accent);
+    color: var(--accent-contrast, #fff);
+    font-size: 0.68rem;
+    font-weight: var(--weight-bold);
+  }
+  .summary {
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  .toolbar .clear {
+    margin-left: auto;
+  }
+  .feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  /* The matched query terms, marked the way a highlighter would - which is what they are. */
+  .hit {
+    display: inline-block;
+    padding: 0.12rem 0.5rem;
+    border-radius: var(--radius-full);
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: var(--text-xs);
+    font-weight: var(--weight-medium);
+  }
+</style>
