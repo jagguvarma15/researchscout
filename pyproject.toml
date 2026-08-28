@@ -111,6 +111,7 @@ module = [
     "sklearn.*",
     "confluent_kafka",
     "confluent_kafka.*",
+    "pywebpush",
 ]
 ignore_missing_imports = true
 
