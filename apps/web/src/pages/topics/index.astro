@@ -10,13 +10,32 @@ import { sparklineGeometry } from '../../lib/sparkline';
 
 const result = await fetchTopics();
 
-const topics = result.ok
+// Server-rendered controls: the trend chips narrow, the sort pills reorder, and both live
+// in the URL so a filtered view is shareable like every other list here.
+const params = Astro.url.searchParams;
+const TREND_KEYS = ['new', 'rising', 'steady', 'fading'] as const;
+const trendParam = params.get('trend') ?? '';
+const trendFilter = (TREND_KEYS as readonly string[]).includes(trendParam) ? trendParam : '';
+const sortParam = params.get('sort') === 'size' ? 'size' : 'score';
+
+function controlHref(trend: string, sort: string): string {
+  const next = new URLSearchParams();
+  if (trend) next.set('trend', trend);
+  if (sort !== 'score') next.set('sort', sort);
+  const query = next.toString();
+  return query ? `/topics?${query}` : '/topics';
+}
+
+let topics = result.ok
   ? result.data.map((topic) => ({
       ...topic,
       spark: sparklineGeometry(topic.history.map((point) => point.size)),
       memberMax: Math.max(...topic.papers.map((paper) => paper.score), 0),
     }))
   : [];
+const totalTopics = topics.length;
+if (trendFilter) topics = topics.filter((topic) => topic.trend === trendFilter);
+if (sortParam === 'size') topics = [...topics].sort((a, b) => b.size - a.size);
 ---
 
 <Base title="Trends">
@@ -24,6 +43,35 @@ const topics = result.ok
     title="Emerging topics"
     lede="Clusters of recent papers, ranked by how fast their signals are climbing."
   />
+
+  {
+    result.ok && totalTopics > 0 && (
+      <div class="controls">
+        <span class="controls-group" role="group" aria-label="Filter by trend">
+          <a class:list={['pill', { on: !trendFilter }]} href={controlHref('', sortParam)} aria-current={!trendFilter ? 'page' : undefined}>
+            All
+          </a>
+          {TREND_KEYS.map((key) => (
+            <a
+              class:list={['pill', { on: trendFilter === key }]}
+              href={controlHref(key, sortParam)}
+              aria-current={trendFilter === key ? 'page' : undefined}
+            >
+              {key[0].toUpperCase() + key.slice(1)}
+            </a>
+          ))}
+        </span>
+        <span class="controls-group" role="group" aria-label="Order topics">
+          <a class:list={['pill', { on: sortParam === 'score' }]} href={controlHref(trendFilter, 'score')} aria-current={sortParam === 'score' ? 'page' : undefined}>
+            By momentum
+          </a>
+          <a class:list={['pill', { on: sortParam === 'size' }]} href={controlHref(trendFilter, 'size')} aria-current={sortParam === 'size' ? 'page' : undefined}>
+            By size
+          </a>
+        </span>
+      </div>
+    )
+  }
 
   {
     !result.ok ? (
@@ -36,8 +84,13 @@ const topics = result.ok
     ) : topics.length === 0 ? (
       <EmptyState
         icon="lucide:hourglass"
-        message="No topics yet."
-        hint="They appear after the next clustering sweep, or run: scout topics build"
+        message={trendFilter ? `No ${trendFilter} topics right now.` : 'No topics yet.'}
+        hint={
+          trendFilter
+            ? 'Trends shift with each nightly clustering sweep.'
+            : 'They appear after the next clustering sweep, or run: scout topics build'
+        }
+        action={trendFilter ? { href: '/topics', label: 'Every topic' } : undefined}
       />
     ) : (
       <ul class="topics">
@@ -96,6 +149,30 @@ const topics = result.ok
 </Base>
 
 <style>
+  /* The filter and order pills, in the shared pill register with an accent-on active. */
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 1.2rem;
+    margin-bottom: var(--space-4);
+  }
+  .controls-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .controls .pill {
+    text-decoration: none;
+    color: var(--muted);
+  }
+  .controls .pill:hover {
+    color: var(--ink);
+  }
+  .controls .pill.on {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
   .topics {
     list-style: none;
     margin: 0;
