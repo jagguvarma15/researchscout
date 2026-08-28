@@ -62,12 +62,15 @@ sources:
       data_license: Reader-submitted posts; each stays with the person who wrote it
       provides: Story points and comment counts, plus the public story ids they came from
   bluesky:
-    # Off since 2026-08: Bluesky now requires authentication for searchPosts everywhere -
-    # api.bsky.app (the workaround after the documented public host started 403ing) answers
-    # 403 too. Re-enable only once the connector speaks authenticated search (app password).
-    # When it ran: post engagement fed social_mention, reply counts fed discussion; the
-    # excluded handles are aggregator bots that would otherwise dominate mention counts.
+    # Off until credentials exist: Bluesky requires authentication for searchPosts
+    # everywhere since 2026-08, and the connector now speaks it - set an account handle
+    # as `identifier` and an app password as `app_password` below (or the
+    # BLUESKY_IDENTIFIER / BLUESKY_APP_PASSWORD environment), then flip enabled. Post
+    # engagement feeds social_mention, reply counts feed discussion; the excluded handles
+    # are aggregator bots that would otherwise dominate mention counts.
     enabled: false
+    # identifier: your-handle.bsky.social
+    # app_password: xxxx-xxxx-xxxx-xxxx
     kind: signal
     cadence: daily
     attribution:
