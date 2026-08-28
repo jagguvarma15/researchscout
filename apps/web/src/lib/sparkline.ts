@@ -9,6 +9,8 @@ export interface SparklineGeometry {
   area: string;
   /* Center of the terminal dot - the series' latest reading. */
   end: { x: number; y: number };
+  /* Every reading's center, in series order - what makes individual builds clickable. */
+  points: { x: number; y: number }[];
 }
 
 /** Null when the series has fewer than two points - a single build has no shape. */
@@ -35,7 +37,43 @@ export function sparklineGeometry(
   const path = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ');
   const last = points[points.length - 1];
   const area = `${path} L${last.x} ${baseline} L${points[0].x} ${baseline} Z`;
-  return { line, area, end: last };
+  return { line, area, end: last, points };
+}
+
+export interface StepLineGeometry {
+  /* d attribute for the step <path> - a frontier holds its level until the next advance. */
+  path: string;
+  /* d attribute for the closed area wash under the steps. */
+  area: string;
+  end: { x: number; y: number };
+  points: { x: number; y: number }[];
+}
+
+/**
+ * A step line for frontier series: each advance holds its level until the next one.
+ * Null below two points, same as the sparkline - one reading has no shape.
+ */
+export function stepLineGeometry(
+  values: number[],
+  width = 640,
+  height = 120,
+  pad = 8,
+): StepLineGeometry | null {
+  const base = sparklineGeometry(values, width, height, pad);
+  if (base === null) return null;
+  const parts: string[] = [];
+  for (const [index, point] of base.points.entries()) {
+    if (index === 0) {
+      parts.push(`M${point.x} ${point.y}`);
+    } else {
+      // Horizontal to the new x at the old level, then vertical to the new level.
+      parts.push(`L${point.x} ${base.points[index - 1].y}`, `L${point.x} ${point.y}`);
+    }
+  }
+  const baseline = height - 2;
+  const last = base.points[base.points.length - 1];
+  const area = `${parts.join(' ')} L${last.x} ${baseline} L${base.points[0].x} ${baseline} Z`;
+  return { path: parts.join(' '), area, end: base.end, points: base.points };
 }
 
 function round(value: number): number {
