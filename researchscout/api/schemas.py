@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, Field
 
@@ -39,7 +39,7 @@ class PaperSummary(BaseModel):
     @classmethod
     def from_paper(
         cls, paper: Paper, *, score: float | None = None, reason: str | None = None
-    ) -> PaperSummary:
+    ) -> Self:
         return cls(
             id=paper.id,
             title=paper.title,
@@ -67,6 +67,53 @@ class PaperList(BaseModel):
     total: int | None = None
     limit: int = 20
     offset: int = 0
+
+
+class SavedUpdate(BaseModel):
+    """A PATCH over one saved row - absent fields change nothing, empty values clear."""
+
+    status: Literal["to-read", "reading", "done"] | None = None
+    tags: list[Annotated[str, Field(min_length=1, max_length=40)]] | None = Field(
+        default=None, max_length=20
+    )
+    note: Annotated[str, Field(max_length=4000)] | None = None
+
+
+class SavedPaperItem(PaperSummary):
+    """A reading-list row: the paper plus its library fields."""
+
+    status: str = "to-read"
+    tags: list[str] = []
+    note: str | None = None
+    saved_at: datetime | None = None
+
+
+class SavedList(BaseModel):
+    items: list[SavedPaperItem]
+    # Every tag the reader uses, for the chips over the library.
+    tags: list[str] = []
+
+
+class HighlightRectBody(BaseModel):
+    x: float
+    y: float
+    w: float
+    h: float
+
+
+class HighlightBody(BaseModel):
+    """One reader mark, mirrored from the browser's local copy."""
+
+    id: str = Field(min_length=1, max_length=64)
+    page: int = Field(ge=1, le=10_000)
+    color: str = Field(max_length=32)
+    text: str = Field(max_length=2000)
+    note: Annotated[str, Field(max_length=2000)] | None = None
+    rects: list[HighlightRectBody] = Field(max_length=50)
+
+
+class HighlightsPayload(BaseModel):
+    items: list[HighlightBody] = Field(max_length=200)
 
 
 class RelatedPapers(BaseModel):
