@@ -15,5 +15,9 @@ labels:
     description: Vision, audio, video, or any cross-modal modeling.
   - name: theory
     description: Learning theory, optimization analysis, generalization bounds.
+  - name: benchmarks
+    description: New benchmarks, evaluation suites, or studies of how models are measured.
+  - name: data
+    description: Datasets, data curation, filtering, or synthetic data generation.
   - name: applications
     description: Domain applications of machine learning outside core methods research.
