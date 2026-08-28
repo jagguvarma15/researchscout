@@ -347,3 +347,62 @@ describe('newId', () => {
     expect(ids.size).toBe(3);
   });
 });
+
+describe('notes, merge and markdown', () => {
+  const base: Highlight = {
+    id: 'a',
+    page: 2,
+    color: 'amber',
+    text: 'the key sentence',
+    rects: [{ x: 1, y: 2, w: 30, h: 4 }],
+  };
+
+  it('round-trips a note and drops an overlong one', () => {
+    saveHighlights(PAPER, [{ ...base, note: 'compare with section 5' }]);
+    expect(loadHighlights(PAPER)[0].note).toBe('compare with section 5');
+
+    saveHighlights(PAPER, [{ ...base, note: 'x'.repeat(2001) }]);
+    expect(loadHighlights(PAPER)[0].note).toBeUndefined();
+  });
+
+  it('merges remote marks without letting them shadow local ones', async () => {
+    const { mergeHighlights } = await import('./highlights');
+    const local = [{ ...base, note: 'local words' }];
+    const remote = [
+      { ...base, note: 'older synced words' },
+      { ...base, id: 'b', page: 5 },
+    ];
+    const merged = mergeHighlights(local, remote);
+    expect(merged.map((item) => item.id)).toEqual(['a', 'b']);
+    expect(merged[0].note).toBe('local words');
+  });
+
+  it('renders the marks as a markdown document, page order, notes nested', async () => {
+    const { highlightsMarkdown } = await import('./highlights');
+    const doc = highlightsMarkdown('Sparse Attention', [
+      { ...base, id: 'b', page: 5, text: '', note: 'a figure worth keeping' },
+      { ...base, note: 'compare with section 5' },
+    ]);
+    const lines = doc.split('\n');
+    expect(lines[0]).toBe('# Highlights - Sparse Attention');
+    expect(lines[2]).toBe('- p2: "the key sentence"');
+    expect(lines[3]).toBe('  - compare with section 5');
+    expect(lines[4]).toBe('- p5: figure or equation');
+    expect(lines[5]).toBe('  - a figure worth keeping');
+  });
+
+  it('remembers when sync is unavailable and stops asking', async () => {
+    const { pullHighlights, pushHighlights } = await import('./highlights');
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      return Promise.resolve(new Response(null, { status: 404 })) as Promise<Response>;
+    });
+    expect(await pullHighlights(PAPER)).toBeNull();
+    pushHighlights(PAPER, [base]);
+    await Promise.resolve();
+    expect(await pullHighlights(PAPER)).toBeNull();
+    // The 404 latched after the first call; nothing else went out.
+    expect(calls).toHaveLength(1);
+  });
+});
