@@ -1,37 +1,223 @@
 ---
+import { Icon } from 'astro-icon/components';
 import EmptyState from '../components/EmptyState.astro';
 import PageIntro from '../components/PageIntro.astro';
-import PaperList from '../components/PaperList.astro';
+import PaperRow from '../components/PaperRow.astro';
+import SavedControls from '../components/SavedControls.svelte';
 import Base from '../layouts/Base.astro';
-import { catalogMessage, fetchSaved } from '../lib/api';
+import { catalogMessage, fetchSavedList } from '../lib/api';
 
-const result = await fetchSaved(Astro.locals.accessToken);
+// The library view: status tabs, tag chips, order, search-within, export - all in the
+// URL, server-rendered, so a filtered shelf is shareable like every other list here.
+const params = Astro.url.searchParams;
+const STATUSES = [
+  ['', 'All'],
+  ['to-read', 'To read'],
+  ['reading', 'Reading'],
+  ['done', 'Done'],
+] as const;
+const statusParam = params.get('status') ?? '';
+const status = STATUSES.some(([key]) => key === statusParam) ? statusParam : '';
+const tag = params.get('tag') ?? '';
+const q = params.get('q') ?? '';
+const sortParam = params.get('sort') ?? 'saved';
+const sort = ['saved', 'published', 'title'].includes(sortParam) ? sortParam : 'saved';
+
+function href(next: { status?: string; tag?: string; q?: string; sort?: string }): string {
+  const merged = {
+    status: next.status ?? status,
+    tag: next.tag ?? tag,
+    q: next.q ?? q,
+    sort: next.sort ?? sort,
+  };
+  const search = new URLSearchParams();
+  if (merged.status) search.set('status', merged.status);
+  if (merged.tag) search.set('tag', merged.tag);
+  if (merged.q) search.set('q', merged.q);
+  if (merged.sort !== 'saved') search.set('sort', merged.sort);
+  const query = search.toString();
+  return query ? `/saved?${query}` : '/saved';
+}
+
+const result = await fetchSavedList({ status, tag, q, sort }, Astro.locals.accessToken);
+const items = result.ok ? result.data.items : null;
+const allTags = result.ok ? result.data.tags : [];
+const filtered = Boolean(status || tag || q);
 ---
 
 <Base title="Saved papers">
   <PageIntro title="Saved papers" />
 
   {
-    !result.ok ? (
+    items !== null && (items.length > 0 || filtered) && (
+      <div class="toolbar">
+        <span class="tabs" role="group" aria-label="Filter by reading status">
+          {STATUSES.map(([key, label]) => (
+            <a
+              class:list={['pill', { on: status === key }]}
+              href={href({ status: key })}
+              aria-current={status === key ? 'page' : undefined}
+            >
+              {label}
+            </a>
+          ))}
+        </span>
+        <span class="order" role="group" aria-label="Order the list">
+          {(
+            [
+              ['saved', 'Recently saved'],
+              ['published', 'Newest'],
+              ['title', 'Title'],
+            ] as const
+          ).map(([key, label]) => (
+            <a
+              class:list={['pill', { on: sort === key }]}
+              href={href({ sort: key })}
+              aria-current={sort === key ? 'page' : undefined}
+            >
+              {label}
+            </a>
+          ))}
+        </span>
+        <form class="find" method="get" action="/saved">
+          {status && <input type="hidden" name="status" value={status} />}
+          {tag && <input type="hidden" name="tag" value={tag} />}
+          {sort !== 'saved' && <input type="hidden" name="sort" value={sort} />}
+          <input type="search" name="q" value={q} placeholder="Search your list" aria-label="Search your saved papers" maxlength="200" />
+        </form>
+        <span class="grow" />
+        <a class="btn btn-ghost" href="/api/me/saved/export?format=bibtex">
+          <Icon name="lucide:download" aria-hidden="true" />
+          BibTeX
+        </a>
+        <a class="btn btn-ghost" href="/api/me/saved/export?format=csv">
+          <Icon name="lucide:download" aria-hidden="true" />
+          CSV
+        </a>
+      </div>
+    )
+  }
+
+  {
+    items !== null && allTags.length > 0 && (
+      <p class="tagrow">
+        {allTags.map((name) => (
+          <a
+            class:list={['pill', { on: tag === name }]}
+            href={href({ tag: tag === name ? '' : name })}
+            aria-current={tag === name ? 'page' : undefined}
+          >
+            {name}
+          </a>
+        ))}
+      </p>
+    )
+  }
+
+  {
+    items === null ? (
       <EmptyState
         kind="error"
         icon="lucide:cloud-off"
-        message={catalogMessage(result.failure, 'reading list')}
+        message={catalogMessage(result.ok ? { status: null } : result.failure, 'reading list')}
         action={{ href: '/saved', label: 'Retry' }}
       />
-    ) : result.data.length === 0 ? (
-      <EmptyState
-        icon="lucide:bookmark-plus"
-        message="Nothing saved yet."
-        hint="Bookmark a paper anywhere and it lands here."
-        action={{ href: '/', label: 'Browse the feed' }}
-      />
+    ) : items.length === 0 ? (
+      filtered ? (
+        <EmptyState
+          icon="lucide:filter-x"
+          message="Nothing in your list matches these filters."
+          action={{ href: '/saved', label: 'The whole list' }}
+        />
+      ) : (
+        <EmptyState
+          icon="lucide:bookmark-plus"
+          message="Nothing saved yet."
+          hint="Bookmark a paper anywhere and it lands here."
+          action={{ href: '/', label: 'Browse the feed' }}
+        />
+      )
     ) : (
-      <PaperList
-        papers={result.data}
-        savedIds={new Set(result.data.map((paper) => paper.id))}
-        density="compact"
-      />
+      <Fragment>
+        <p class="count">
+          {items.length} paper{items.length === 1 ? '' : 's'}
+        </p>
+        <ul class="feed">
+          {items.map((paper) => (
+            <PaperRow paper={paper} saved={true} density="compact">
+              <Fragment slot="extra">
+                <SavedControls
+                  client:visible
+                  paperId={paper.id}
+                  status={paper.status}
+                  tags={paper.tags}
+                  note={paper.note}
+                />
+              </Fragment>
+            </PaperRow>
+          ))}
+        </ul>
+      </Fragment>
     )
   }
 </Base>
+
+<style>
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--line);
+  }
+  .tabs,
+  .order {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .toolbar .pill,
+  .tagrow .pill {
+    text-decoration: none;
+    color: var(--muted);
+  }
+  .toolbar .pill:hover,
+  .tagrow .pill:hover {
+    color: var(--ink);
+  }
+  .toolbar .pill.on,
+  .tagrow .pill.on {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  .find input {
+    font: inherit;
+    font-size: var(--text-sm);
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-full);
+    padding: 0.25rem 0.75rem;
+    min-width: 12rem;
+  }
+  .grow {
+    flex: 1;
+  }
+  .tagrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0.75rem 0 0;
+  }
+  .count {
+    margin: 0.75rem 0 0;
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  .feed {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+</style>
