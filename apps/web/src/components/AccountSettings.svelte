@@ -46,6 +46,40 @@
     window.location.href = '/api/me/export';
   }
 
+  // Web push: offered only when the deployment enables it (the key route 404s otherwise),
+  // so the whole block simply never renders on installs without it.
+  let pushAvailable = $state(false);
+  let pushOn = $state(false);
+  let pushBusy = $state(false);
+  let pushNote = $state('');
+
+  $effect(() => {
+    void (async () => {
+      const { pushOffered, currentSubscription } = await import('../lib/push');
+      pushAvailable = await pushOffered();
+      if (pushAvailable) pushOn = (await currentSubscription()) !== null;
+    })();
+  });
+
+  async function togglePush(): Promise<void> {
+    pushBusy = true;
+    pushNote = '';
+    try {
+      const { enablePush, disablePush } = await import('../lib/push');
+      if (pushOn) {
+        await disablePush();
+        pushOn = false;
+      } else {
+        const outcome = await enablePush();
+        if (outcome === 'on') pushOn = true;
+        else if (outcome === 'denied') pushNote = 'The browser blocked notifications for this site.';
+        else pushNote = 'Could not turn notifications on - try again.';
+      }
+    } finally {
+      pushBusy = false;
+    }
+  }
+
   async function deleteAccount(): Promise<void> {
     deleting = true;
     message = '';
@@ -93,6 +127,19 @@
     </div>
     <button class="btn btn-ghost" type="button" onclick={downloadData}>Download</button>
   </div>
+
+  {#if pushAvailable}
+    <div class="row spaced">
+      <div>
+        <h3>Notifications</h3>
+        <p>A browser notice when a new digest or daily report is published.</p>
+        {#if pushNote}<p class="push-note">{pushNote}</p>{/if}
+      </div>
+      <button class="btn btn-ghost" type="button" onclick={togglePush} disabled={pushBusy}>
+        {pushBusy ? 'Working...' : pushOn ? 'Turn off' : 'Turn on'}
+      </button>
+    </div>
+  {/if}
 
   {#if termsVersion}
     <p class="terms">You accepted the terms, version {termsVersion}.</p>
@@ -172,6 +219,10 @@
   }
   .terms {
     margin-top: var(--space-4);
+    font-size: var(--text-xs);
+  }
+  .push-note {
+    color: var(--muted);
     font-size: var(--text-xs);
   }
   .danger {
