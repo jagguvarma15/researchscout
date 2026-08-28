@@ -37,8 +37,9 @@ describe('gateEnabled', () => {
 });
 
 describe('isPublicPath', () => {
-  it('admits exactly the landing, the legal pages, and the auth machinery', () => {
-    for (const path of ['/welcome', '/terms', '/privacy', '/login', '/callback', '/logout', '/entry']) {
+  it('admits exactly the landing, the legal pages, the auth machinery, and the feed', () => {
+    // The feed route carries its own FEED_TOKEN check; the session gate steps aside for it.
+    for (const path of ['/welcome', '/terms', '/privacy', '/login', '/callback', '/logout', '/entry', '/feeds/digests.xml']) {
       expect(gate.isPublicPath(path), path).toBe(true);
     }
   });
