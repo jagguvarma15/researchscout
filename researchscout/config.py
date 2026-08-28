@@ -202,6 +202,10 @@ class Settings(BaseSettings):
     # papers never surface. Rides the v2 clustering, so it only takes effect with
     # foryou_centroids >= 1; off keeps the profile to saves and interests exactly as before.
     foryou_events: bool = False
+    # Server-side sync of reader highlights. Off (the default) leaves marks purely in the
+    # browser exactly as before and 404s the endpoints; on, the reader mirrors each paper's
+    # marks to the account so they survive a device change and the local sweep.
+    highlights_sync: bool = False
     # Streaming pipeline: the brew-managed broker, the topic prefix (rs.raw.v1 and the
     # parsed/enriched taps), the worker's consumer group, and its recovery partitions.
     # The consumer batch sizes the lists the batch stages see; taps off skips the two
