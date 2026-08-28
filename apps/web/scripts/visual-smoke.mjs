@@ -236,6 +236,10 @@ async function shootSurfaces(browser, details) {
     ['desktop-benchmarks', '/benchmarks', { width: 1280, height: 1100 }, null],
     ['desktop-benchmarks-dark', '/benchmarks', { width: 1280, height: 1100 }, 'dark'],
     ['desktop-models-sorted', '/models?sort=downloads', { width: 1280, height: 900 }, null],
+    ['desktop-search', '/search?q=attention', { width: 1280, height: 900 }, null],
+    ['phone-search', '/search?q=attention', { width: 390, height: 844 }, null],
+    ['desktop-frontier', '/trends', { width: 1280, height: 1000 }, null],
+    ['desktop-frontier-dark', '/trends', { width: 1280, height: 1000 }, 'dark'],
   ];
   for (const [name, path, viewport, theme] of shots) {
     if (!path) {
