@@ -151,8 +151,10 @@
     const query = params.toString();
     rememberFilters(query);
     // Through the client router, so applying filters animates the feed change instead of
-    // reloading the document.
-    void navigate(query ? `/?${query}` : '/');
+    // reloading the document. A search stays a search: applied from /search, the filters
+    // narrow the results page rather than bouncing back to the feed.
+    const base = searching && window.location.pathname === '/search' ? '/search' : '/';
+    void navigate(query ? `${base}?${query}` : base);
   }
 
   function reset() {
