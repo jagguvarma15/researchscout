@@ -24,6 +24,7 @@ from researchscout.api.routers import (
     stream,
     system,
     topics,
+    trends,
     webimport,
 )
 from researchscout.api.service_auth import service_token_middleware
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(feed.router, prefix="/v1")
     app.include_router(digests.router, prefix="/v1")
     app.include_router(topics.router, prefix="/v1")
+    app.include_router(trends.router, prefix="/v1")
     app.include_router(keywords.router, prefix="/v1")
     app.include_router(sources.router, prefix="/v1")
     app.include_router(system.router, prefix="/v1")
