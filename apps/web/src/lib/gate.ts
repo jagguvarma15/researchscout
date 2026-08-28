@@ -27,6 +27,9 @@ const PUBLIC_PATHS = new Set([
   '/callback',
   '/logout',
   '/entry',
+  // The Atom feed carries its own FEED_TOKEN check inside the route - feed readers
+  // cannot sign in, so the session gate steps aside for exactly this path.
+  '/feeds/digests.xml',
 ]);
 
 export function gateEnabled(): boolean {
