@@ -172,6 +172,33 @@ class SavedPaperRow(Base):
         ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
     )
     saved_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The library fields (migration 0030): reading status, reader-chosen tags, a free note.
+    # Writers omit absent JSONB values rather than binding None (the 0028 lesson).
+    status: Mapped[str] = mapped_column(String(16), server_default="to-read")
+    tags: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class UserHighlightRow(Base):
+    """One synced reader highlight (migration 0031); localStorage stays the original."""
+
+    __tablename__ = "user_highlights"
+
+    user_sub: Mapped[str] = mapped_column(
+        ForeignKey("users.sub", ondelete="CASCADE"), primary_key=True
+    )
+    paper_id: Mapped[str] = mapped_column(
+        ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    highlight_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    page: Mapped[int] = mapped_column(Integer)
+    color: Mapped[str] = mapped_column(String(32))
+    text: Mapped[str] = mapped_column(Text)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rects: Mapped[list[dict[str, float]]] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class UserInterestRow(Base):
