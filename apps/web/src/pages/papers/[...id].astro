@@ -209,7 +209,7 @@ const published =
             <h2 class="a-label">Keywords</h2>
             <p class="tags">
               {paper.keywords.map((keyword) => (
-                <a class="badge" href={`/?q=${encodeURIComponent(keyword)}`}>
+                <a class="badge" href={`/?keyword=${encodeURIComponent(keyword)}`}>
                   {keyword}
                 </a>
               ))}
