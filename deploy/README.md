@@ -43,6 +43,35 @@ citations 06:00, report 07:00, fast signals 08:00 and 18:00, daily set 17:00, he
 deploy was in flight is covered by the watermark-derived ingest window on the next run,
 and a slot whose run fails retries after half an hour, twice, before conceding the day.
 
+## Optional capability switches
+
+Each of these is an environment change on the right half of the deployment - the code is
+already live, off, and byte-identical to before until the value exists.
+
+On the Railway `api` service:
+
+- `RS_FORYOU_EVENTS=true` - clicked and dwelled papers join the For You profile;
+  dismissed papers never come back (needs `RS_FORYOU_CENTROIDS` at 1 or more).
+- `RS_HIGHLIGHTS_SYNC=true` - reader highlights follow the account across devices.
+- `RS_PUSH_ENABLED=true` with `RS_VAPID_PRIVATE_KEY`, `RS_VAPID_PUBLIC_KEY` and
+  `RS_VAPID_SUBJECT` (mint a keypair with `uv run python -m py_vapid` or openssl) -
+  browser notices when a digest or report publishes; the account panel then shows the
+  toggle.
+- `RS_STREAM_LABELS_ENABLED=true` - the categorize task classifies papers against
+  `config/labels.yaml`.
+- `RS_SCHEDULER_REVISIONS_AT=01:30` - the arXiv revisions sweep (v2s, DOIs, journal
+  references) gets its nightly slot; unset, it never runs.
+- Signal source credentials: `GITHUB_TOKEN` (then flip `code_adoption.enabled` in
+  `config/sources.yaml` - the connector burns anonymous rate limits without it),
+  `OPENALEX_API_KEY` (the citation fallback self-skips keyless), `BLUESKY_IDENTIFIER`
+  plus `BLUESKY_APP_PASSWORD` (then flip `bluesky.enabled`), and `openreview.enabled`
+  seasonally around review cycles.
+
+On Vercel:
+
+- `FEED_TOKEN` - enables the Atom feed at `/feeds/digests.xml?token=<value>`; unset,
+  the path answers 404. Share the full URL only with people who should have the feed.
+
 ## Moving data in or out
 
 The Postgres service's TCP proxy is the path for both directions; its connection string
