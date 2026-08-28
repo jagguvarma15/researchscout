@@ -25,7 +25,7 @@ const AXE_SOURCE = readFileSync(
 // cards, the issue archive, the profile column, and the prose page with the live table.
 // The detail archetypes (paper article, digest issue, topic page) join at runtime with a
 // live id each - see discoverDetails.
-const PAGES = ['/', '/saved', '/for-you', '/topics', '/digests', '/models', '/benchmarks', '/profile', '/about'];
+const PAGES = ['/', '/saved', '/for-you', '/topics', '/digests', '/models', '/benchmarks', '/profile', '/about', '/search?q=attention', '/trends'];
 const WIDTHS = [
   { name: 'phone', viewport: { width: 390, height: 844 } },
   { name: 'desktop', viewport: { width: 1280, height: 800 } },
