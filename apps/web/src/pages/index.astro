@@ -16,6 +16,13 @@ import { subjectLabel, TOPICS, topicLabel } from '../lib/taxonomy';
 
 const params = Astro.url.searchParams;
 const q = params.get('q') ?? '';
+
+// Search grew its own page; every old /?q= link still resolves, one hop later. The feed
+// itself never redirects (the no-trap rule below), but this is a different page, not a
+// loop: back from /search lands wherever the reader came from.
+if (q) {
+  return Astro.redirect(`/search?${params.toString()}`);
+}
 const daysParam = params.get('days') ?? '';
 const year = params.get('year') ?? '';
 const month = params.get('month') ?? '';
@@ -26,6 +33,7 @@ const sortParam = params.get('sort') ?? '';
 const category = params.getAll('category');
 const subject = params.getAll('subject');
 const topicParam = params.getAll('topic');
+const keyword = params.getAll('keyword');
 const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
 
 // The feed is a radar, so it opens on the last week. A default rather than a cap: an explicit
@@ -40,7 +48,7 @@ const DEFAULT_DAYS = '7';
 // suppresses the merge. Nothing redirects, so every state stays reachable (same stance as
 // the saved-filters offer further down). The 'all' window is internal only: the API takes
 // numeric days or none, so it becomes "no window" here and is never sent or linked.
-const FILTER_PARAMS = ['q', 'days', 'year', 'month', 'author', 'venue', 'min_citations', 'sort', 'category', 'subject', 'topic'];
+const FILTER_PARAMS = ['q', 'days', 'year', 'month', 'author', 'venue', 'min_citations', 'sort', 'category', 'subject', 'topic', 'keyword'];
 const defaults = FILTER_PARAMS.some((name) => params.has(name))
   ? null
   : parseFeedDefaults(Astro.cookies.get(FEED_DEFAULTS_COOKIE)?.value);
@@ -97,6 +105,7 @@ for (const s of subject) {
 }
 for (const t of topic) chips.push({ label: topicLabel(t), href: withTopic(t) });
 for (const c of category) chips.push({ label: c, href: withoutParams([['category', c]]) });
+for (const kw of keyword) chips.push({ label: kw, href: withoutParams([['keyword', kw]]) });
 // Only an explicit window gets a removable chip; the seven-day default shows in the heading.
 if (daysParam) chips.push({ label: `Last ${daysParam} days`, href: withoutParams([['days']]) });
 if (year) {
@@ -155,6 +164,7 @@ const [result, savedResult, savedFilters] = await Promise.all([
     category,
     subject,
     topic,
+    keyword,
     page,
   }),
   fetchSaved(Astro.locals.accessToken),
