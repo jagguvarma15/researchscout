@@ -196,9 +196,7 @@ class UserHighlightRow(Base):
     text: Mapped[str] = mapped_column(Text)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     rects: Mapped[list[dict[str, float]]] = mapped_column(JSONB)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserInterestRow(Base):
