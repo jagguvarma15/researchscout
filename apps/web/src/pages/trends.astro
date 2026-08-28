@@ -1,0 +1,273 @@
+---
+import EmptyState from '../components/EmptyState.astro';
+import PageIntro from '../components/PageIntro.astro';
+import Base from '../layouts/Base.astro';
+import { catalogMessage, fetchTrends, formatDate } from '../lib/api';
+import { stepLineGeometry } from '../lib/sparkline';
+
+// The movement page: where the headline benchmarks' state of the art went, and what the
+// major labs shipped - the catalogue's tables arranged along time instead of rank.
+const result = await fetchTrends();
+
+const series = result.ok
+  ? result.data.sota
+      .map((entry) => ({
+        ...entry,
+        geo: stepLineGeometry(entry.points.map((point) => point.score)),
+      }))
+      .filter((entry) => entry.geo !== null)
+  : [];
+const releases = result.ok ? result.data.releases : [];
+
+function fmtScore(scale: string, value: number): string {
+  return scale === 'fraction' ? `${(value * 100).toFixed(1)}%` : value.toLocaleString('en-US');
+}
+
+// Month headers for the release timeline, computed once so the template only compares.
+function monthOf(published: string | null): string {
+  if (!published) return 'Undated';
+  return new Date(published).toLocaleDateString('en-US', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+const timeline = releases.map((model, index) => ({
+  ...model,
+  monthHeader:
+    index === 0 || monthOf(model.published_on) !== monthOf(releases[index - 1].published_on)
+      ? monthOf(model.published_on)
+      : null,
+}));
+---
+
+<Base title="Frontier">
+  <PageIntro
+    title="Frontier"
+    lede="Where the headline benchmarks' state of the art moved, and what the major labs shipped."
+  />
+
+  {
+    !result.ok ? (
+      <EmptyState
+        kind="error"
+        icon="lucide:cloud-off"
+        message={catalogMessage(result.failure, 'frontier data')}
+        action={{ href: '/trends', label: 'Retry' }}
+      />
+    ) : series.length === 0 && releases.length === 0 ? (
+      <EmptyState
+        icon="lucide:hourglass"
+        message="No frontier data yet."
+        hint="Charts appear once the catalogue refresh has recorded dated benchmark scores."
+      />
+    ) : (
+      <Fragment>
+        {series.length > 0 && (
+          <section class="charts">
+            <h2 class="s-label">State of the art over time</h2>
+            <ul class="chart-grid">
+              {series.map((entry) => (
+                <li class="card bench">
+                  <div class="bench-head">
+                    <h3 class="bench-name">
+                      <a href={`/benchmarks?b=${entry.id}`}>{entry.name}</a>
+                    </h3>
+                    <span class="bench-now">
+                      {fmtScore(entry.scale, entry.points[entry.points.length - 1].score)}
+                    </span>
+                  </div>
+                  <svg
+                    class="chart"
+                    width="640"
+                    height="120"
+                    viewBox="0 0 640 120"
+                    role="img"
+                    aria-label={`${entry.name} state of the art across ${entry.points.length} advances`}
+                  >
+                    <line x1="8" y1="112" x2="632" y2="112" />
+                    <path class="wash" d={entry.geo!.area} />
+                    <path class="steps" d={entry.geo!.path} />
+                    {entry.points.map((point, index) => (
+                      <circle cx={entry.geo!.points[index].x} cy={entry.geo!.points[index].y} r="4">
+                        <title>
+                          {`${point.model_name} - ${fmtScore(entry.scale, point.score)} - ${formatDate(point.on)}`}
+                        </title>
+                      </circle>
+                    ))}
+                  </svg>
+                  <p class="bench-caption">
+                    <span>{formatDate(entry.points[0].on)}</span>
+                    <span>
+                      {entry.points[entry.points.length - 1].model_name} leads as of{' '}
+                      {formatDate(entry.points[entry.points.length - 1].on)}
+                    </span>
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {releases.length > 0 && (
+          <section class="releases">
+            <h2 class="s-label">Notable releases</h2>
+            <ol class="timeline">
+              {timeline.map((model) => (
+                <Fragment>
+                  {model.monthHeader && <li class="month">{model.monthHeader}</li>}
+                  <li class="release">
+                    <span class="when">
+                      {model.published_on ? formatDate(model.published_on) : ''}
+                    </span>
+                    <a class="what" href={`/models/${model.id}`}>
+                      {model.name}
+                    </a>
+                    <span class="who">{model.provider}</span>
+                  </li>
+                </Fragment>
+              ))}
+            </ol>
+          </section>
+        )}
+      </Fragment>
+    )
+  }
+</Base>
+
+<style>
+  .s-label {
+    margin: var(--space-6) 0 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid var(--line);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--track-caps-wide);
+    text-transform: uppercase;
+  }
+  .chart-grid {
+    list-style: none;
+    margin: var(--space-4) 0 0;
+    padding: 0;
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(24rem, 1fr));
+  }
+  @media (max-width: 40rem) {
+    .chart-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+  .bench {
+    padding: 1.1rem 1.25rem;
+    min-width: 0;
+  }
+  .bench-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .bench-name {
+    margin: 0;
+    font-size: var(--text-base);
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--track-tight);
+  }
+  .bench-name a {
+    color: var(--ink);
+    text-decoration: none;
+  }
+  .bench-name a:hover {
+    color: var(--accent);
+  }
+  /* The current frontier reading, in the tabular register numbers share here. */
+  .bench-now {
+    font-variant-numeric: tabular-nums;
+    font-weight: var(--weight-semibold);
+    color: var(--accent-ink);
+  }
+  .chart {
+    margin-top: 0.6rem;
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+  .chart line {
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+  .chart .steps {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linejoin: round;
+  }
+  .chart .wash {
+    fill: var(--accent);
+    opacity: 0.08;
+  }
+  .chart circle {
+    fill: var(--accent);
+    stroke: var(--surface);
+    stroke-width: 2;
+  }
+  .bench-caption {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin: 0.3rem 0 0;
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
+  .timeline {
+    list-style: none;
+    margin: var(--space-4) 0 0;
+    padding: 0;
+    max-width: 44rem;
+  }
+  .month {
+    margin-top: var(--space-4);
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: var(--weight-semibold);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+  }
+  .release {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    padding: 0.45rem 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .release:last-child {
+    border-bottom: none;
+  }
+  .when {
+    flex: none;
+    width: 5.5rem;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+  }
+  .what {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ink);
+    font-weight: var(--weight-medium);
+    text-decoration: none;
+  }
+  .what:hover {
+    color: var(--accent);
+  }
+  .who {
+    flex: none;
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+</style>
