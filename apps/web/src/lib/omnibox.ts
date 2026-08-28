@@ -59,7 +59,7 @@ export function classify(raw: string): Intent {
 /** True when the input is a slash command the composer understands (not an unknown one). */
 export function isKnownCommand(raw: string): boolean {
   const parsed = parseInput(raw);
-  return parsed.kind === 'web' || parsed.kind === 'ai';
+  return parsed.kind === 'web' || parsed.kind === 'ai' || parsed.kind === 'deep';
 }
 
 /** The feed URL for a full search, which is where "search all papers" hands off to. */
