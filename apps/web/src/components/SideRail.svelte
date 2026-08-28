@@ -14,6 +14,7 @@
     Boxes,
     Gauge,
     Info,
+    LineChart,
     Newspaper,
     Settings2,
     Sparkles,
@@ -43,6 +44,7 @@
       items: [
         { href: '/models', label: 'Models', icon: Boxes },
         { href: '/benchmarks', label: 'Benchmarks', icon: Gauge },
+        { href: '/trends', label: 'Frontier', icon: LineChart },
       ],
     },
     {
