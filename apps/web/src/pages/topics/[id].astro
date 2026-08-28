@@ -72,8 +72,8 @@ const builds =
               width="640"
               height="120"
               viewBox="0 0 640 120"
-              role="img"
-              aria-label={`Cluster size across ${topic.history.length} builds`}
+              role="group"
+              aria-label={`Cluster size across ${topic.history.length} builds - each point opens the feed for its window`}
             >
               <title>
                 {topic.history.map((point) => point.size).join(', ')} papers across the last
