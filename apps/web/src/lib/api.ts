@@ -42,6 +42,8 @@ export interface FeedParams {
   topic?: string[];
   author?: string;
   venue?: string;
+  /** Extracted keyword phrases; repeat to widen. */
+  keyword?: string[];
   minCitations?: string;
   sort?: string;
   /** 'asc' or 'desc'; omitted takes the column's natural direction. */
@@ -82,6 +84,7 @@ export async function fetchPapers(params: FeedParams): Promise<CatalogResult<Pap
   for (const value of params.category ?? []) search.append('category', value);
   for (const value of params.subject ?? []) search.append('subject', value);
   for (const value of params.topic ?? []) search.append('topic', value);
+  for (const value of params.keyword ?? []) search.append('keyword', value);
   if (!params.q && params.page && params.page > 1) {
     search.set('offset', String((params.page - 1) * PAGE_SIZE));
   }
@@ -147,6 +150,29 @@ export async function fetchRelated(id: string): Promise<RelatedPapers | null> {
   } catch {
     return null;
   }
+}
+
+// The trends payload: benchmark frontiers over time plus the recent notable releases.
+export interface SotaPoint {
+  on: string;
+  score: number;
+  model_name: string;
+}
+
+export interface SotaSeries {
+  id: string;
+  name: string;
+  scale: string;
+  points: SotaPoint[];
+}
+
+export interface TrendsData {
+  sota: SotaSeries[];
+  releases: NotableModel[];
+}
+
+export async function fetchTrends(): Promise<CatalogResult<TrendsData>> {
+  return readCatalog<TrendsData>('/v1/trends');
 }
 
 // A data source as /about lists it. The attribution fields are null together when a source
