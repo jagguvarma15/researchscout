@@ -116,6 +116,22 @@ class HighlightsPayload(BaseModel):
     items: list[HighlightBody] = Field(max_length=200)
 
 
+class PushKeys(BaseModel):
+    """The browser's encryption keys, exactly as PushSubscription.toJSON hands them over."""
+
+    p256dh: str = Field(min_length=1, max_length=200)
+    auth: str = Field(min_length=1, max_length=100)
+
+
+class PushSubscriptionBody(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=1000, pattern=r"^https://")
+    keys: PushKeys
+
+
+class PushUnsubscribeBody(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=1000)
+
+
 class RelatedPapers(BaseModel):
     """A paper's neighborhood, from the citation graph and the embedding space.
 
