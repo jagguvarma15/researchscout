@@ -28,6 +28,7 @@
     Minus,
     Plus,
     Scaling,
+    StickyNote,
     Trash2,
     X,
   } from 'lucide-svelte';
@@ -36,9 +37,13 @@
   import {
     clampRect,
     highlightAt,
+    highlightsMarkdown,
     inkBounds,
     loadHighlights,
+    mergeHighlights,
     newId,
+    pullHighlights,
+    pushHighlights,
     rectFromDrag,
     saveHighlights,
     toScreenRects,
@@ -172,6 +177,14 @@
     failed = false;
     unlockScroll = lockBodyScroll();
     highlights = loadHighlights(paperId);
+    // Best-effort sync pull: marks made on another device join the local list; the local
+    // list wins by id. A deployment without the flag answers 404 once and this stays local.
+    void pullHighlights(paperId).then((remote) => {
+      if (remote && remote.length > 0) {
+        highlights = mergeHighlights(highlights, remote);
+        saveHighlights(paperId, highlights);
+      }
+    });
     const url = new URL(window.location.href);
     url.searchParams.set('read', '1');
     // Spread, never null: the client router keeps its scroll position and entry index in
@@ -426,6 +439,22 @@
 
   function persist() {
     saveHighlights(paperId, highlights);
+    pushHighlights(paperId, highlights);
+  }
+
+  // Which mark's note is open in the panel, and the markdown export.
+  let noting = $state<string | null>(null);
+
+  function exportMarkdown() {
+    const blob = new Blob([highlightsMarkdown(title, highlights)], {
+      type: 'text/markdown',
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'highlights.md';
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   function clearPending() {
@@ -932,29 +961,55 @@
             <ul>
               {#each ordered as item}
                 <li>
-                  <button
-                    class="jump"
-                    onclick={() => {
-                      goTo(item.page);
-                      listOpen = false;
-                    }}
-                  >
-                    <span class="swatch" style={`background:${COLORS[item.color]}`}></span>
-                    <span class="quote" class:framed={!item.text}>
-                      {item.text || 'Figure or equation'}
-                    </span>
-                    <span class="onpage">p{item.page}</span>
-                  </button>
-                  <button
-                    class="tool"
-                    onclick={() => removeHighlight(item.id)}
-                    aria-label="Remove this highlight"
-                  >
-                    <Trash2 size={14} aria-hidden="true" />
-                  </button>
+                  <div class="mark-row">
+                    <button
+                      class="jump"
+                      onclick={() => {
+                        goTo(item.page);
+                        listOpen = false;
+                      }}
+                    >
+                      <span class="swatch" style={`background:${COLORS[item.color]}`}></span>
+                      <span class="quote" class:framed={!item.text}>
+                        {item.text || 'Figure or equation'}
+                      </span>
+                      <span class="onpage">p{item.page}</span>
+                    </button>
+                    <button
+                      class="tool"
+                      class:on={noting === item.id}
+                      onclick={() => (noting = noting === item.id ? null : item.id)}
+                      aria-expanded={noting === item.id}
+                      aria-label={item.note ? 'Edit the note' : 'Add a note'}
+                    >
+                      <StickyNote size={14} aria-hidden="true" />
+                    </button>
+                    <button
+                      class="tool"
+                      onclick={() => removeHighlight(item.id)}
+                      aria-label="Remove this highlight"
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                    </button>
+                  </div>
+                  {#if noting === item.id}
+                    <textarea
+                      class="marknote"
+                      rows="3"
+                      maxlength="2000"
+                      placeholder="Your note on this mark"
+                      bind:value={item.note}
+                      onchange={persist}
+                    ></textarea>
+                  {:else if item.note}
+                    <p class="marknote-view">{item.note}</p>
+                  {/if}
                 </li>
               {/each}
             </ul>
+            <button class="export" type="button" onclick={exportMarkdown}>
+              Export as markdown
+            </button>
           {/if}
         </aside>
       {/if}
@@ -1368,9 +1423,46 @@
     padding: 0;
   }
   .list li {
+    display: block;
+  }
+  /* The jump, note and remove controls on one line; the note text below them. */
+  .mark-row {
     display: flex;
     align-items: center;
     gap: 0.3rem;
+  }
+  .marknote {
+    width: 100%;
+    margin: 0.15rem 0 0.4rem;
+    font: inherit;
+    font-size: var(--text-xs);
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.35rem 0.5rem;
+    resize: vertical;
+  }
+  .marknote-view {
+    margin: 0 0 0.4rem;
+    padding-left: 1.3rem;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    line-height: 1.5;
+  }
+  .export {
+    margin-top: 0.6rem;
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: var(--text-xs);
+    color: var(--muted);
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .export:hover {
+    color: var(--ink);
   }
   .jump {
     flex: 1;
