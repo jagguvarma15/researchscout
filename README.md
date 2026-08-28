@@ -116,6 +116,15 @@ The pipeline monitors itself: a health task self-checks every half hour (ingest 
 failing streaks, weekend-aware freshness, hung runs, retention), `GET /v1/system/status`
 serves the verdict, and the site's about page renders it.
 
+Several capabilities ship off by default and turn on per deployment - `.env.example`
+documents every `RS_*` knob. The notable switches: `RS_FORYOU_EVENTS` (implicit feedback
+in the personalized feed), `RS_HIGHLIGHTS_SYNC` (reader marks follow the account),
+`RS_PUSH_ENABLED` plus a VAPID keypair (browser notices when an issue publishes, with
+`FEED_TOKEN` on the web side for the Atom feed), `RS_STREAM_LABELS_ENABLED`
+(config/labels.yaml classification), `RS_SCHEDULER_REVISIONS_AT` (the arXiv revisions
+sweep), and per-source credentials in `config/sources.yaml` (GitHub stars, OpenAlex
+citations, OpenReview scores, Bluesky discussion).
+
 ## Data sources and attribution
 
 Every connector in `config/sources.yaml` carries an `attribution` block naming the
