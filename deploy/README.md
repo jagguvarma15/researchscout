@@ -41,7 +41,9 @@ by default): pipeline 00:30 (ingest, categorize, index, full text), revisions 01
 citations 06:00, report 07:00, fast signals 08:00 and 18:00, daily set 17:00, health every
 30 minutes. A redeploy or restart re-arms the next future slot; a slot missed while a
 deploy was in flight is covered by the watermark-derived ingest window on the next run,
-and a slot whose run fails retries after half an hour, twice, before conceding the day.
+and a slot whose run fails retries after half an hour - an hour when the failure was
+upstream rate limiting - twice, before conceding the day. Only the failure that concedes
+the slot reaches the error reporter; the attempts a retry absorbs stay in the ledger.
 
 ## Optional capability switches
 
