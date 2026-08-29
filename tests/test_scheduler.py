@@ -276,6 +276,95 @@ def test_a_quota_failure_concedes_the_slot() -> None:
     assert task.retries_left == task.max_retries
 
 
+def test_an_absorbed_retry_does_not_reach_the_error_reporter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the failure that concedes the slot reports; absorbed attempts stay in the ledger."""
+    captured: list[BaseException] = []
+    monkeypatch.setattr("researchscout.scheduler.observe.capture_exception", captured.append)
+
+    def run() -> None:
+        raise RuntimeError("upstream down")
+
+    task = Task("x", 60.0, run, at=(time(14, 0),), zone=NY)
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    assert captured == []  # first attempt: a retry is armed, nothing reported
+    now["wall"] = datetime(2026, 8, 4, 14, 30, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    assert captured == []  # second attempt: the last retry, still absorbed
+    now["wall"] = datetime(2026, 8, 4, 15, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    assert len(captured) == 1  # budget spent: the conceding failure is the one report
+
+
+def test_an_interval_task_failure_reaches_the_error_reporter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No retry budget to absorb it, so an interval task's failure reports at once."""
+    captured: list[BaseException] = []
+    monkeypatch.setattr("researchscout.scheduler.observe.capture_exception", captured.append)
+
+    def run() -> None:
+        raise RuntimeError("nope")
+
+    Scheduler([Task("x", 60.0, run)], clock=lambda: 0.0).run_pass()
+    assert len(captured) == 1
+
+
+def test_a_quota_concession_is_not_reported(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A spent daily cap is a documented operating state, not an incident."""
+    captured: list[BaseException] = []
+    monkeypatch.setattr("researchscout.scheduler.observe.capture_exception", captured.append)
+
+    class _Quota(Exception):
+        status_code = 429
+
+    def run() -> None:
+        raise _Quota("Error code: 429 - Rate limit exceeded: free-models-per-day")
+
+    task = Task("x", 60.0, run, at=(time(14, 0), time(17, 0)), zone=NY)
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    assert captured == []
+
+
+def test_a_throttle_shaped_failure_waits_twice_as_long() -> None:
+    """An upstream that asked for a pause is not helped by knocking again in half an hour."""
+
+    def run() -> None:
+        raise RuntimeError("stopped early: Client error '429 Unknown Error' for url 'x'")
+
+    task = Task("x", 60.0, run, at=(time(14, 0), time(17, 0)), zone=NY)
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    # Twice the plain retry delay: a full hour out instead of thirty minutes.
+    assert task.next_wall == datetime(2026, 8, 4, 15, 0, tzinfo=NY)
+
+
+def test_the_doubled_throttle_wait_still_never_passes_the_next_slot() -> None:
+    def run() -> None:
+        raise RuntimeError("429 from upstream")
+
+    task = Task("x", 60.0, run, at=(time(14, 0), time(14, 45)), zone=NY)
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([task], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["x"]
+    # An hour would land at 15:00, past the 14:45 slot: capped at the slot as ever.
+    assert task.next_wall == datetime(2026, 8, 4, 14, 45, tzinfo=NY)
+
+
 def test_an_interval_task_still_starts_due() -> None:
     task = Task("x", 60.0, lambda: None)
     Scheduler([task], clock=lambda: 1000.0, wall=lambda: datetime(2026, 8, 4, 15, 2, tzinfo=NY))
