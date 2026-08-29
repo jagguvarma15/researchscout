@@ -42,7 +42,7 @@ from zoneinfo import ZoneInfo
 
 from researchscout import observe
 from researchscout.config import Settings
-from researchscout.llm.errors import is_quota_status
+from researchscout.llm.errors import is_quota_note, is_quota_status
 from researchscout.schedule import describe, next_run, parse_times
 
 if TYPE_CHECKING:
@@ -160,23 +160,31 @@ class Scheduler:
             task.run()
         except Exception as exc:  # noqa: BLE001 - a failing task must not stop the loop
             logger.warning("scheduled task %s failed", task.name, exc_info=True)
-            # The loop swallows the failure by design, so this is the one place a task
-            # error can reach the error reporter (a no-op when reporting is off).
-            observe.capture_exception(exc)
             if task.at and task.retries_left > 0 and not is_quota_status(exc):
                 # Re-arm within the day rather than concede the slot: arXiv being down at
-                # half past midnight should cost half an hour, not twenty-four. Capped at
-                # the next real slot so a retry can only ever move work earlier, and the
-                # budget resets whenever a run succeeds or the slot rolls over. A bare 429
-                # concedes instead: a spent daily quota does not come back in half an hour,
-                # and retrying it only stacks failed rows into a streak.
+                # half past midnight should cost half an hour, not twenty-four. A failure
+                # that reads like upstream throttling waits twice as long - an upstream
+                # that asked for a pause is not helped by knocking again in thirty
+                # minutes, and arXiv's blocks outlast that. Capped at the next real slot
+                # so a retry can only ever move work earlier, and the budget resets
+                # whenever a run succeeds or the slot rolls over. A bare 429 on the
+                # exception concedes instead: a spent daily quota does not come back in
+                # half an hour, and retrying it only stacks failed rows into a streak.
                 task.retries_left -= 1
                 wall = self._wall()
                 slot = next_run(task.at, wall, task.zone)
-                retry_at = wall + timedelta(seconds=task.retry_delay_sec)
+                delay = task.retry_delay_sec * (2 if is_quota_note(str(exc)) else 1)
+                retry_at = wall + timedelta(seconds=delay)
                 task.next_wall = min(retry_at, slot) if slot is not None else retry_at
                 self._heartbeat()
                 return
+            # The loop swallows the failure by design, so this is the one place a task
+            # error can reach the error reporter (a no-op when reporting is off). Only
+            # the failure that concedes the slot reports: an attempt the retry budget
+            # absorbs is the design working and already in the ledger, and a spent
+            # quota is a documented operating state, not an incident.
+            if not is_quota_status(exc):
+                observe.capture_exception(exc)
         self._reschedule(task)
         self._heartbeat()
 
