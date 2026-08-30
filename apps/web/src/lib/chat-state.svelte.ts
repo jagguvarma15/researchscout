@@ -40,6 +40,11 @@ export const scope = $state({
   title: null as string | null,
 });
 
+// Whether the day's AI quota is spent, learned from a quota-kind error frame and cleared
+// by the next completed llm answer. Session-only on purpose: quotas reset daily and a
+// stale persisted banner would claim an outage that ended overnight.
+export const quota = $state({ exhausted: false });
+
 export function setScope(paperId: string, title: string): void {
   scope.paperId = paperId;
   scope.title = title;
@@ -115,8 +120,14 @@ export function clearConversation(): void {
 
 function applyEvent(frame: SseEvent, current: Message) {
   const payload = frame.payload as Record<string, any>;
-  if (frame.event === 'meta') {
+  if (frame.event === 'plan') {
+    // The deep ask's decomposed sub-questions, before retrieval starts.
+    if (Array.isArray(payload.parts)) {
+      current.plan = payload.parts.filter((part: unknown) => typeof part === 'string');
+    }
+  } else if (frame.event === 'meta') {
     current.retrieved = payload.retrieved;
+    if (payload.agentic === true) current.agentic = true;
     if (current.phase !== 'streaming') current.phase = 'thinking';
   } else if (frame.event === 'results') {
     current.results = payload.items;
@@ -133,10 +144,43 @@ function applyEvent(frame: SseEvent, current: Message) {
     current.phase = 'done';
     current.cited = payload.cited;
     current.used = payload.used;
+    if (Array.isArray(payload.hallucinated) && payload.hallucinated.length > 0) {
+      current.hallucinated = payload.hallucinated;
+    }
+    if (typeof payload.model === 'string') current.model = payload.model;
+    if (typeof payload.prompt_tokens === 'number') current.promptTokens = payload.prompt_tokens;
+    if (typeof payload.completion_tokens === 'number') {
+      current.completionTokens = payload.completion_tokens;
+    }
+    if (typeof payload.elapsed_ms === 'number') current.elapsedMs = payload.elapsed_ms;
+    // A completed generated answer is proof the quota is back (or never was out).
+    if (current.mode === 'llm' && !current.error) quota.exhausted = false;
   } else if (frame.event === 'error') {
     current.phase = 'done';
-    current.text = payload.message ?? 'Something went wrong.';
-    current.error = true;
+    // busy, quota, and unavailable are different states to a reader; old APIs send only
+    // a code, where 503 was always the busy queue.
+    const kind =
+      payload.kind === 'quota' || payload.kind === 'busy'
+        ? payload.kind
+        : payload.code === 503
+          ? 'busy'
+          : 'unavailable';
+    current.errorKind = kind;
+    if (kind === 'quota') quota.exhausted = true;
+    const note =
+      kind === 'quota'
+        ? "Scout's AI quota is used up for today. Quick answers still work."
+        : kind === 'busy'
+          ? 'Scout is busy with other questions - try again in a moment.'
+          : (payload.message ?? 'The AI backend is unavailable right now.');
+    if (current.text) {
+      // Mirror the Stop button: a failure after text has streamed must never destroy
+      // the partial answer - the note lands under it instead.
+      current.errorNote = note;
+    } else {
+      current.text = note;
+      current.error = true;
+    }
   }
   schedulePersist();
 }
@@ -152,7 +196,7 @@ export async function ask(
   // backend ignores it there by design, so the bytes would say nothing).
   const history = mode === 'llm' ? buildHistory() : [];
   const label = options.deep ? `/deep ${question}` : mode === 'llm' ? `/ai ${question}` : question;
-  chat.messages.push({ role: 'user', text: label });
+  chat.messages.push({ role: 'user', text: label, at: Date.now() });
   chat.asked = true;
   chat.busy = true;
   controller = new AbortController();
@@ -162,6 +206,11 @@ export async function ask(
     phase: 'searching',
     mode,
     question,
+    at: Date.now(),
+    ...(options.deep ? { agentic: true } : {}),
+    // The pin is recorded on the message itself, so a restored transcript still says
+    // what a scoped answer was scoped to even though the pin does not persist.
+    ...(scope.paperId && scope.title ? { scope: { paperId: scope.paperId, title: scope.title } } : {}),
   });
   if (mode === 'fast' && dictionary) {
     // The loader line names the dictionary keywords the question hit.
@@ -236,7 +285,7 @@ export async function runWebSearch(query: string): Promise<void> {
   // The /web command: an assistant message holding web hit cards, reusing the same
   // fallback rendering and one-click import flow as the notfound path.
   if (chat.busy) return;
-  chat.messages.push({ role: 'user', text: `/web ${query}` });
+  chat.messages.push({ role: 'user', text: `/web ${query}`, at: Date.now() });
   chat.asked = true;
   chat.busy = true;
   controller = new AbortController();
@@ -246,6 +295,7 @@ export async function runWebSearch(query: string): Promise<void> {
     phase: 'searching',
     question: query,
     webBusy: true,
+    at: Date.now(),
   });
   chat.messages.push(current);
   trimThread();
@@ -385,6 +435,18 @@ function serializeMessage(message: Message): Record<string, unknown> {
     webHits: message.webHits,
     webFailed: message.webFailed,
     imports: message.imports,
+    at: message.at,
+    agentic: message.agentic,
+    plan: message.plan,
+    scope: message.scope,
+    hallucinated: message.hallucinated,
+    model: message.model,
+    promptTokens: message.promptTokens,
+    completionTokens: message.completionTokens,
+    elapsedMs: message.elapsedMs,
+    retrieved: message.retrieved,
+    errorKind: message.errorKind,
+    errorNote: message.errorNote,
   };
 }
 
@@ -523,6 +585,19 @@ function cleanImports(value: unknown): Record<string, string> | undefined {
   return Object.keys(cleaned).length > 0 ? cleaned : undefined;
 }
 
+function num(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function cleanScope(value: unknown): { paperId: string; title: string } | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const paperId = str(candidate.paperId, 100);
+  const title = str(candidate.title, 500);
+  if (!paperId || !ID_SHAPE.test(paperId) || title === null) return undefined;
+  return { paperId, title };
+}
+
 function cleanMessage(value: unknown): Message | null {
   if (typeof value !== 'object' || value === null) return null;
   const candidate = value as Record<string, unknown>;
@@ -552,9 +627,30 @@ function cleanMessage(value: unknown): Message | null {
     webHits: cleanWebHits(candidate.webHits),
     webFailed: strList(candidate.webFailed, 5, 20),
     imports: cleanImports(candidate.imports),
+    at: num(candidate.at),
+    agentic: candidate.agentic === true || undefined,
+    plan: strList(candidate.plan, 4, 300),
+    scope: cleanScope(candidate.scope),
+    // Hallucinated ids gate nothing (they render as plain text), but the same shape
+    // filter keeps garbage out of the transcript.
+    hallucinated: strList(candidate.hallucinated, 20, 100).filter((id) => ID_SHAPE.test(id)),
+    model: str(candidate.model, 120) ?? undefined,
+    promptTokens: num(candidate.promptTokens),
+    completionTokens: num(candidate.completionTokens),
+    elapsedMs: num(candidate.elapsedMs),
+    retrieved: num(candidate.retrieved),
+    errorKind:
+      candidate.errorKind === 'busy' ||
+      candidate.errorKind === 'quota' ||
+      candidate.errorKind === 'unavailable'
+        ? candidate.errorKind
+        : undefined,
+    errorNote: str(candidate.errorNote, 300) ?? undefined,
   };
   if (message.cited?.length === 0) message.cited = undefined;
   if (message.webFailed?.length === 0) message.webFailed = undefined;
+  if (message.plan?.length === 0) message.plan = undefined;
+  if (message.hallucinated?.length === 0) message.hallucinated = undefined;
   return message;
 }
 
