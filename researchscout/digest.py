@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from researchscout.answer import _CITATION_RE
 from researchscout.llm.base import LLM
+from researchscout.llm.usage import PURPOSE_DIGEST, llm_purpose
 from researchscout.schema import Paper
 from researchscout.score import breakthrough
 from researchscout.store.papers import list_papers
@@ -114,7 +115,8 @@ def compose_digest(llm: LLM, items: list[RankedPaper], *, start: datetime, end: 
         user_prompt = f"Digest window: {start:%Y-%m-%d} to {end:%Y-%m-%d}\n\nPapers:\n{context}"
         llm_ok = True
         try:
-            body = llm.complete(_SYSTEM_PROMPT, user_prompt)
+            with llm_purpose(PURPOSE_DIGEST):
+                body = llm.complete(_SYSTEM_PROMPT, user_prompt)
         except Exception:  # noqa: BLE001 - the ranked list is the safe floor
             logger.warning("digest prose failed; publishing the ranked list", exc_info=True)
             body = _fallback_body(items)
