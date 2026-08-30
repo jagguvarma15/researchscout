@@ -109,7 +109,9 @@ def recent_notfound(session: Session, *, limit: int = 10) -> list[str]:
             (AskMetricRow.outcome == "notfound") | AskMetricRow.outcome.is_(None),
         )
         .group_by(AskMetricRow.question)
-        .order_by(func.max(AskMetricRow.asked_at).desc())
+        # The id tiebreak matters: now() is transaction-scoped in Postgres, so rows
+        # written in one transaction share a timestamp and "latest" needs the sequence.
+        .order_by(func.max(AskMetricRow.asked_at).desc(), func.max(AskMetricRow.id).desc())
         .limit(limit)
     ).all()
     return [question for question, _ in rows]
