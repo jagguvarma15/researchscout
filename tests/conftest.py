@@ -20,6 +20,21 @@ def _fresh_settings() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _fresh_llm_usage() -> Iterator[None]:
+    """Clear the last-usage contextvar between tests.
+
+    Production reads it immediately after the call that set it, always in the same
+    context. The test process is one long-lived context, so a record left by one test
+    would read as "this fake's synthesis usage" in the next.
+    """
+    from researchscout.llm.usage import _last_usage_var
+
+    _last_usage_var.set(None)
+    yield
+    _last_usage_var.set(None)
+
+
+@pytest.fixture(autouse=True)
 def _fresh_sources_config() -> Iterator[None]:
     """Give every test its own view of the sources registry file.
 
