@@ -6,6 +6,7 @@
   // forwards intents.
   import type { Message, WebHit } from '../lib/chat-types';
   import { formatMonthYear, renderAnswerHtml } from '../lib/chat-format';
+  import { logEvent } from '../lib/events';
   import WebHitCard from './WebHitCard.svelte';
 
   let {
@@ -45,6 +46,29 @@
 
   const status = $derived(statusLabel(message));
   const streamingCaret = $derived(message.role === 'assistant' && busy && last);
+  // The answer's provenance caption: how much was read and cited, by which model, in how
+  // long. Every part is presence-conditional so old transcripts and old APIs render fine.
+  const caption = $derived.by(() => {
+    if (message.role !== 'assistant' || message.mode !== 'llm') return null;
+    if (message.phase !== 'done' || message.error) return null;
+    const parts: string[] = [];
+    if (typeof message.retrieved === 'number' && message.retrieved > 0) {
+      const cited = message.cited?.length ?? 0;
+      parts.push(`Read ${message.retrieved} paper${message.retrieved === 1 ? '' : 's'}, cited ${cited}`);
+    }
+    if (message.model) parts.push(message.model);
+    if (typeof message.elapsedMs === 'number') parts.push(`${(message.elapsedMs / 1000).toFixed(1)}s`);
+    return parts.length > 0 ? parts.join(' - ') : null;
+  });
+  const askedAt = $derived(
+    typeof message.at === 'number' ? new Date(message.at).toLocaleString() : undefined,
+  );
+
+  function paperClick(paperId: string): void {
+    // The papers an answer sends someone to are a strong interest signal; same beacon as
+    // the feed (anonymous clicks are dropped server-side, exactly like there).
+    logEvent({ event: 'click', paper_id: paperId, surface: 'chat' });
+  }
   // Completed LLM answers render as formatted HTML; renderAnswerHtml escapes everything
   // and linkifies only the server-confirmed used ids, which is what makes @html safe.
   // Stopped answers format too - a half answer still reads better with its lists intact.
@@ -60,6 +84,18 @@
 </script>
 
 <div class="msg {message.role}" class:error={message.error}>
+  {#if message.role === 'assistant' && message.scope}
+    <p class="note">About: {message.scope.title}</p>
+  {/if}
+  {#if message.plan && message.plan.length > 0}
+    <!-- The deep ask shows its work: the sub-questions retrieval ran, visible from the
+         moment the plan event lands and kept above the finished answer. -->
+    <p class="plan">
+      {#each message.plan as part}
+        <span>{part}</span>
+      {/each}
+    </p>
+  {/if}
   {#if status}
     <p class="status" role="status">
       <!-- Keyed so each phase label arrives with a small fade instead of snapping; the
@@ -78,7 +114,9 @@
              short cascade. -->
         <div class="result-card" style="--i: {Math.min(index, 5)}">
           <div class="cardhead">
-            <a class="cardtitle" href={`/papers/${result.id}`}>{result.title}</a>
+            <a class="cardtitle" href={`/papers/${result.id}`} onclick={() => paperClick(result.id)}
+              >{result.title}</a
+            >
             {#if result.relevance !== null}
               <span class="cardmatch">{Math.round(result.relevance * 100)}%</span>
             {/if}
@@ -124,14 +162,30 @@
   {#if message.stopped}
     <p class="note">Stopped</p>
   {/if}
+  {#if message.errorNote}
+    <!-- A failure that arrived mid-answer: the partial text above is preserved, the way
+         the Stop button preserves it, and this names what happened. -->
+    <p class="note">{message.errorNote}</p>
+  {/if}
   {#if !message.results && message.cited && message.cited.length > 0}
     <p class="citations">
       {#each message.used ?? [] as paper}
         {#if message.cited.includes(paper.id)}
-          <a href={`/papers/${paper.id}`} title={paper.title}>{paper.id}</a>
+          <a href={`/papers/${paper.id}`} title={paper.title} onclick={() => paperClick(paper.id)}
+            >{paper.id}</a
+          >
         {/if}
       {/each}
     </p>
+  {/if}
+  {#if message.hallucinated && message.hallucinated.length > 0}
+    <p class="note">
+      Removed {message.hallucinated.length} citation{message.hallucinated.length === 1 ? '' : 's'} the
+      model invented.
+    </p>
+  {/if}
+  {#if caption}
+    <p class="note" title={askedAt}>{caption}</p>
   {/if}
   {#if message.mode === 'fast' && message.phase === 'done' && !message.error && message.cited && message.cited.length > 0}
     <p class="actions">
@@ -390,6 +444,22 @@
     margin: 0;
     font-size: var(--text-xs, 0.75rem);
     color: var(--muted, #5d6570);
+  }
+  /* The deep-ask sub-questions: quiet chips, not accent pills - they are provenance,
+     not navigation. */
+  .plan {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0;
+  }
+  .plan span {
+    font-size: var(--text-xs, 0.75rem);
+    color: var(--muted, #5d6570);
+    border: 1px solid var(--line, #e6e1d5);
+    border-radius: var(--radius-full, 999px);
+    padding: 0.1rem 0.6rem;
+    background: var(--surface, #fff);
   }
   .citations {
     display: flex;
