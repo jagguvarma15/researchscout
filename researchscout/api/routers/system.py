@@ -25,6 +25,8 @@ from researchscout.api.deps import get_session
 from researchscout.api.schemas import (
     AskStats,
     HealthCheckInfo,
+    LlmPurposeCalls,
+    LlmStats,
     ScheduleGroup,
     SchedulerRun,
     SystemStatus,
@@ -33,6 +35,7 @@ from researchscout.config import get_settings
 from researchscout.health import run_health_checks
 from researchscout.schedule import next_run, parse_times, previous_run
 from researchscout.store.ask_metrics import ask_summary, recent_notfound
+from researchscout.store.llm_usage import usage_summary
 from researchscout.store.models import PaperRow, SchedulerRunRow
 from researchscout.store.runs import last_started, recent_runs
 
@@ -137,8 +140,36 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
             llm_p50_ms=summary.llm_p50_ms,
             llm_p95_ms=summary.llm_p95_ms,
             notfound=recent_notfound(session),
+            refused=summary.refused,
+            llm_errors=summary.llm_errors,
+            busy=summary.busy,
+            hallucination_rate=summary.hallucination_rate,
         )
         if summary.asked > 0
+        else None
+    )
+    usage = usage_summary(session)
+    llm = (
+        LlmStats(
+            model=settings.llm_model,
+            calls_today=usage.calls_today,
+            prompt_tokens_today=usage.prompt_tokens_today,
+            completion_tokens_today=usage.completion_tokens_today,
+            by_purpose=[
+                LlmPurposeCalls(
+                    purpose=entry.purpose,
+                    calls=entry.calls,
+                    ok=entry.ok,
+                    quota=entry.quota,
+                    errors=entry.errors,
+                    prompt_tokens=entry.prompt_tokens,
+                    completion_tokens=entry.completion_tokens,
+                )
+                for entry in usage.by_purpose
+            ],
+            last_quota_at=usage.last_quota_at,
+        )
+        if usage.calls_today > 0 or usage.last_quota_at is not None
         else None
     )
     return SystemStatus(
@@ -155,4 +186,5 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
         last_health_run=_last_health_run(session),
         schedule=_schedule_groups(),
         ask=ask,
+        llm=llm,
     )
