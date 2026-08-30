@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
 from researchscout.llm.errors import is_quota_error
+from researchscout.llm.usage import PURPOSE_TOPIC_LABEL, llm_purpose
 from researchscout.score import breakthrough
 from researchscout.store.topics import window_vectors
 
@@ -167,9 +168,9 @@ def label_topic(
         parts.append("Keywords: " + ", ".join(keywords))
     parts.append("Representative titles:\n" + "\n".join(f"- {title}" for title in titles))
     prompt = "\n\n".join(parts)
-    lines = [
-        line.strip() for line in llm.complete(_LABEL_SYSTEM, prompt).splitlines() if line.strip()
-    ]
+    with llm_purpose(PURPOSE_TOPIC_LABEL):
+        reply = llm.complete(_LABEL_SYSTEM, prompt)
+    lines = [line.strip() for line in reply.splitlines() if line.strip()]
     label = lines[0] if lines else "Untitled topic"
     summary = lines[1] if len(lines) > 1 else None
     return label, summary
