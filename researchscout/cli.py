@@ -232,18 +232,89 @@ def ask(
     ] = None,
 ) -> None:
     """Answer a question with a grounded, cited summary of recent papers."""
+    import time
+
+    from openai import OpenAIError
+
     from researchscout.answer import answer
     from researchscout.config import get_settings
     from researchscout.embed.factory import default_embedder
     from researchscout.llm.openai_compat import OpenAICompatLLM
+    from researchscout.llm.tracing import pipeline_run
     from researchscout.store.db import session_scope
+
+    def record(
+        *,
+        retrieved: int,
+        total_ms: int,
+        outcome: str,
+        model: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        hallucinated: int | None = None,
+    ) -> None:
+        # Best-effort like the API routers: a metrics failure never spoils the answer.
+        import logging
+
+        from researchscout.store.ask_metrics import record_ask
+
+        try:
+            with session_scope() as metrics_session:
+                record_ask(
+                    metrics_session,
+                    mode="llm",
+                    surface="cli",
+                    question=question,
+                    retrieved=retrieved,
+                    best_relevance=None,
+                    found=retrieved > 0,
+                    retrieve_ms=None,
+                    rerank_ms=None,
+                    llm_ms=None,
+                    total_ms=total_ms,
+                    outcome=outcome,
+                    agentic=use_agentic,
+                    model=model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    hallucinated=hallucinated,
+                )
+        except Exception:  # noqa: BLE001 - metrics are never worth an error
+            logging.getLogger(__name__).warning("could not record cli ask metrics", exc_info=True)
 
     use_agentic = agentic if agentic is not None else get_settings().agentic_ask
     embedder = default_embedder()
     llm = OpenAICompatLLM()
-    with session_scope() as session:
-        result = answer(session, embedder, llm, question, k=k, days=days, agentic=use_agentic)
+    run = pipeline_run(
+        "ask",
+        inputs={"question": question},
+        tags=["cli", "agentic" if use_agentic else "single-shot"],
+        metadata={"mode": "llm", "agentic": use_agentic, "k": k},
+    )
+    started = time.perf_counter()
+    try:
+        with session_scope() as session:
+            result = answer(
+                session, embedder, llm, question, k=k, days=days, agentic=use_agentic, trace=run
+            )
+    except OpenAIError as exc:
+        elapsed = int((time.perf_counter() - started) * 1000)
+        record(retrieved=0, total_ms=elapsed, outcome="llm_error")
+        run.end(outputs={"outcome": "llm_error"}, error=repr(exc)[:200])
+        raise
+    run.end(outputs={"outcome": "ok", "retrieved": len(result.used)})
+    record(
+        retrieved=len(result.used),
+        total_ms=int((time.perf_counter() - started) * 1000),
+        outcome="ok",
+        model=result.model,
+        prompt_tokens=result.prompt_tokens,
+        completion_tokens=result.completion_tokens,
+        hallucinated=len(result.hallucinated),
+    )
 
+    if result.plan:
+        typer.secho("Sub-questions: " + " / ".join(result.plan), fg=typer.colors.CYAN)
     typer.echo(result.text)
     if result.cited:
         typer.secho(f"\nCited: {', '.join(result.cited)}", fg=typer.colors.GREEN)
