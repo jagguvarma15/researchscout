@@ -153,3 +153,49 @@ def test_status_reports_ask_usage(session: Session) -> None:
     assert body["ask"]["found_rate"] == pytest.approx(0.5)
     assert body["ask"]["fast_p50_ms"] is not None
     assert body["ask"]["notfound"] == ["obscure thing nobody wrote about"]
+    assert body["ask"]["refused"] == 0 and body["ask"]["llm_errors"] == 0
+
+
+def test_status_reports_llm_usage(session: Session) -> None:
+    from researchscout.llm.usage import LlmCallUsage
+    from researchscout.store.llm_usage import add_usage
+
+    # Quiet deployment: no model calls means no llm block at all.
+    body = _client(session).get("/v1/system/status").json()
+    assert body["llm"] is None
+
+    add_usage(
+        session,
+        LlmCallUsage(
+            purpose="synthesis",
+            model="test-model",
+            prompt_tokens=1200,
+            completion_tokens=300,
+            latency_ms=900,
+            outcome="ok",
+            detail=None,
+        ),
+    )
+    add_usage(
+        session,
+        LlmCallUsage(
+            purpose="topic_label",
+            model="test-model",
+            prompt_tokens=None,
+            completion_tokens=None,
+            latency_ms=100,
+            outcome="quota",
+            detail="429",
+        ),
+    )
+    session.commit()
+
+    body = _client(session).get("/v1/system/status").json()
+    llm = body["llm"]
+    assert llm["calls_today"] == 2
+    assert llm["prompt_tokens_today"] == 1200
+    assert llm["completion_tokens_today"] == 300
+    assert llm["last_quota_at"] is not None
+    purposes = {entry["purpose"]: entry for entry in llm["by_purpose"]}
+    assert purposes["synthesis"]["ok"] == 1
+    assert purposes["topic_label"]["quota"] == 1
