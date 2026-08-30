@@ -173,3 +173,23 @@ def test_supplied_query_vector_skips_the_embed_and_timings_fill(session: Session
     assert results[0].relevance is None  # rerank off in tests: scores are rank-based
     assert set(timings) == {"embed_ms", "legs_ms", "rerank_ms"}
     assert timings["embed_ms"] < 1.0  # nothing was embedded
+
+
+def test_scored_papers_carry_their_prior(session: Session) -> None:
+    """Fusion downstream (the agentic path) re-fuses ranks and must not lose the prior."""
+    embedder = _setup_hybrid(session)
+    append_signal(
+        session,
+        Signal(
+            paper_id="arxiv:2402.00002",
+            type=SignalType.citation,
+            source="test",
+            value=50.0,
+            observed_at=datetime.now(UTC),
+        ),
+    )
+    results = retrieve(session, embedder, "q", k=10, days=30)
+    by_id = {item.paper.id: item for item in results}
+    assert all(item.prior > 0.0 for item in results)
+    # Same vector, same age: the citation boost lives in the prior, and only there.
+    assert by_id["arxiv:2402.00002"].prior > by_id["arxiv:2402.00001"].prior
