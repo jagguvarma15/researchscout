@@ -76,9 +76,12 @@ def test_chat_streams_meta_tokens_done(monkeypatch: pytest.MonkeyPatch) -> None:
     assert response.headers["content-type"].startswith("text/event-stream")
     events = _events(response.text)
     assert [name for name, _ in events] == ["meta", "token", "token", "done"]
-    assert events[0][1] == {"retrieved": 1}
+    assert events[0][1] == {"retrieved": 1, "mode": "llm", "agentic": False}
     assert events[-1][1]["cited"] == ["arxiv:2401.00001"]
     assert events[-1][1]["used"][0]["id"] == "arxiv:2401.00001"
+    # The enriched done keys ride along even when the fake set none of them.
+    assert events[-1][1]["model"] is None
+    assert events[-1][1]["elapsed_ms"] >= 0
 
 
 def test_chat_requires_auth(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,7 +123,7 @@ def test_chat_off_topic_refuses_without_retrieval(monkeypatch: pytest.MonkeyPatc
         raise AssertionError("answer_stream must not run for off-topic questions")
 
     monkeypatch.setattr(chat_router, "answer_stream", no_stream)
-    monkeypatch.setattr(chat_router, "is_research_question", lambda llm, question: False)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda llm, question, **k: False)
     client = _client(monkeypatch)
     response = client.post("/v1/chat", json={"question": "best lasagna recipe"})
 
@@ -140,7 +143,7 @@ def test_chat_in_scope_streams_normally(monkeypatch: pytest.MonkeyPatch) -> None
         yield Answer(text="Hello", cited=[], hallucinated=[], used=used)
 
     monkeypatch.setattr(chat_router, "answer_stream", fake_stream)
-    monkeypatch.setattr(chat_router, "is_research_question", lambda llm, question: True)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda llm, question, **k: True)
     client = _client(monkeypatch)
     events = _events(client.post("/v1/chat", json={"question": "q"}).text)
     assert [name for name, _ in events] == ["meta", "token", "done"]
@@ -149,7 +152,7 @@ def test_chat_in_scope_streams_normally(monkeypatch: pytest.MonkeyPatch) -> None
 def test_chat_guardrail_flag_off_skips_classifier(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RS_CHAT_GUARDRAIL", "0")
 
-    def no_classify(llm: object, question: object) -> bool:
+    def no_classify(llm: object, question: object, **kwargs: object) -> bool:
         raise AssertionError("the classifier must not run when the flag is off")
 
     def fake_stream(*a: object, **k: object):
@@ -326,3 +329,135 @@ def test_chat_rejects_an_overlong_history(monkeypatch: pytest.MonkeyPatch) -> No
     turns = [{"role": "user", "text": f"turn {i}"} for i in range(9)]
     response = client.post("/v1/chat", json={"question": "q", "history": turns})
     assert response.status_code == 422
+
+
+def test_a_refusal_records_a_refused_row(
+    monkeypatch: pytest.MonkeyPatch, _capture_metrics: list[dict]
+) -> None:
+    monkeypatch.setattr(chat_router, "is_research_question", lambda llm, question, **k: False)
+    client = _client(monkeypatch)
+    client.post("/v1/chat", json={"question": "best lasagna recipe"})
+
+    assert len(_capture_metrics) == 1
+    row = _capture_metrics[0]
+    assert row["outcome"] == "refused"
+    assert row["question"] == "best lasagna recipe"
+    assert row["found"] is False and row["retrieved"] == 0
+    assert row["user_hash"] is not None
+
+
+def test_a_busy_queue_records_and_names_its_kind(
+    monkeypatch: pytest.MonkeyPatch, _capture_metrics: list[dict]
+) -> None:
+    def no_slot():
+        raise HTTPException(status_code=503, detail="busy", headers={"Retry-After": "10"})
+
+    monkeypatch.setattr(chat_router, "llm_slot", no_slot)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda *a, **k: True)
+    client = _client(monkeypatch)
+    events = _events(client.post("/v1/chat", json={"question": "q"}).text)
+
+    assert events[-1][0] == "error"
+    assert events[-1][1]["kind"] == "busy" and events[-1][1]["code"] == 503
+    assert _capture_metrics[0]["outcome"] == "busy"
+
+
+def test_a_quota_death_names_its_kind_and_message(
+    monkeypatch: pytest.MonkeyPatch, _capture_metrics: list[dict]
+) -> None:
+    from openai import OpenAIError
+
+    class _Quota(OpenAIError):
+        status_code = 429
+
+    def broken_stream(*a: object, **k: object):
+        yield StreamMeta(retrieved=1, used=[_scored()])
+        raise _Quota("Rate limit exceeded: free-models-per-day")
+
+    monkeypatch.setattr(chat_router, "answer_stream", broken_stream)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda *a, **k: True)
+    client = _client(monkeypatch)
+    events = _events(client.post("/v1/chat", json={"question": "q"}).text)
+
+    assert events[-1][0] == "error"
+    assert events[-1][1]["kind"] == "quota"
+    assert "fast answers still work" in events[-1][1]["message"]
+    assert _capture_metrics[0]["outcome"] == "llm_error"
+
+
+def test_a_plain_llm_death_reads_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from openai import OpenAIError
+
+    def broken_stream(*a: object, **k: object):
+        yield StreamMeta(retrieved=1, used=[_scored()])
+        raise OpenAIError("connection refused")
+
+    monkeypatch.setattr(chat_router, "answer_stream", broken_stream)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda *a, **k: True)
+    client = _client(monkeypatch)
+    events = _events(client.post("/v1/chat", json={"question": "q"}).text)
+    assert events[-1][1]["kind"] == "unavailable"
+
+
+def test_an_agentic_plan_streams_before_meta(monkeypatch: pytest.MonkeyPatch) -> None:
+    from researchscout.answer import StreamPlan
+
+    used = [_scored()]
+
+    def fake_stream(*a: object, **k: object):
+        yield StreamPlan(parts=["alpha", "beta"])
+        yield StreamMeta(retrieved=1, used=used)
+        yield StreamDelta(text="Hello")
+        yield Answer(text="Hello", cited=[], hallucinated=[], used=used)
+
+    monkeypatch.setattr(chat_router, "answer_stream", fake_stream)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda *a, **k: True)
+    client = _client(monkeypatch)
+    events = _events(client.post("/v1/chat", json={"question": "q", "agentic": True}).text)
+
+    assert [name for name, _ in events] == ["plan", "meta", "token", "done"]
+    assert events[0][1] == {"parts": ["alpha", "beta"]}
+    assert events[1][1]["agentic"] is True
+
+
+def test_a_completed_answer_records_the_full_row(
+    monkeypatch: pytest.MonkeyPatch, _capture_metrics: list[dict]
+) -> None:
+    from researchscout.api.auth import owner_tag
+
+    used = [_scored()]
+
+    def fake_stream(*a: object, **k: object):
+        timings = k.get("timings")
+        if isinstance(timings, dict):
+            timings.update({"retrieve_ms": 120.0, "rerank_ms": 40.0, "llm_ms": 900.0})
+        yield StreamMeta(retrieved=1, used=used)
+        yield StreamDelta(text="Hello [arxiv:2401.00001] and [arxiv:9999.99999]")
+        yield Answer(
+            text="Hello [arxiv:2401.00001] and [arxiv:9999.99999]",
+            cited=["arxiv:2401.00001"],
+            hallucinated=["arxiv:9999.99999"],
+            used=used,
+            model="test-model",
+            prompt_tokens=321,
+            completion_tokens=45,
+        )
+
+    monkeypatch.setattr(chat_router, "answer_stream", fake_stream)
+    monkeypatch.setattr(chat_router, "is_research_question", lambda *a, **k: True)
+    client = _client(monkeypatch)
+    events = _events(client.post("/v1/chat", json={"question": "q"}).text)
+
+    done = events[-1][1]
+    assert done["model"] == "test-model"
+    assert done["prompt_tokens"] == 321 and done["completion_tokens"] == 45
+    row = _capture_metrics[0]
+    assert row["outcome"] == "ok"
+    assert row["model"] == "test-model"
+    assert row["prompt_tokens"] == 321 and row["completion_tokens"] == 45
+    assert row["retrieve_ms"] == 120 and row["rerank_ms"] == 40 and row["llm_ms"] == 900
+    assert row["first_token_ms"] is not None and row["first_token_ms"] >= 0
+    assert row["hallucinated"] == 1
+    # The test app runs in local no-auth mode, so the resolved account is the local user.
+    assert row["user_hash"] == owner_tag("local")
+    assert row["agentic"] is False and row["pinned"] is False
