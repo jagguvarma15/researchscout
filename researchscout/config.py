@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     # low (the openai default is 2, i.e. three requests per 429).
     llm_timeout_sec: float = 120.0
     llm_max_retries: int = 1
+    # Ask streamed completions to report token usage (stream_options.include_usage).
+    # OpenRouter and recent Ollama honor it; older Ollama ignores it (token counts stay
+    # NULL). A strict server that rejects the parameter is handled in the client — it
+    # retries once without it and stops sending it — so this kill switch exists only for
+    # exotic providers where even that first rejection is unwanted.
+    llm_stream_usage: bool = True
     # Chat rate limiting (in-process fixed window).
     # Web search fallback (arXiv + Semantic Scholar cards on not-found answers). Default
     # ON deliberately (a documented deviation like the guardrail): user-triggered, zero
