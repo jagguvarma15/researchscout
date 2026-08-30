@@ -266,6 +266,31 @@ export interface AskStats {
   llm_p50_ms: number | null;
   llm_p95_ms: number | null;
   notfound: string[];
+  // Outcome counts and the hallucination rate; optional so an older API still parses.
+  refused?: number;
+  llm_errors?: number;
+  busy?: number;
+  hallucination_rate?: number | null;
+}
+
+export interface LlmPurposeCalls {
+  purpose: string;
+  calls: number;
+  ok: number;
+  quota: number;
+  errors: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+}
+
+// Today's model spend from the llm_usage ledger - the daily-budget view.
+export interface LlmStats {
+  model: string;
+  calls_today: number;
+  prompt_tokens_today: number;
+  completion_tokens_today: number;
+  by_purpose: LlmPurposeCalls[];
+  last_quota_at: string | null;
 }
 
 export interface SystemStatus {
@@ -283,6 +308,8 @@ export interface SystemStatus {
   schedule: ScheduleGroup[];
   // Ask/chat usage over the last week; null when nothing was asked (or an older API).
   ask?: AskStats | null;
+  // Today's model spend; null when no calls today (or an older API).
+  llm?: LlmStats | null;
 }
 
 export async function fetchSystemStatus(): Promise<SystemStatus | null> {
