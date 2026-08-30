@@ -7,6 +7,7 @@ invented (a hallucinated citation never survives into ``Answer.cited``).
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -16,7 +17,8 @@ from sqlalchemy.orm import Session
 from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
-from researchscout.llm.usage import PURPOSE_SYNTHESIS, llm_purpose
+from researchscout.llm.tracing import NOOP_RUN, PipelineRun
+from researchscout.llm.usage import PURPOSE_SYNTHESIS, last_usage, llm_purpose
 from researchscout.retrieve.search import ScoredPaper, retrieve
 from researchscout.store.chunks import best_chunk_texts
 from researchscout.store.facets import PaperFacets
@@ -85,11 +87,26 @@ class Answer:
     cited: list[str]
     hallucinated: list[str]
     used: list[ScoredPaper]
+    # What produced the answer, when the client recorded it: the model id and token
+    # counts land here right after the generation finishes (same resumption window as the
+    # usage contextvar - see llm/usage.py). None with fakes and on empty-retrieval paths.
+    model: str | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    # The agentic sub-questions, when decomposition produced more than one.
+    plan: list[str] | None = None
+
+
+@dataclass
+class StreamPlan:
+    """Agentic only, before ``StreamMeta``: the sub-questions retrieval will run."""
+
+    parts: list[str]
 
 
 @dataclass
 class StreamMeta:
-    """First stream event: what retrieval found, before any generation."""
+    """What retrieval found, before any generation (after ``StreamPlan`` when agentic)."""
 
     retrieved: int
     used: list[ScoredPaper]
@@ -140,8 +157,12 @@ class FastAnswer:
     answer: Answer
     found: bool
     best_relevance: float | None
-    # Empty on the not-found path; last with a default so existing constructors hold.
+    # Empty on the not-found path; defaulted so existing constructors hold.
     entries: list[FastEntry] = field(default_factory=list)
+    # What retrieval found BEFORE the relevance floor. The not-found path strips
+    # ``answer.used``, so without this the metrics read "retrieved nothing" for exactly
+    # the questions the corpus-gap panel exists to analyze.
+    retrieved: int = 0
 
 
 def _relevance(item: ScoredPaper) -> float | None:
@@ -245,6 +266,7 @@ def answer_fast(
                 answer=Answer(text=_NOT_FOUND_TEXT, cited=[], hallucinated=[], used=[]),
                 found=False,
                 best_relevance=best,
+                retrieved=len(used),
             )
 
         kept = [
@@ -272,7 +294,13 @@ def answer_fast(
             )
         result = _post_check(_fast_text(entries), keep)
         span["cited"] = len(result.cited)
-        return FastAnswer(answer=result, found=True, best_relevance=best, entries=entries)
+        return FastAnswer(
+            answer=result,
+            found=True,
+            best_relevance=best,
+            entries=entries,
+            retrieved=len(used),
+        )
 
 
 def _context(papers: list[ScoredPaper], quotes: dict[str, str] | None = None) -> str:
@@ -334,16 +362,23 @@ def _retrieve_for(
     agentic: bool,
     paper_id: str | None = None,
     query_vector: list[float] | None = None,
+    timings: dict[str, float] | None = None,
+    parts: list[str] | None = None,
+    run: PipelineRun | None = None,
 ) -> list[ScoredPaper]:
     """Agentic multi-hop retrieval when asked, otherwise the single-shot hybrid search.
 
     A paper pin overrides agentic: decomposing a question about one hand-chosen paper into
     sub-searches would wander off the pin, and the pin already is the retrieval answer.
+    ``parts`` carries an already-shown decomposition into the agentic path; ``timings``
+    reaches only the single-shot leg (the agentic path is timed as a whole by the caller).
     """
     if agentic and paper_id is None:
         from researchscout.agentic import agentic_retrieve
 
-        return agentic_retrieve(session, embedder, llm, question, k=k, days=days)
+        return agentic_retrieve(
+            session, embedder, llm, question, k=k, days=days, parts=parts, run=run
+        )
     return retrieve(
         session,
         embedder,
@@ -352,7 +387,40 @@ def _retrieve_for(
         days=days,
         facets=_pin_facets(paper_id, days),
         query_vector=query_vector,
+        timings=timings,
     )
+
+
+def _plan_for(
+    llm: LLM, search_text: str, *, agentic: bool, paper_id: str | None, run: PipelineRun
+) -> list[str] | None:
+    """The agentic decomposition, or None when the ask is single-shot (or pinned)."""
+    if not agentic or paper_id is not None:
+        return None
+    from researchscout.agentic import decompose
+
+    with run.step("decompose", inputs={"question": search_text}) as step, step.ambient():
+        parts = decompose(llm, search_text)
+        step.out(parts=parts)
+    return parts
+
+
+def _attach_usage(result: Answer, llm: LLM, plan: list[str] | None) -> Answer:
+    """Stamp the answer with its model, token cost, and plan.
+
+    Must run in the same resumption window that finished the generation - the usage
+    contextvar does not survive the SSE threadpool's per-call context copies.
+    """
+    result.model = llm.model
+    result.plan = plan if plan and len(plan) > 1 else None
+    usage = last_usage()
+    # Both guards matter: the purpose keeps a decompose or guardrail record out, and the
+    # model identity keeps a non-recording LLM (a test fake) from inheriting a stale
+    # record left in this context by an earlier real call.
+    if usage is not None and usage.purpose == PURPOSE_SYNTHESIS and usage.model == llm.model:
+        result.prompt_tokens = usage.prompt_tokens
+        result.completion_tokens = usage.completion_tokens
+    return result
 
 
 def answer_stream(
@@ -366,17 +434,28 @@ def answer_stream(
     agentic: bool = False,
     history: list[Turn] | None = None,
     paper_id: str | None = None,
-) -> Iterator[StreamMeta | StreamDelta | Answer]:
-    """Streaming variant of :func:`answer`: meta first, then deltas, then the final Answer.
+    timings: dict[str, float] | None = None,
+    trace: PipelineRun | None = None,
+) -> Iterator[StreamPlan | StreamMeta | StreamDelta | Answer]:
+    """Streaming variant of :func:`answer`: plan (agentic), meta, deltas, the final Answer.
 
     The final :class:`Answer` carries the citation post-check over the accumulated text — the
-    same guarantee as the non-streaming path, it just arrives after the last delta.
+    same guarantee as the non-streaming path, it just arrives after the last delta. A
+    ``timings`` dict, when given, is filled with retrieve_ms (decompose included when
+    agentic), rerank_ms (single-shot only), and llm_ms; ``trace`` attaches the stages to a
+    pipeline run.
     """
+    run = trace if trace is not None else NOOP_RUN
     with trace_span(
         "ask", question=question, k=k, days=days, streaming=True, agentic=agentic
     ) as span:
         search_text = _retrieval_query(question, history)
-        query_vector = None if agentic else embedder.embed_query(search_text)
+        retrieval_started = time.perf_counter()
+        plan = _plan_for(llm, search_text, agentic=agentic, paper_id=paper_id, run=run)
+        if plan is not None and len(plan) > 1:
+            yield StreamPlan(parts=plan)
+        query_vector = None if plan is not None else embedder.embed_query(search_text)
+        inner: dict[str, float] = {}
         used = _retrieve_for(
             session,
             embedder,
@@ -387,7 +466,14 @@ def answer_stream(
             agentic=agentic,
             paper_id=paper_id,
             query_vector=query_vector,
+            timings=inner,
+            parts=plan,
+            run=run,
         )
+        if timings is not None:
+            timings["retrieve_ms"] = round((time.perf_counter() - retrieval_started) * 1000.0, 1)
+            if "rerank_ms" in inner:
+                timings["rerank_ms"] = inner["rerank_ms"]
         span["retrieved"] = len(used)
         yield StreamMeta(retrieved=len(used), used=used)
         if not used:
@@ -401,16 +487,20 @@ def answer_stream(
             f"{_history_block(history)}Question: {question}\n\nPapers:\n{_context(used, quotes)}"
         )
         parts: list[str] = []
-        # The purpose block covers only the call: the client reads it eagerly, and a
-        # block spanning the loop would die with the SSE threadpool's context copies.
-        with llm_purpose(PURPOSE_SYNTHESIS):
+        llm_started = time.perf_counter()
+        # The purpose and ambient blocks cover only the call: the client reads them
+        # eagerly, and a block spanning the loop would die with the SSE threadpool's
+        # context copies.
+        with run.step("synthesize") as step, step.ambient(), llm_purpose(PURPOSE_SYNTHESIS):
             deltas = llm.stream(_SYSTEM_PROMPT, user_prompt)
         for delta in deltas:
             parts.append(delta)
             yield StreamDelta(text=delta)
+        if timings is not None:
+            timings["llm_ms"] = round((time.perf_counter() - llm_started) * 1000.0, 1)
         span["model"] = llm.model
 
-        result = _post_check("".join(parts), used)
+        result = _attach_usage(_post_check("".join(parts), used), llm, plan)
         span["cited"] = len(result.cited)
         span["hallucinated"] = len(result.hallucinated)
         yield result
@@ -427,11 +517,17 @@ def answer(
     agentic: bool = False,
     history: list[Turn] | None = None,
     paper_id: str | None = None,
+    timings: dict[str, float] | None = None,
+    trace: PipelineRun | None = None,
 ) -> Answer:
     """Retrieve recent papers and synthesize a grounded, cited answer."""
+    run = trace if trace is not None else NOOP_RUN
     with trace_span("ask", question=question, k=k, days=days, agentic=agentic) as span:
         search_text = _retrieval_query(question, history)
-        query_vector = None if agentic else embedder.embed_query(search_text)
+        retrieval_started = time.perf_counter()
+        plan = _plan_for(llm, search_text, agentic=agentic, paper_id=paper_id, run=run)
+        query_vector = None if plan is not None else embedder.embed_query(search_text)
+        inner: dict[str, float] = {}
         used = _retrieve_for(
             session,
             embedder,
@@ -442,7 +538,14 @@ def answer(
             agentic=agentic,
             paper_id=paper_id,
             query_vector=query_vector,
+            timings=inner,
+            parts=plan,
+            run=run,
         )
+        if timings is not None:
+            timings["retrieve_ms"] = round((time.perf_counter() - retrieval_started) * 1000.0, 1)
+            if "rerank_ms" in inner:
+                timings["rerank_ms"] = inner["rerank_ms"]
         span["retrieved"] = len(used)
         if not used:
             return Answer(
@@ -453,11 +556,14 @@ def answer(
         user_prompt = (
             f"{_history_block(history)}Question: {question}\n\nPapers:\n{_context(used, quotes)}"
         )
-        with llm_purpose(PURPOSE_SYNTHESIS):
+        llm_started = time.perf_counter()
+        with run.step("synthesize") as step, step.ambient(), llm_purpose(PURPOSE_SYNTHESIS):
             text = llm.complete(_SYSTEM_PROMPT, user_prompt)
+        if timings is not None:
+            timings["llm_ms"] = round((time.perf_counter() - llm_started) * 1000.0, 1)
         span["model"] = llm.model
 
-        result = _post_check(text, used)
+        result = _attach_usage(_post_check(text, used), llm, plan)
         span["cited"] = len(result.cited)
         span["hallucinated"] = len(result.hallucinated)
         return result
