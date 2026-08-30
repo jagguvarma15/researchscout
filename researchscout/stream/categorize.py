@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
+from researchscout.llm.usage import PURPOSE_CUSTOM_LABEL, PURPOSE_KEYWORD_FALLBACK, llm_purpose
 from researchscout.store.topics import list_topics
 from researchscout.stream.envelope import Envelope
 from researchscout.taxonomy import group_for
@@ -237,9 +238,10 @@ class Categorizer:
         return {"key": best.key, "label": best.label, "similarity": round(best_similarity, 4)}
 
     def _llm_keywords(self, title: str, abstract: str) -> list[str]:
-        reply = self._llm.complete(
-            _KEYWORD_SYSTEM, f"Title: {title}\n\nAbstract: {abstract}", temperature=0.0
-        )
+        with llm_purpose(PURPOSE_KEYWORD_FALLBACK):
+            reply = self._llm.complete(
+                _KEYWORD_SYSTEM, f"Title: {title}\n\nAbstract: {abstract}", temperature=0.0
+            )
         phrases = [p.strip(" .-") for p in _LIST_SPLIT.split(reply)]
         return [p for p in phrases if p and len(p.split()) <= 6][:_KEYWORD_TOP_K]
 
@@ -268,11 +270,12 @@ class Categorizer:
             return []
         catalog = "\n".join(f"{spec.name}: {spec.description}" for spec in self._labels)
         try:
-            reply = self._llm.complete(
-                _LABEL_SYSTEM,
-                f"Labels:\n{catalog}\n\nTitle: {title}\n\nAbstract: {abstract}",
-                temperature=0.0,
-            )
+            with llm_purpose(PURPOSE_CUSTOM_LABEL):
+                reply = self._llm.complete(
+                    _LABEL_SYSTEM,
+                    f"Labels:\n{catalog}\n\nTitle: {title}\n\nAbstract: {abstract}",
+                    temperature=0.0,
+                )
         except Exception:  # noqa: BLE001 - labels are optional enrichment
             logger.warning("label classification failed", exc_info=True)
             return []
