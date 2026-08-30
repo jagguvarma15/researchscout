@@ -242,6 +242,59 @@ def test_ask_maps_llm_failure_to_502(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ask_router, "answer", boom)
     response = _client().post("/v1/ask", json={"question": "q"})
     assert response.status_code == 502
+    assert response.json()["detail"] == "LLM backend unavailable"
+
+
+def test_ask_names_a_spent_quota(
+    monkeypatch: pytest.MonkeyPatch, _capture_ask_metrics: list[dict]
+) -> None:
+    class _Quota(OpenAIError):
+        status_code = 429
+
+    def boom(*a: object, **k: object) -> Answer:
+        raise _Quota("Rate limit exceeded: free-models-per-day")
+
+    monkeypatch.setattr(ask_router, "answer", boom)
+    response = _client().post("/v1/ask", json={"question": "q"})
+    assert response.status_code == 502
+    assert response.json()["detail"] == "LLM quota exhausted for today"
+    assert _capture_ask_metrics[0]["outcome"] == "llm_error"
+
+
+def test_ask_records_timings_and_identity(
+    monkeypatch: pytest.MonkeyPatch, _capture_ask_metrics: list[dict]
+) -> None:
+    from researchscout.api.auth import owner_tag
+
+    used = ScoredPaper(paper=_paper(), score=1.0, distance=0.0)
+
+    def fake_answer(*a: object, **k: object) -> Answer:
+        timings = k.get("timings")
+        if isinstance(timings, dict):
+            timings.update({"retrieve_ms": 80.0, "llm_ms": 700.0})
+        return Answer(
+            text="See [arxiv:2401.00001].",
+            cited=["arxiv:2401.00001"],
+            hallucinated=[],
+            used=[used],
+            model="test-model",
+            prompt_tokens=100,
+            completion_tokens=25,
+            plan=["alpha", "beta"],
+        )
+
+    monkeypatch.setattr(ask_router, "answer", fake_answer)
+    response = _client().post("/v1/ask", json={"question": "q", "agentic": True})
+    assert response.status_code == 200
+    assert response.json()["plan"] == ["alpha", "beta"]
+    row = _capture_ask_metrics[0]
+    assert row["outcome"] == "ok"
+    assert row["retrieve_ms"] == 80 and row["llm_ms"] == 700
+    assert row["model"] == "test-model"
+    assert row["prompt_tokens"] == 100 and row["completion_tokens"] == 25
+    assert row["agentic"] is True
+    # The test app runs in local no-auth mode, so the resolved account is the local user.
+    assert row["user_hash"] == owner_tag("local")
 
 
 def test_the_feed_leaves_out_what_the_caller_dismissed(monkeypatch: pytest.MonkeyPatch) -> None:
