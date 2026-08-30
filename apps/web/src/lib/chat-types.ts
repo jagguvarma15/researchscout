@@ -61,4 +61,26 @@ export interface Message {
   webHits?: WebHit[];
   webFailed?: string[];
   imports?: Record<string, string>;
+  // When the exchange happened (epoch ms), stamped on push and persisted.
+  at?: number;
+  // The turn ran the multi-hop deep path; the plan is its decomposed sub-questions
+  // (streamed as the plan event before meta).
+  agentic?: boolean;
+  plan?: string[];
+  // The paper pin active when the question was asked, kept on the message so a restored
+  // transcript still says what a scoped answer was scoped to.
+  scope?: { paperId: string; title: string };
+  // Citation ids the post-check dropped because the model invented them.
+  hallucinated?: string[];
+  // What produced the answer and what it cost, from the enriched done event.
+  model?: string;
+  promptTokens?: number;
+  completionTokens?: number;
+  elapsedMs?: number;
+  // How an errored stream failed: busy (try again shortly), quota (out for the day, fast
+  // answers still work), or unavailable (the backend itself).
+  errorKind?: 'busy' | 'quota' | 'unavailable';
+  // A failure that arrived after text had streamed: the note renders after the preserved
+  // partial answer instead of replacing it.
+  errorNote?: string;
 }
