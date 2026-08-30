@@ -62,6 +62,10 @@ class ScoredPaper:
     # The raw cross-encoder relevance in [0, 1], before the prior multiply — the only
     # absolute match signal. None when reranking is off (scores are rank-based then).
     relevance: float | None = None
+    # The recency-and-breakthrough prior already folded into ``score``, kept separately
+    # so downstream fusion (the agentic path) can re-fuse ranks without losing it. The
+    # default covers hand-built instances (the reference hop, tests).
+    prior: float = 1.0
 
 
 def _recency_weight(published_at: datetime, half_life_days: float) -> float:
@@ -131,7 +135,7 @@ def retrieve(
     papers = get_papers(session, list(fused))
     boosts = breakthrough_many(session, list(papers))
     candidates: list[Candidate] = []
-    lookup: dict[str, tuple[Paper, float]] = {}
+    lookup: dict[str, tuple[Paper, float, float]] = {}
     for paper_id, rrf_score in fused.items():
         paper = papers.get(paper_id)
         if paper is None:
@@ -146,7 +150,7 @@ def retrieve(
             )
         )
         # Lexical-only hits have no measured cosine distance; report the maximum.
-        lookup[paper_id] = (paper, distances.get(paper_id, 1.0))
+        lookup[paper_id] = (paper, distances.get(paper_id, 1.0), prior)
 
     legs_done = time.perf_counter()
     reranker = get_reranker() if use_rerank else None
@@ -156,6 +160,12 @@ def retrieve(
         timings["legs_ms"] = round((legs_done - embed_done) * 1000.0, 1)
         timings["rerank_ms"] = round((time.perf_counter() - legs_done) * 1000.0, 1)
     return [
-        ScoredPaper(paper=lookup[key][0], score=score, distance=lookup[key][1], relevance=relevance)
+        ScoredPaper(
+            paper=lookup[key][0],
+            score=score,
+            distance=lookup[key][1],
+            relevance=relevance,
+            prior=lookup[key][2],
+        )
         for key, score, relevance in ranked
     ][:k]
