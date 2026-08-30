@@ -14,6 +14,8 @@ may still use.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
@@ -46,6 +48,20 @@ class User:
 
 
 _LOCAL_USER = User(sub="local", username="local")
+
+
+def owner_tag(sub: str | None) -> str | None:
+    """A short pseudonymous tag for an account, or None for anonymous callers.
+
+    Byte-for-byte the web's ``lib/owner.ts`` derivation - twelve characters of the
+    base64url sha256 of the sub - so a metrics row and a client-side envelope stamped for
+    the same account carry the same tag, while neither ever holds the sub itself. Twelve
+    characters answer "same account or not" and nothing more.
+    """
+    if not sub:
+        return None
+    digest = hashlib.sha256(sub.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii")[:12]
 
 
 def _discover_jwks_url(issuer: str) -> str:
