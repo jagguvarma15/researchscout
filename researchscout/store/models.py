@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    false,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -498,6 +499,19 @@ class AskMetricRow(Base):
     rerank_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     llm_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_ms: Mapped[int] = mapped_column(Integer)
+    # v2 (migration 0034): every ask records now, so outcome is the one truth - ok |
+    # notfound | refused | llm_error | busy - while found stays for old readers.
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    # The web's ownerTag derivation (12 chars of sha256, never the sub); NULL when anonymous.
+    user_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    agentic: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    pinned: Mapped[bool] = mapped_column(Boolean, server_default=false())
+    rerank_used: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    first_token_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    hallucinated: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class LlmUsageRow(Base):
