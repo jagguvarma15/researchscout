@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
 from researchscout.llm.base import LLM
+from researchscout.llm.usage import PURPOSE_SYNTHESIS, llm_purpose
 from researchscout.retrieve.search import ScoredPaper, retrieve
 from researchscout.store.chunks import best_chunk_texts
 from researchscout.store.facets import PaperFacets
@@ -400,7 +401,11 @@ def answer_stream(
             f"{_history_block(history)}Question: {question}\n\nPapers:\n{_context(used, quotes)}"
         )
         parts: list[str] = []
-        for delta in llm.stream(_SYSTEM_PROMPT, user_prompt):
+        # The purpose block covers only the call: the client reads it eagerly, and a
+        # block spanning the loop would die with the SSE threadpool's context copies.
+        with llm_purpose(PURPOSE_SYNTHESIS):
+            deltas = llm.stream(_SYSTEM_PROMPT, user_prompt)
+        for delta in deltas:
             parts.append(delta)
             yield StreamDelta(text=delta)
         span["model"] = llm.model
@@ -448,7 +453,8 @@ def answer(
         user_prompt = (
             f"{_history_block(history)}Question: {question}\n\nPapers:\n{_context(used, quotes)}"
         )
-        text = llm.complete(_SYSTEM_PROMPT, user_prompt)
+        with llm_purpose(PURPOSE_SYNTHESIS):
+            text = llm.complete(_SYSTEM_PROMPT, user_prompt)
         span["model"] = llm.model
 
         result = _post_check(text, used)
