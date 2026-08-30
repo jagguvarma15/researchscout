@@ -230,3 +230,86 @@ describe('conversation persistence', () => {
     expect(chat.messages[chat.messages.length - 2].text).toBe('q24');
   });
 });
+
+describe('the observability fields survive the round trip', () => {
+  it('round-trips timestamps, plan, scope, and provenance', () => {
+    chat.messages.push({
+      role: 'assistant',
+      text: 'Answer [arxiv:2401.00001].',
+      phase: 'done',
+      mode: 'llm',
+      at: 1_756_500_000_000,
+      agentic: true,
+      plan: ['sparse attention', 'kv cache'],
+      scope: { paperId: 'arxiv:2401.00001', title: 'A Paper' },
+      hallucinated: ['arxiv:9999.99999'],
+      model: 'test-model',
+      promptTokens: 321,
+      completionTokens: 45,
+      elapsedMs: 8200,
+      retrieved: 8,
+      errorKind: 'quota',
+      errorNote: 'AI quota exhausted for today',
+    });
+    persistNow();
+    emptyInMemory();
+
+    restoreConversation();
+    const message = chat.messages[0];
+    expect(message.at).toBe(1_756_500_000_000);
+    expect(message.agentic).toBe(true);
+    expect(message.plan).toEqual(['sparse attention', 'kv cache']);
+    expect(message.scope).toEqual({ paperId: 'arxiv:2401.00001', title: 'A Paper' });
+    expect(message.hallucinated).toEqual(['arxiv:9999.99999']);
+    expect(message.model).toBe('test-model');
+    expect(message.promptTokens).toBe(321);
+    expect(message.completionTokens).toBe(45);
+    expect(message.elapsedMs).toBe(8200);
+    expect(message.retrieved).toBe(8);
+    expect(message.errorKind).toBe('quota');
+    expect(message.errorNote).toBe('AI quota exhausted for today');
+  });
+
+  it('drops malformed observability fields on restore', () => {
+    seed(
+      envelope([
+        {
+          role: 'assistant',
+          text: 'x',
+          at: 'yesterday',
+          agentic: 'yes',
+          plan: [42, 'ok'],
+          scope: { paperId: 'javascript:alert(1)', title: 'nope' },
+          hallucinated: ['<script>', 'arxiv:2401.00001'],
+          model: 12,
+          promptTokens: -5,
+          elapsedMs: Number.NaN,
+          errorKind: 'exploded',
+          errorNote: 'n'.repeat(500),
+        },
+      ]),
+    );
+    restoreConversation();
+    const message = chat.messages[0];
+    expect(message.at).toBeUndefined();
+    expect(message.agentic).toBeUndefined();
+    expect(message.plan).toEqual(['ok']);
+    expect(message.scope).toBeUndefined();
+    expect(message.hallucinated).toEqual(['arxiv:2401.00001']);
+    expect(message.model).toBeUndefined();
+    expect(message.promptTokens).toBeUndefined();
+    expect(message.elapsedMs).toBeUndefined();
+    expect(message.errorKind).toBeUndefined();
+    expect(message.errorNote).toBeUndefined();
+  });
+
+  it('an old envelope without the new fields restores whole', () => {
+    seed(envelope([{ role: 'user', text: 'plain old question' }]));
+    restoreConversation();
+    const message = chat.messages[0];
+    expect(message.text).toBe('plain old question');
+    expect(message.at).toBeUndefined();
+    expect(message.plan).toBeUndefined();
+    expect(message.errorKind).toBeUndefined();
+  });
+});
