@@ -562,9 +562,11 @@ def _report(settings: Settings) -> str:
     published report, so nothing shares a transaction here.
     """
     from researchscout.report import build_daily_report
+    from researchscout.store.ask_metrics import prune_ask_metrics
     from researchscout.store.db import session_scope
     from researchscout.store.digests import upsert_digest
     from researchscout.store.lineage import prune_lineage
+    from researchscout.store.llm_usage import prune_llm_usage
     from researchscout.store.raw import prune_raw_items
 
     zone = ZoneInfo(settings.scheduler_timezone)
@@ -587,6 +589,10 @@ def _report(settings: Settings) -> str:
         raw_pruned = prune_raw_items(session, keep_days=settings.raw_items_keep_days)
     if raw_pruned:
         logger.info("pruned %d raw item(s)", raw_pruned)
+    with session_scope() as session:
+        prune_ask_metrics(session)
+    with session_scope() as session:
+        prune_llm_usage(session)
     return note
 
 
