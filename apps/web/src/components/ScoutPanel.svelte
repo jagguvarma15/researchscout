@@ -5,7 +5,7 @@
   // or lose the thread, and reopening must show both. The pure pieces (frame splitting,
   // formatting, keyword matching) still live in src/lib; rendering is still ChatMessage's.
 
-  import { chat, importHit, searchWeb, summarize } from '../lib/chat-state.svelte';
+  import { chat, importHit, quota, searchWeb, summarize } from '../lib/chat-state.svelte';
   import ChatMessage from './ChatMessage.svelte';
 
   let { onactivity }: { onactivity: () => void } = $props();
@@ -27,6 +27,11 @@
 <div class="thread">
   <!-- Clear conversation lives in the omnibox foot row: the transcript should start with
        the conversation, not a control. -->
+  {#if quota.exhausted}
+    <p class="quota" role="status">
+      AI answers are paused for today (daily quota). Quick answers still work.
+    </p>
+  {/if}
   {#each chat.messages as message}
     <ChatMessage
       {message}
@@ -40,6 +45,15 @@
 </div>
 
 <style>
+  .quota {
+    margin: 0;
+    padding: 0.45rem 0.7rem;
+    border: 1px solid var(--line, #e6e1d5);
+    border-radius: var(--radius-sm, 10px);
+    background: var(--surface-2, #f4f0e8);
+    color: var(--muted, #5d6570);
+    font-size: var(--text-xs, 0.75rem);
+  }
   .thread {
     display: flex;
     flex-direction: column;
