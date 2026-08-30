@@ -74,7 +74,7 @@ const CONVERSATION = {
         { id: 'arxiv:2401.00002', title: 'Efficient Long-context Attention at Scale', score: 0.9 },
       ],
     },
-    { role: 'user', text: 'summarize the main approaches', phase: 'done' },
+    { role: 'user', text: '/deep summarize the main approaches', phase: 'done' },
     {
       role: 'assistant',
       phase: 'done',
@@ -84,6 +84,17 @@ const CONVERSATION = {
       used: [
         { id: 'arxiv:2401.00001', title: 'Causal Discovery with Inverted Self-attention', score: 1 },
       ],
+      // The observability additions, so the chat shot proves the plan chips, the
+      // hallucination notice, and the provenance caption all render.
+      at: Date.now() - 60_000,
+      agentic: true,
+      plan: ['sparse attention methods', 'linear attention kernels'],
+      hallucinated: ['arxiv:9999.99999'],
+      model: 'nvidia/nemotron-3-super-120b-a12b:free',
+      promptTokens: 1450,
+      completionTokens: 220,
+      elapsedMs: 8200,
+      retrieved: 8,
     },
   ],
 };
