@@ -750,3 +750,33 @@ def test_announce_stays_silent_and_safe(monkeypatch: pytest.MonkeyPatch) -> None
 
     monkeypatch.setattr("researchscout.deliver.notify_new_issue", blowing_up)
     _announce(get_settings(), title="Digest", url="/digests/x")
+
+
+def test_the_report_slot_prunes_the_metric_ledgers(monkeypatch: pytest.MonkeyPatch) -> None:
+    import researchscout.scheduler as scheduler_mod
+
+    pruned: list[str] = []
+
+    class _Scope:
+        def __enter__(self) -> object:
+            return object()
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    monkeypatch.setattr("researchscout.store.db.session_scope", lambda: _Scope())
+    monkeypatch.setattr("researchscout.report.build_daily_report", lambda session, zone: None)
+    monkeypatch.setattr("researchscout.store.lineage.prune_lineage", lambda session: 0)
+    monkeypatch.setattr("researchscout.store.raw.prune_raw_items", lambda session, keep_days: 0)
+    monkeypatch.setattr(
+        "researchscout.store.ask_metrics.prune_ask_metrics",
+        lambda session: pruned.append("ask"),
+    )
+    monkeypatch.setattr(
+        "researchscout.store.llm_usage.prune_llm_usage",
+        lambda session: pruned.append("llm"),
+    )
+
+    note = scheduler_mod._report(Settings())
+    assert note == "window empty"
+    assert pruned == ["ask", "llm"]
