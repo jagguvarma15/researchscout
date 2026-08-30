@@ -498,3 +498,23 @@ class AskMetricRow(Base):
     rerank_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     llm_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_ms: Mapped[int] = mapped_column(Integer)
+
+
+class LlmUsageRow(Base):
+    """One model call: purpose, tokens, latency, and how it ended (the daily-budget ledger)."""
+
+    __tablename__ = "llm_usage"
+    __table_args__ = (
+        Index("ix_llm_usage_called_at", "called_at"),
+        Index("ix_llm_usage_purpose_called", "purpose", "called_at"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    called_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    purpose: Mapped[str] = mapped_column(String(30))
+    model: Mapped[str] = mapped_column(String(120))
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer)
+    outcome: Mapped[str] = mapped_column(String(10))  # ok | quota | error | aborted
+    detail: Mapped[str | None] = mapped_column(String(200), nullable=True)
