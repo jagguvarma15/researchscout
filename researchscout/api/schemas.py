@@ -189,6 +189,8 @@ class AskResponse(BaseModel):
     used: list[UsedPaper]
     # False only for fast-mode answers under the relevance floor (nothing matched).
     found: bool = True
+    # The agentic sub-questions, when a deep ask decomposed into more than one.
+    plan: list[str] | None = None
 
 
 class FastResultItem(BaseModel):
@@ -618,6 +620,36 @@ class AskStats(BaseModel):
     llm_p95_ms: int | None
     # Recent questions that found nothing - the corpus-gap list.
     notfound: list[str] = []
+    # Outcome counts over the window (defaults keep old readers whole).
+    refused: int = 0
+    llm_errors: int = 0
+    busy: int = 0
+    # Share of completed llm answers whose post-check dropped an invented citation.
+    hallucination_rate: float | None = None
+
+
+class LlmPurposeCalls(BaseModel):
+    """One purpose's share of today's model spend."""
+
+    purpose: str
+    calls: int
+    ok: int
+    quota: int
+    errors: int
+    prompt_tokens: int
+    completion_tokens: int
+
+
+class LlmStats(BaseModel):
+    """Today's model usage from the llm_usage ledger - the daily-budget view."""
+
+    model: str
+    calls_today: int
+    prompt_tokens_today: int
+    completion_tokens_today: int
+    by_purpose: list[LlmPurposeCalls] = []
+    # The last time a call died on quota (7-day lookback), or None.
+    last_quota_at: datetime | None = None
 
 
 class SystemStatus(BaseModel):
@@ -643,6 +675,8 @@ class SystemStatus(BaseModel):
     schedule: list[ScheduleGroup] = []
     # Ask/chat usage over the last week (None when nothing was asked).
     ask: AskStats | None = None
+    # Today's model spend (None when no calls today and no recent quota death).
+    llm: LlmStats | None = None
 
 
 class NotableModelInfo(BaseModel):
