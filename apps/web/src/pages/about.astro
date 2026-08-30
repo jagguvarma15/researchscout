@@ -311,9 +311,32 @@ const healthChecks = [
                   {status.ask.found_rate !== null &&
                     `; ${Math.round(status.ask.found_rate * 100)} percent found papers`}
                   {status.ask.fast_p50_ms !== null &&
-                    `; quick answers ${status.ask.fast_p50_ms}ms median`}
+                    `; quick answers ${status.ask.fast_p50_ms}ms median${
+                      status.ask.fast_p95_ms !== null ? ` (p95 ${status.ask.fast_p95_ms}ms)` : ''
+                    }`}
                   {status.ask.llm_p50_ms !== null &&
-                    `; AI answers ${(status.ask.llm_p50_ms / 1000).toFixed(1)}s median`}
+                    `; AI answers ${(status.ask.llm_p50_ms / 1000).toFixed(1)}s median${
+                      status.ask.llm_p95_ms !== null
+                        ? ` (p95 ${(status.ask.llm_p95_ms / 1000).toFixed(1)}s)`
+                        : ''
+                    }`}
+                  {(status.ask.refused ?? 0) > 0 && `; ${status.ask.refused} off-topic refused`}
+                  {(status.ask.llm_errors ?? 0) > 0 && `; ${status.ask.llm_errors} AI failures`}
+                  .
+                </li>
+              )}
+              {status?.llm && (
+                <li>
+                  <strong>{status.llm.calls_today.toLocaleString('en-US')} model calls</strong>{' '}
+                  today ({status.llm.model}
+                  {status.llm.prompt_tokens_today > 0 &&
+                    `; ${(status.llm.prompt_tokens_today + status.llm.completion_tokens_today).toLocaleString('en-US')} tokens`}
+                  {status.llm.by_purpose.length > 0 &&
+                    `; ${status.llm.by_purpose
+                      .map((entry) => `${entry.purpose.replaceAll('_', ' ')} ${entry.calls}`)
+                      .join(', ')}`}
+                  ){status.llm.last_quota_at &&
+                    `; last hit the daily quota ${new Date(status.llm.last_quota_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                   .
                 </li>
               )}
