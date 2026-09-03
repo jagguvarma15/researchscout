@@ -752,6 +752,30 @@ def test_announce_stays_silent_and_safe(monkeypatch: pytest.MonkeyPatch) -> None
     _announce(get_settings(), title="Digest", url="/digests/x")
 
 
+def test_announce_threads_the_summary_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    from researchscout.config import get_settings
+    from researchscout.scheduler import _announce
+
+    monkeypatch.setenv("RS_PUSH_ENABLED", "true")
+    get_settings.cache_clear()
+    seen: list[str] = []
+
+    def recorder(**kwargs: object) -> int:
+        seen.append(str(kwargs["body"]))
+        return 1
+
+    monkeypatch.setattr("researchscout.deliver.notify_new_issue", recorder)
+    _announce(get_settings(), title="Digest", url="/digests/x", body="5 arrivals; 5 must-reads.")
+    _announce(get_settings(), title="Digest", url="/digests/x")
+    _announce(get_settings(), title="Digest", url="/digests/x", body="")
+    # No summary (or an empty one) falls back to the generic notice.
+    assert seen == [
+        "5 arrivals; 5 must-reads.",
+        "Fresh reading is ready.",
+        "Fresh reading is ready.",
+    ]
+
+
 def test_the_report_slot_prunes_the_metric_ledgers(monkeypatch: pytest.MonkeyPatch) -> None:
     import researchscout.scheduler as scheduler_mod
 
