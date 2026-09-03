@@ -34,3 +34,43 @@ export function issueNumber(slug: string): number | null {
   const match = /-w(\d+)$/.exec(slug);
   return match ? Number(match[1]) : null;
 }
+
+/** An ISO date as prose ("2026-09-01" -> "Sep 1, 2026"); the raw string when unparseable. */
+export function humanDate(iso: string): string {
+  const day = iso.slice(0, 10);
+  const parsed = new Date(`${day}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+const SIGNAL_LABELS: Record<string, string> = {
+  citation: 'citations',
+  code_stars: 'code stars',
+  hf_trending_rank: 'HF trending',
+  social_mention: 'social buzz',
+  review_score: 'review scores',
+  discussion: 'discussion',
+};
+
+/** Why a digest item ranked, from its per-signal contributions: the top two positive
+ * signals as prose ("Momentum from citations and code stars"); empty when nothing did. */
+export function whyLine(why: Record<string, number> | undefined): string {
+  const positive = Object.entries(why ?? {})
+    .filter(([, value]) => value > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 2)
+    .map(([key]) => SIGNAL_LABELS[key] ?? key.replaceAll('_', ' '));
+  if (positive.length === 0) return '';
+  return `Momentum from ${positive.join(' and ')}`;
+}
+
+/** The one-line issue summary shared by the archive and the Atom feed; empty at zero. */
+export function issueSummary(itemCount: number): string {
+  if (itemCount <= 0) return '';
+  return `${itemCount} paper${itemCount === 1 ? '' : 's'}`;
+}
