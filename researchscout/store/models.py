@@ -19,6 +19,7 @@ from sqlalchemy import (
     Text,
     false,
     func,
+    true,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -114,10 +115,15 @@ class DigestRow(Base):
     __tablename__ = "digests"
 
     slug: Mapped[str] = mapped_column(String, primary_key=True)
+    # weekly | daily - the two producers share the table; the column makes kind queryable
+    # instead of inferred from the slug shape.
+    kind: Mapped[str] = mapped_column(String, nullable=False, server_default="weekly")
     title: Mapped[str] = mapped_column(Text)
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     body: Mapped[str] = mapped_column(Text)
+    # False when the weekly prose is the deterministic fallback (model unavailable).
+    llm_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=true())
     items: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
