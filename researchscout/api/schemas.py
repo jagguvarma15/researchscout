@@ -489,16 +489,28 @@ class DigestItem(BaseModel):
     title: str
     score: float
     citations: float
+    # Enrichment stored since the items payload widened; defaults cover legacy rows.
+    primary_category: str | None = None
+    keywords: list[str] = []
+    authors: list[str] = []
+    author_count: int = 0
+    venue: str | None = None
+    # Per-signal-type breakthrough contributions - why the paper ranked.
+    why: dict[str, float] = {}
 
 
 class DigestSummary(BaseModel):
     slug: str
+    # weekly | daily; defaulted for rows serialized before the column existed.
+    kind: str = "weekly"
     title: str
     period_start: datetime
     period_end: datetime
     # How many papers the issue carries, for the index page; 0 on rows stored
     # before the field existed.
     item_count: int = 0
+    # False when the weekly prose is the deterministic fallback.
+    llm_ok: bool = True
 
 
 class DigestDetail(DigestSummary):
@@ -508,6 +520,9 @@ class DigestDetail(DigestSummary):
 
 class DigestList(BaseModel):
     items: list[DigestSummary]
+    total: int = 0
+    limit: int = 20
+    offset: int = 0
 
 
 class TopicPaper(BaseModel):
