@@ -42,9 +42,9 @@ def test_report_ranks_counts_and_cites(monkeypatch: pytest.MonkeyPatch) -> None:
         _paper("arxiv:2607.3", "Physics paper", category="hep-th"),
     ]
     scores = {
-        "arxiv:2607.1": _Score(total=0.1),
-        "arxiv:2607.2": _Score(total=3.0),
-        "arxiv:2607.3": _Score(total=1.0),
+        "arxiv:2607.1": _Score(total=0.1, contributions={}),
+        "arxiv:2607.2": _Score(total=3.0, contributions={"citation": 2.5, "discussion": 0.5}),
+        "arxiv:2607.3": _Score(total=1.0, contributions={"citation": 1.0}),
     }
     topics = [
         SimpleNamespace(label="Efficient attention", trend="rising", size=6),
@@ -72,6 +72,10 @@ def test_report_ranks_counts_and_cites(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Old stable topic" not in digest.body  # steady topics are not movements
     assert "1. [arxiv:2607.2] Hot paper" in digest.body
     assert digest.period_end == now
+    assert digest.kind == "daily"
+    assert digest.llm_ok is True  # no prose call happened, so no fallback either
+    assert digest.summary == "3 arrivals; 3 must-reads."
+    assert digest.items[0].contributions == {"citation": 2.5, "discussion": 0.5}
 
 
 def test_ties_break_by_recency(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,7 +83,7 @@ def test_ties_break_by_recency(monkeypatch: pytest.MonkeyPatch) -> None:
         _paper("arxiv:2607.4", "Older", hours_old=20),
         _paper("arxiv:2607.5", "Newer", hours_old=1),
     ]
-    scores = {pid: _Score(total=0.0) for pid in ("arxiv:2607.4", "arxiv:2607.5")}
+    scores = {pid: _Score(total=0.0, contributions={}) for pid in ("arxiv:2607.4", "arxiv:2607.5")}
     monkeypatch.setattr(report_mod, "papers_arrived_since", lambda *a, **k: papers)
     monkeypatch.setattr(report_mod, "breakthrough_many", lambda session, ids: scores)
     monkeypatch.setattr(report_mod, "list_topics", lambda session: [])
