@@ -6,13 +6,31 @@ import pytest
 from sqlalchemy.orm import Session
 
 from researchscout.config import get_settings
-from researchscout.deliver import NullDeliverer, WebPushDeliverer, get_deliverer
+from researchscout.deliver import NullDeliverer, WebPushDeliverer, get_deliverer, notify_new_issue
 
 
 def test_default_is_the_null_deliverer() -> None:
     deliverer = get_deliverer()
     assert isinstance(deliverer, NullDeliverer)
     assert deliverer.deliver(title="t", body="b", url="/digests") == 0
+
+
+def test_notify_forwards_the_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    import researchscout.deliver as deliver_mod
+
+    seen: dict[str, str] = {}
+
+    class _Recorder:
+        def deliver(self, *, title: str, body: str, url: str) -> int:
+            seen.update(title=title, body=body, url=url)
+            return 1
+
+    monkeypatch.setattr(deliver_mod, "get_deliverer", lambda: _Recorder())
+    assert notify_new_issue(title="Daily report", url="/digests/2026-09-01") == 1
+    assert seen["body"] == "Fresh reading is ready."  # the default still stands
+
+    notify_new_issue(title="Daily report", url="/digests/2026-09-01", body="5 must-reads.")
+    assert seen["body"] == "5 must-reads."
 
 
 def test_keys_and_flag_pick_web_push(monkeypatch: pytest.MonkeyPatch) -> None:
