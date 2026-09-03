@@ -3,18 +3,20 @@
 // First tests for the API client. Node rather than the project-wide jsdom: this module only
 // ever runs in Astro frontmatter on the server. The network is a stubbed global fetch - what
 // is pinned here is the shape contract pages rely on (CatalogResult tells apart unreachable,
-// HTTP error, and data), the derived failure copy, the id encoding, and the digest renderer's
-// escape-then-link discipline.
+// HTTP error, and data), the derived failure copy, the id encoding, and the digest readers'
+// paging contract.
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   catalogMessage,
+  digestQuery,
+  fetchDigest,
+  fetchDigests,
   fetchPaper,
   fetchPapers,
   fetchSaved,
   fetchTopics,
-  renderDigestBody,
 } from './api';
 
 function respondWith(body: unknown, ok = true, status = 200) {
@@ -93,21 +95,50 @@ describe('fetchPaper', () => {
   });
 });
 
-describe('renderDigestBody', () => {
-  it('escapes markup before anything else', () => {
-    const html = renderDigestBody('a <script> & b', new Set());
-    expect(html).toBe('<p>a &lt;script&gt; &amp; b</p>');
+describe('digestQuery', () => {
+  it('always pins the page size and starts unfiltered', () => {
+    expect(digestQuery({})).toBe('limit=20');
   });
 
-  it('links only citations the digest actually contains', () => {
-    const html = renderDigestBody('[arxiv:1] and [arxiv:2]', new Set(['arxiv:1']));
-    expect(html).toContain('<a href="/papers/arxiv:1">[arxiv:1]</a>');
-    expect(html).toContain('[arxiv:2]');
-    expect(html).not.toContain('href="/papers/arxiv:2"');
+  it('carries the kind and turns pages into offsets', () => {
+    expect(digestQuery({ kind: 'weekly', page: 3 })).toBe('kind=weekly&limit=20&offset=40');
   });
 
-  it('turns blank lines into paragraphs and single breaks into br', () => {
-    const html = renderDigestBody('one\ntwo\n\nthree', new Set());
-    expect(html).toBe('<p>one<br />two</p><p>three</p>');
+  it('page one carries no offset', () => {
+    expect(digestQuery({ kind: 'daily', page: 1 })).toBe('kind=daily&limit=20');
+  });
+});
+
+describe('the digest readers', () => {
+  it('fetchDigests keeps the page envelope', async () => {
+    vi.stubGlobal(
+      'fetch',
+      respondWith({ items: [{ slug: '2026-w28' }], total: 41, limit: 20, offset: 0 })
+    );
+    const result = await fetchDigests({ kind: 'weekly' });
+    expect(result).toEqual({
+      ok: true,
+      data: { items: [{ slug: '2026-w28' }], total: 41, limit: 20, offset: 0 },
+    });
+  });
+
+  it('fetchDigests floors a missing total at the visible page', async () => {
+    vi.stubGlobal('fetch', respondWith({ items: [{ slug: '2026-w28' }] }));
+    const result = await fetchDigests();
+    expect(result.ok && result.data.total).toBe(1);
+  });
+
+  it('fetchDigest reports failures instead of collapsing them into null', async () => {
+    vi.stubGlobal('fetch', respondWith(null, false, 503));
+    const result = await fetchDigest('2026-w28');
+    expect(result).toEqual({ ok: false, failure: { status: 503 } });
+  });
+
+  it('fetchDigest encodes the slug', async () => {
+    const fetchMock = respondWith({ slug: 'a b' });
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchDigest('a b');
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url.endsWith('/v1/digests/a%20b')).toBe(true);
   });
 });
