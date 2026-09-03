@@ -2,26 +2,68 @@
 import { Icon } from 'astro-icon/components';
 import EmptyState from '../../components/EmptyState.astro';
 import PageIntro from '../../components/PageIntro.astro';
+import PaperRow from '../../components/PaperRow.astro';
+import SaveButton from '../../components/SaveButton.svelte';
 import SignalMark from '../../components/SignalMark.astro';
+import Telemetry from '../../components/Telemetry.svelte';
 import Base from '../../layouts/Base.astro';
-import { fetchDigest, formatDate, renderDigestBody } from '../../lib/api';
-import { issueNumber } from '../../lib/format';
-import { renderMathHTML } from '../../lib/math';
+import type { PaperSummary } from '../../lib/api';
+import { catalogMessage, fetchDigest, fetchForYou, fetchSaved } from '../../lib/api';
+import { humanDate, issueNumber, issueSummary, whyLine } from '../../lib/format';
+import { renderIssueBody, renderMathHTML } from '../../lib/math';
 import { morphName } from '../../lib/morph';
+import { categoryName } from '../../lib/taxonomy';
 
 const slug = Astro.params.slug ?? '';
-const digest = await fetchDigest(slug);
-if (digest === null) {
+const [result, savedResult] = await Promise.all([
+  fetchDigest(slug),
+  fetchSaved(Astro.locals.accessToken),
+]);
+const digest = result.ok ? result.data : null;
+// A 404 is the one failure that means "no such issue"; anything else is the API's problem
+// and must not read as a missing page.
+const missing = !result.ok && result.failure.status === 404;
+if (missing) {
   Astro.response.status = 404;
 }
+const savedIds = new Set(savedResult.ok ? savedResult.data.map((paper) => paper.id) : []);
 
 const issue = issueNumber(slug);
-const kicker = issue === null ? 'Daily report' : `Weekly digest · No. ${issue}`;
+// The API serves kind since the archive grew tabs; older payloads fall back to the slug shape.
+const kind = digest?.kind ?? (issue === null ? 'daily' : 'weekly');
+const kicker =
+  kind === 'daily' ? 'Daily report' : issue === null ? 'Weekly digest' : `Weekly digest · No. ${issue}`;
+const fallbackProse = kind === 'weekly' && digest?.llm_ok === false;
+
+// Digest scores are recency-decayed breakthrough boosts, not a 0-1 scale: the meters read
+// relative within this issue's own list.
+const items = digest?.items ?? [];
+const signalMax = Math.max(...items.map((item) => item.score), 0) || 1;
+
+// The personalized coda: only on a weekly issue a signed-in reader sees while it is still
+// current - the feed endpoint windows days back from now, so on an old issue "this week"
+// would be a lie and the block is omitted instead.
+let forYou: PaperSummary[] = [];
+if (digest !== null && kind === 'weekly' && Astro.locals.user !== null) {
+  const sincePeriodEnd = Date.now() - new Date(digest.period_end).getTime();
+  if (sincePeriodEnd <= 7 * 86_400_000) {
+    const days = Math.min(
+      Math.max(Math.ceil((Date.now() - new Date(digest.period_start).getTime()) / 86_400_000), 1),
+      14,
+    );
+    const personal = await fetchForYou(Astro.locals.accessToken, { days, limit: 10 });
+    if (personal.ok) {
+      const inIssue = new Set(items.map((item) => item.paper_id));
+      forYou = personal.data.filter((paper) => !inIssue.has(paper.id)).slice(0, 5);
+    }
+  }
+}
+const forYouMax = Math.max(...forYou.map((paper) => paper.score ?? 0), 0) || 1;
 ---
 
 <Base title={digest?.title ?? 'Not found'}>
   {
-    digest === null ? (
+    missing ? (
       <Fragment>
         <PageIntro title="Digest not found" />
         <EmptyState
@@ -30,45 +72,122 @@ const kicker = issue === null ? 'Daily report' : `Weekly digest · No. ${issue}`
           action={{ href: '/digests', label: 'Back to the archive' }}
         />
       </Fragment>
+    ) : digest === null ? (
+      <Fragment>
+        <PageIntro title="Digests" />
+        <EmptyState
+          kind="error"
+          icon="lucide:cloud-off"
+          message={catalogMessage(result.ok ? { status: null } : result.failure, 'digests')}
+          action={{ href: `/digests/${slug}`, label: 'Retry' }}
+        />
+      </Fragment>
     ) : (
       <article class="issue">
         <header class="intro">
           <p class="kicker">{kicker}</p>
           <h1 transition:name={morphName('digest', digest.slug)}>{digest.title}</h1>
           <p class="meta">
-            {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
-            {digest.items.length > 0 &&
-              ` · ${digest.items.length} paper${digest.items.length === 1 ? '' : 's'}`}
+            {humanDate(digest.period_start)} to {humanDate(digest.period_end)}
+            {digest.item_count > 0 && ` · ${issueSummary(digest.item_count)}`}
           </p>
         </header>
+        {fallbackProse && (
+          <p class="fallback-note">
+            This issue's summary is the ranked list; the model was unavailable.
+          </p>
+        )}
         <div
           class="digest-body"
-          set:html={renderDigestBody(digest.body, new Set(digest.items.map((i) => i.paper_id)))}
+          set:html={renderIssueBody(digest.body, new Set(items.map((i) => i.paper_id)))}
         />
-        <h2 class="ranked-title">Must read</h2>
-        <ol class="ranked">
-          {digest.items.map((item) => (
-            <li>
-              <div class="ranked-text">
-                <a href={`/papers/${item.paper_id}`} set:html={renderMathHTML(item.title)} />
-                <span class="scores">
-                  <SignalMark score={item.score} />
-                  {item.citations > 0 && (
-                    <span class="cites">
-                      · {item.citations} citation{item.citations === 1 ? '' : 's'}
+        {items.length > 0 && (
+          <Fragment>
+            <h2 class="micro-label ranked-title">Must read</h2>
+            <ol class="ranked">
+              {items.map((item, index) => (
+                <li data-paper-id={item.paper_id} data-rank={index}>
+                  <div class="ranked-text">
+                    <div class="headline">
+                      <a
+                        href={`/papers/${item.paper_id}`}
+                        transition:name={morphName('paper-title', item.paper_id)}
+                        set:html={renderMathHTML(item.title)}
+                      />
+                      <SaveButton
+                        client:visible
+                        paperId={item.paper_id}
+                        saved={savedIds.has(item.paper_id)}
+                      />
+                    </div>
+                    {(item.authors ?? []).length > 0 && (
+                      <p class="byline">
+                        {(item.authors ?? []).join(', ')}
+                        {(item.author_count ?? 0) > (item.authors ?? []).length &&
+                          ` +${(item.author_count ?? 0) - (item.authors ?? []).length}`}
+                        {item.venue && ` · ${item.venue}`}
+                      </p>
+                    )}
+                    {whyLine(item.why) && <p class="why">{whyLine(item.why)}</p>}
+                    <span class="scores">
+                      <SignalMark
+                        score={item.score}
+                        max={signalMax}
+                        label="momentum within this issue"
+                      />
+                      {item.citations > 0 && (
+                        <span class="cites">
+                          · {item.citations} citation{item.citations === 1 ? '' : 's'}
+                        </span>
+                      )}
                     </span>
-                  )}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ol>
+                    {(item.primary_category || (item.keywords ?? []).length > 0) && (
+                      <span class="chips">
+                        {item.primary_category && (
+                          <span class="pill cat" title={categoryName(item.primary_category)}>
+                            {item.primary_category}
+                          </span>
+                        )}
+                        {(item.keywords ?? []).map((keyword) => (
+                          <a class="pill kw" href={`/?keyword=${encodeURIComponent(keyword)}`}>
+                            {keyword}
+                          </a>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </Fragment>
+        )}
+        {forYou.length > 0 && (
+          <section class="foryou">
+            <h2 class="micro-label ranked-title">For you this week</h2>
+            <ul class="personal">
+              {forYou.map((paper, index) => (
+                <PaperRow
+                  paper={paper}
+                  signalMax={forYouMax}
+                  rank={items.length + index}
+                  saved={savedIds.has(paper.id)}
+                  density="compact"
+                >
+                  <Fragment slot="extra">
+                    {paper.reason && <span class="pill reason">{paper.reason}</span>}
+                  </Fragment>
+                </PaperRow>
+              ))}
+            </ul>
+          </section>
+        )}
         <p class="back">
           <a class="btn btn-ghost" href="/digests">
             <Icon name="lucide:chevron-left" aria-hidden="true" />
             Back to the archive
           </a>
         </p>
+        <Telemetry client:idle surface="digest" enabled={Astro.locals.user !== null} />
       </article>
     )
   }
@@ -107,21 +226,19 @@ const kicker = issue === null ? 'Daily report' : `Weekly digest · No. ${issue}`
     font-size: var(--text-sm);
     margin: 0.45rem 0 var(--space-6);
   }
-  /* The prose reads in the serif; the accent paper-link chips inside it stay as shipped. */
-  .issue :global(.digest-body) {
-    font-family: var(--font-serif);
-    font-size: 1.0625rem;
-    max-width: 65ch;
+  .fallback-note {
+    margin: 0 0 var(--space-4);
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-style: italic;
   }
   .ranked-title {
+    display: block;
     margin: var(--space-6) 0 0;
     padding-bottom: 0.5rem;
     border-bottom: 1px solid var(--line);
-    color: var(--muted);
     font-size: 0.72rem;
-    font-weight: var(--weight-semibold);
     letter-spacing: var(--track-caps-wide);
-    text-transform: uppercase;
   }
   .ranked {
     list-style: none;
@@ -154,6 +271,12 @@ const kicker = issue === null ? 'Daily report' : `Weekly digest · No. ${issue}`
   .ranked-text {
     min-width: 0;
   }
+  .headline {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
   .ranked a {
     display: block;
     margin-bottom: 0.3rem;
@@ -167,6 +290,17 @@ const kicker = issue === null ? 'Daily report' : `Weekly digest · No. ${issue}`
   .ranked a:hover {
     color: var(--accent);
   }
+  .byline {
+    margin: 0 0 0.3rem;
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
+  .why {
+    margin: 0 0 0.3rem;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    font-style: italic;
+  }
   .scores {
     display: inline-flex;
     flex-wrap: wrap;
@@ -177,8 +311,50 @@ const kicker = issue === null ? 'Daily report' : `Weekly digest · No. ${issue}`
     color: var(--muted);
     font-size: var(--text-xs);
   }
+  .chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-top: 0.45rem;
+  }
+  .chips .pill {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .chips a.pill:hover {
+    color: var(--accent-ink);
+    background: var(--accent-soft);
+    border-color: transparent;
+  }
+  .foryou .personal {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .foryou :global(.pill.reason) {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
   .back {
     margin: var(--space-5) 0 0;
     text-align: center;
+  }
+  @media (max-width: 40rem) {
+    h1 {
+      font-size: var(--text-xl);
+    }
+    .ranked li {
+      grid-template-columns: 2rem 1fr;
+      gap: 0.55rem;
+      padding: 0.75rem 0;
+    }
+    .ranked li::before {
+      font-size: 1.2rem;
+    }
+    .headline {
+      flex-wrap: wrap;
+    }
   }
 </style>
