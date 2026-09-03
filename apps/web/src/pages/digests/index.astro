@@ -1,23 +1,71 @@
 ---
 import EmptyState from '../../components/EmptyState.astro';
 import PageIntro from '../../components/PageIntro.astro';
+import Pager from '../../components/Pager.astro';
 import Base from '../../layouts/Base.astro';
-import { catalogMessage, fetchDigests, formatDate } from '../../lib/api';
-import { issueNumber } from '../../lib/format';
+import { catalogMessage, DIGEST_PAGE_SIZE, fetchDigests } from '../../lib/api';
+import { humanDate, issueNumber, issueSummary } from '../../lib/format';
 import { morphName } from '../../lib/morph';
+import { pageLink } from '../../lib/paging';
+import { SITE_URL } from '../../lib/site-url.js';
 
-const result = await fetchDigests();
+const params = Astro.url.searchParams;
+const KINDS = [
+  ['', 'All'],
+  ['weekly', 'Weekly'],
+  ['daily', 'Daily'],
+] as const;
+const kindParam = params.get('kind') ?? '';
+const kind = KINDS.some(([key]) => key === kindParam) ? kindParam : '';
+const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
 
-// Weekly issues carry a serif numeral spine; the daily reports' date slugs have no issue
-// numbering, so their spine is the date itself.
-function spineFor(slug: string, periodEnd: string): string {
-  const issue = issueNumber(slug);
-  return issue === null ? formatDate(periodEnd) : `No. ${issue}`;
+const result = await fetchDigests({ kind: kind || undefined, page });
+const digests = result.ok ? result.data.items : null;
+const total = result.ok ? result.data.total : 0;
+const pageCount = Math.max(1, Math.ceil(total / DIGEST_PAGE_SIZE));
+
+// A tab switch starts back at page one - the page number belongs to the old filter.
+function tabHref(nextKind: string): string {
+  return nextKind ? `/digests?kind=${nextKind}` : '/digests';
 }
+
+// Weekly issues carry a serif numeral spine; daily reports have no issue numbering, so
+// their spine is the day itself (short - the meta line below carries the full dates).
+function spineFor(digest: { slug: string; kind: string; period_end: string }): string {
+  const issue = issueNumber(digest.slug);
+  if (digest.kind !== 'daily' && issue !== null) return `No. ${issue}`;
+  const parsed = new Date(`${digest.period_end.slice(0, 10)}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return digest.period_end.slice(0, 10);
+  return parsed.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+// The feed carries its own token, so its URL is spelled out only here - a members-only,
+// uncached page - and never as a head link every page would embed.
+const feedToken = (process.env.FEED_TOKEN ?? '').trim();
+const feedUrl =
+  feedToken && Astro.locals.user !== null
+    ? `${SITE_URL}/feeds/digests.xml?token=${encodeURIComponent(feedToken)}`
+    : null;
 ---
 
 <Base title="Digests">
   <PageIntro title="Digests" />
+
+  <div class="toolbar">
+    <span class="tabs" role="group" aria-label="Filter by cadence">
+      {
+        KINDS.map(([key, label]) => (
+          <a
+            class:list={['pill', { on: kind === key }]}
+            href={tabHref(key)}
+            aria-current={kind === key ? 'page' : undefined}
+          >
+            {label}
+          </a>
+        ))
+      }
+    </span>
+  </div>
 
   {
     !result.ok ? (
@@ -25,9 +73,9 @@ function spineFor(slug: string, periodEnd: string): string {
         kind="error"
         icon="lucide:cloud-off"
         message={catalogMessage(result.failure, 'digests')}
-        action={{ href: '/digests', label: 'Retry' }}
+        action={{ href: `/digests${Astro.url.search}`, label: 'Retry' }}
       />
-    ) : result.data.length === 0 ? (
+    ) : digests !== null && digests.length === 0 ? (
       <EmptyState
         icon="lucide:hourglass"
         message="No digests published yet."
@@ -35,32 +83,74 @@ function spineFor(slug: string, periodEnd: string): string {
       />
     ) : (
       <ul class="list">
-        {result.data.map((digest) => (
+        {(digests ?? []).map((digest) => (
           <li>
             <a class="entry" href={`/digests/${digest.slug}`}>
-              <span class="spine">{spineFor(digest.slug, digest.period_end)}</span>
+              <span class="spine">{spineFor(digest)}</span>
               <span class="text">
                 <span class="title" transition:name={morphName('digest', digest.slug)}>
                   {digest.title}
                 </span>
-                <span class="meta">
-                  {formatDate(digest.period_start)} to {formatDate(digest.period_end)}
+                <span class="micro-label">
+                  {humanDate(digest.period_start)} to {humanDate(digest.period_end)}
                 </span>
               </span>
-              {digest.item_count > 0 && (
-                <span class="count">
-                  {digest.item_count} paper{digest.item_count === 1 ? '' : 's'}
-                </span>
-              )}
+              {digest.item_count > 0 && <span class="count">{issueSummary(digest.item_count)}</span>}
             </a>
           </li>
         ))}
       </ul>
     )
   }
+
+  {
+    digests !== null && pageCount > 1 && (
+      <Pager
+        variant="prevnext"
+        page={page}
+        pageCount={pageCount}
+        link={(target) => pageLink(Astro.url.searchParams, target, '/digests')}
+      />
+    )
+  }
+
+  {
+    feedUrl && (
+      <details class="feed-sub">
+        <summary>Subscribe by feed reader</summary>
+        <p>Paste this Atom URL into your reader. The link carries your site's feed key.</p>
+        <input readonly value={feedUrl} aria-label="Atom feed URL" />
+      </details>
+    )
+  }
 </Base>
 
 <style>
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    max-width: 52rem;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--line);
+  }
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .toolbar .pill {
+    text-decoration: none;
+    color: var(--muted);
+  }
+  .toolbar .pill:hover {
+    color: var(--ink);
+  }
+  .toolbar .pill.on {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
   .list {
     list-style: none;
     margin: 0;
@@ -103,17 +193,33 @@ function spineFor(slug: string, periodEnd: string): string {
   .entry:hover .title {
     color: var(--accent);
   }
-  .meta {
-    color: var(--muted);
-    font-size: 0.7rem;
-    font-weight: var(--weight-bold);
-    letter-spacing: var(--track-caps);
-    text-transform: uppercase;
-  }
   .count {
     color: var(--muted);
     font-size: var(--text-xs);
     white-space: nowrap;
+  }
+  .feed-sub {
+    max-width: 52rem;
+    margin-top: var(--space-5);
+    color: var(--muted);
+    font-size: var(--text-sm);
+  }
+  .feed-sub summary {
+    cursor: pointer;
+    width: fit-content;
+  }
+  .feed-sub p {
+    margin: 0.5rem 0;
+  }
+  .feed-sub input {
+    width: 100%;
+    padding: 0.4rem 0.65rem;
+    font: inherit;
+    font-size: var(--text-xs);
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
   }
   @media (max-width: 40rem) {
     .entry {
