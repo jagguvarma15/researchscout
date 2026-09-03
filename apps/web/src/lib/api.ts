@@ -136,8 +136,18 @@ export async function fetchSavedList(
   return readCatalog<SavedLibrary>(`/v1/me/saved${query ? `?${query}` : ''}`, token);
 }
 
-export async function fetchForYou(token?: string | null): Promise<CatalogResult<PaperSummary[]>> {
-  const result = await readCatalog<{ items: PaperSummary[] }>('/v1/me/feed', token);
+export async function fetchForYou(
+  token?: string | null,
+  opts: { days?: number; limit?: number } = {},
+): Promise<CatalogResult<PaperSummary[]>> {
+  const search = new URLSearchParams();
+  if (opts.days) search.set('days', String(opts.days));
+  if (opts.limit) search.set('limit', String(opts.limit));
+  const query = search.toString();
+  const result = await readCatalog<{ items: PaperSummary[] }>(
+    `/v1/me/feed${query ? `?${query}` : ''}`,
+    token,
+  );
   return result.ok ? { ok: true, data: result.data.items } : result;
 }
 
@@ -573,31 +583,71 @@ export async function fetchSavedFilters(token?: string | null): Promise<string |
 
 export interface DigestSummary {
   slug: string;
+  /* weekly | daily; defaulted by the API for rows older than the column. */
+  kind: string;
   title: string;
   period_start: string;
   period_end: string;
   /* Papers in the issue; 0 on rows stored before the field existed. */
   item_count: number;
+  /* False when the weekly prose is the deterministic fallback. */
+  llm_ok: boolean;
+}
+
+/* One ranked paper of an issue; the enrichment fields are empty on legacy rows. */
+export interface DigestItem {
+  paper_id: string;
+  title: string;
+  score: number;
+  citations: number;
+  primary_category?: string | null;
+  keywords?: string[];
+  authors?: string[];
+  author_count?: number;
+  venue?: string | null;
+  /* Per-signal-type breakthrough contributions - why the paper ranked. */
+  why?: Record<string, number>;
 }
 
 export interface DigestDetail extends DigestSummary {
   body: string;
-  items: { paper_id: string; title: string; score: number; citations: number }[];
+  items: DigestItem[];
 }
 
-export async function fetchDigests(): Promise<CatalogResult<DigestSummary[]>> {
-  const result = await readCatalog<{ items: DigestSummary[] }>('/v1/digests');
-  return result.ok ? { ok: true, data: result.data.items } : result;
+export const DIGEST_PAGE_SIZE = 20;
+
+export interface DigestPage {
+  items: DigestSummary[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
-export async function fetchDigest(slug: string): Promise<DigestDetail | null> {
-  try {
-    const response = await fetch(`${API_URL}/v1/digests/${slug}`, { headers: apiHeaders() });
-    if (!response.ok) return null;
-    return (await response.json()) as DigestDetail;
-  } catch {
-    return null;
+/* Pure so the archive page's tab/pager links stay testable. */
+export function digestQuery(params: { kind?: string; page?: number }): string {
+  const search = new URLSearchParams();
+  if (params.kind) search.set('kind', params.kind);
+  search.set('limit', String(DIGEST_PAGE_SIZE));
+  if (params.page && params.page > 1) {
+    search.set('offset', String((params.page - 1) * DIGEST_PAGE_SIZE));
   }
+  return search.toString();
+}
+
+export async function fetchDigests(
+  params: { kind?: string; page?: number } = {},
+): Promise<CatalogResult<DigestPage>> {
+  const result = await readCatalog<DigestPage>(`/v1/digests?${digestQuery(params)}`);
+  if (!result.ok) return result;
+  // An API one deploy older than this page serves no total; the visible page is the floor.
+  return {
+    ok: true,
+    data: { ...result.data, total: result.data.total ?? result.data.items.length },
+  };
+}
+
+export async function fetchDigest(slug: string): Promise<CatalogResult<DigestDetail>> {
+  return readCatalog(`/v1/digests/${encodeURIComponent(slug)}`);
 }
 
 export interface TopicPaper {
@@ -638,19 +688,3 @@ export async function fetchTopic(id: number): Promise<TopicDetail | null> {
   }
 }
 
-// Digest bodies are plain LLM text: escape everything, then turn [scheme:id] citations into
-// paper links and blank lines into paragraph breaks. Only ids actually in the digest get
-// linked — an id the model invented stays as escaped plain text instead of a dead link.
-export function renderDigestBody(text: string, validIds: Set<string>): string {
-  const escaped = text
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-  const linked = escaped.replace(/\[([a-z]+:[^\]\s]+)\]/g, (match, id: string) =>
-    validIds.has(id) ? `<a href="/papers/${id}">[${id}]</a>` : match,
-  );
-  return linked
-    .split(/\n{2,}/)
-    .map((block) => `<p>${block.replaceAll('\n', '<br />')}</p>`)
-    .join('');
-}
