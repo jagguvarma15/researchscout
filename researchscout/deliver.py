@@ -86,6 +86,6 @@ def get_deliverer(settings: Settings | None = None) -> Deliverer:
     return NullDeliverer()
 
 
-def notify_new_issue(*, title: str, url: str) -> int:
+def notify_new_issue(*, title: str, url: str, body: str = "Fresh reading is ready.") -> int:
     """Announce a freshly published digest or report; returns how many notices went out."""
-    return get_deliverer().deliver(title=title, body="Fresh reading is ready.", url=url)
+    return get_deliverer().deliver(title=title, body=body, url=url)
