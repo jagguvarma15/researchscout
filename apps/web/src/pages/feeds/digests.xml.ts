@@ -11,6 +11,7 @@ import type { APIRoute } from 'astro';
 
 import { fetchDigests } from '../../lib/api';
 import { atomFeed, feedTokenMatches } from '../../lib/feed';
+import { issueSummary } from '../../lib/format';
 import { SITE_URL } from '../../lib/site-url.js';
 
 export const GET: APIRoute = async ({ url }) => {
@@ -26,10 +27,11 @@ export const GET: APIRoute = async ({ url }) => {
     title: 'ResearchScout digests',
     subtitle: 'Weekly digests and daily reports from the paper radar.',
     selfPath: '/feeds/digests.xml',
-    issues: result.data.map((digest) => ({
+    issues: result.data.items.map((digest) => ({
       slug: digest.slug,
       title: digest.title,
       updated: digest.period_end,
+      summary: issueSummary(digest.item_count) || undefined,
     })),
   });
   return new Response(body, {
