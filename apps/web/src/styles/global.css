@@ -799,12 +799,14 @@ svg[data-icon] {
   color: inherit;
 }
 
-/* Digest reading typography: the body is server-rendered HTML (renderDigestBody),
-   so it is styled here globally rather than from a scoped page block. */
+/* Digest reading typography: the body is server-rendered HTML (renderIssueBody), so it is
+   styled here globally rather than from a scoped page block - the one source of truth for
+   the issue prose, serif and sized for reading. */
 
 .digest-body {
   max-width: 65ch;
-  font-size: 0.97rem;
+  font-family: var(--font-serif);
+  font-size: 1.0625rem;
   line-height: var(--leading-relaxed);
 }
 
