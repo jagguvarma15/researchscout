@@ -32,6 +32,21 @@ describe('atomFeed', () => {
     expect(xml.match(/<entry>/g)).toHaveLength(2);
   });
 
+  it('renders a summary only when the issue carries one, escaped', () => {
+    const xml = atomFeed({
+      siteUrl: 'https://scout.example',
+      title: 't',
+      subtitle: 's',
+      selfPath: '/feeds/digests.xml',
+      issues: [
+        { ...issues[0], summary: '10 papers & <counting>' },
+        issues[1], // no summary
+      ],
+    });
+    expect(xml).toContain('<summary>10 papers &amp; &lt;counting&gt;</summary>');
+    expect(xml.match(/<summary>/g)).toHaveLength(1);
+  });
+
   it('survives an empty archive', () => {
     const xml = atomFeed({
       siteUrl: 'https://scout.example',
