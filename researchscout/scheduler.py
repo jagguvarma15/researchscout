@@ -511,21 +511,21 @@ def _digest(settings: Settings) -> str:
     with session_scope() as session:
         upsert_digest(session, result)
     logger.info("digest %s: %d papers, %d cited", result.slug, len(result.items), len(result.cited))
-    _announce(settings, title=result.title, url=f"/digests/{result.slug}")
+    _announce(settings, title=result.title, url=f"/digests/{result.slug}", body=result.summary)
     note = f"{result.slug}: {len(result.items)} papers, {len(result.cited)} cited"
     if not result.llm_ok:
         note += "; prose fallback (llm unavailable)"
     return note
 
 
-def _announce(settings: Settings, *, title: str, url: str) -> None:
+def _announce(settings: Settings, *, title: str, url: str, body: str | None = None) -> None:
     """Best-effort delivery of a fresh issue - a publish never fails on a notification."""
     if not settings.push_enabled:
         return
     from researchscout.deliver import notify_new_issue
 
     try:
-        sent = notify_new_issue(title=title, url=url)
+        sent = notify_new_issue(title=title, url=url, body=body or "Fresh reading is ready.")
         if sent:
             logger.info("announced %s to %d subscriber(s)", url, sent)
     except Exception:  # noqa: BLE001 - the publish already happened; the notice is extra
@@ -580,7 +580,7 @@ def _report(settings: Settings) -> str:
             logger.info("daily report %s: %d must-read", result.slug, len(result.items))
             note = f"{result.slug}: {len(result.items)} must-read"
     if result is not None:
-        _announce(settings, title=result.title, url=f"/digests/{result.slug}")
+        _announce(settings, title=result.title, url=f"/digests/{result.slug}", body=result.summary)
     with session_scope() as session:
         pruned = prune_lineage(session)
     if pruned:
