@@ -490,7 +490,7 @@ def digest(
 ) -> None:
     """Build and publish this week's digest (LLM summary over the window's top papers)."""
     from researchscout.config import get_settings
-    from researchscout.digest import build_digest
+    from researchscout.digest import compose_digest, rank_digest
     from researchscout.llm.openai_compat import OpenAICompatLLM
     from researchscout.store.db import session_scope
     from researchscout.store.digests import upsert_digest
@@ -498,17 +498,19 @@ def digest(
     settings = get_settings()
     window = days if days is not None else settings.digest_days
     top_k = k if k is not None else settings.digest_top_k
-    llm = OpenAICompatLLM()
+    # Rank and compose split like the scheduler: the LLM round-trip must not hold a session.
     with session_scope() as session:
-        result = build_digest(session, llm, days=window, k=top_k)
-        if result is None:
-            typer.secho(f"No papers in the last {window}d — no digest.", fg=typer.colors.YELLOW)
-            raise typer.Exit(code=1)
+        items, start, end = rank_digest(session, days=window, k=top_k)
+    if not items:
+        typer.secho(f"No papers in the last {window}d — no digest.", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    result = compose_digest(OpenAICompatLLM(), items, start=start, end=end)
+    with session_scope() as session:
         upsert_digest(session, result)
-    typer.secho(
-        f"published {result.slug}: {len(result.items)} papers, {len(result.cited)} cited",
-        fg=typer.colors.GREEN,
-    )
+    message = f"published {result.slug}: {len(result.items)} papers, {len(result.cited)} cited"
+    if not result.llm_ok:
+        message += " (prose fallback, llm unavailable)"
+    typer.secho(message, fg=typer.colors.GREEN)
 
 
 @stream_app.command("serve")
@@ -571,12 +573,18 @@ def stream_tail(
 @app.command()
 def report() -> None:
     """Build and publish today's report (deterministic; no LLM needed)."""
+    from zoneinfo import ZoneInfo
+
+    from researchscout.config import get_settings
     from researchscout.report import build_daily_report
     from researchscout.store.db import session_scope
     from researchscout.store.digests import upsert_digest
 
+    # Slug in the scheduler's zone, exactly like the scheduled run - a manual evening run
+    # under the UTC default would publish under tomorrow's date.
+    zone = ZoneInfo(get_settings().scheduler_timezone)
     with session_scope() as session:
-        result = build_daily_report(session)
+        result = build_daily_report(session, zone=zone)
         if result is None:
             typer.secho("No papers in the last day — no report.", fg=typer.colors.YELLOW)
             raise typer.Exit(code=1)
