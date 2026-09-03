@@ -57,6 +57,7 @@ def build_daily_report(
             paper=paper,
             score=scores[paper.id].total,
             citations=float(paper.citation_count),
+            contributions=dict(scores[paper.id].contributions),
         )
         for paper in papers
     ]
@@ -89,6 +90,7 @@ def build_daily_report(
         for index, item in enumerate(must_read, start=1)
     )
 
+    # llm_ok stays at its True default: no prose call happened, so "no fallback" is the truth.
     return Digest(
         slug=day_slug(now, zone),
         title=f"Daily report {day_slug(now, zone)}",
@@ -97,4 +99,6 @@ def build_daily_report(
         body="\n".join(lines),
         cited=[item.paper.id for item in must_read],
         items=must_read,
+        kind="daily",
+        summary=f"{len(papers)} arrivals; {len(must_read)} must-reads.",
     )
