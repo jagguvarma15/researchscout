@@ -1,4 +1,10 @@
-"""Weekly digests: rank the window's papers by freshness and citation buzz, then summarize.
+"""Weekly digests: rank the week's arrivals by freshness and citation buzz, then summarize.
+
+The window is arrival (``created_at``), not publication: arXiv's published_at is submission
+time, a day or more behind the announcement that actually lands a paper here, and a window
+on it under-fills after ingest gaps and weekends - the same reasoning the daily report
+documents. Recency decay still reads publication age, so a late-arriving older paper joins
+the pool but does not outrank the week's genuinely fresh work.
 
 The summary follows the same grounded-citation contract as :func:`researchscout.answer.answer`:
 the model may cite only the ranked papers, and any invented id is dropped by the post-check.
@@ -8,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
@@ -17,9 +23,8 @@ from researchscout.answer import _CITATION_RE
 from researchscout.llm.base import LLM
 from researchscout.llm.usage import PURPOSE_DIGEST, llm_purpose
 from researchscout.schema import Paper
-from researchscout.score import breakthrough
-from researchscout.store.papers import list_papers
-from researchscout.store.signals import latest_value
+from researchscout.score import breakthrough_many
+from researchscout.store.papers import papers_arrived_since
 from researchscout.trace import trace_span
 
 _SYSTEM_PROMPT = (
@@ -30,7 +35,9 @@ _SYSTEM_PROMPT = (
 )
 
 _HALF_LIFE_DAYS = 14.0
-_CANDIDATE_POOL = 200
+# Arrivals come newest-first, so a small cap would silently truncate the week's tail; a
+# thousand covers a heavy week and the scoring is one batched query either way.
+_CANDIDATE_POOL = 1000
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +47,8 @@ class RankedPaper:
     paper: Paper
     score: float
     citations: float
+    # Per-signal-type breakthrough breakdown - the "why this paper is here" data.
+    contributions: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass
@@ -52,6 +61,9 @@ class Digest:
     cited: list[str]
     items: list[RankedPaper]
     llm_ok: bool = True
+    kind: str = "weekly"
+    # One deterministic sentence for delivery notices; derived, never persisted.
+    summary: str = ""
 
 
 def week_slug(end: datetime) -> str:
@@ -60,26 +72,24 @@ def week_slug(end: datetime) -> str:
     return f"{iso.year}-w{iso.week:02d}"
 
 
-def _latest_citations(session: Session, paper_id: str) -> float:
-    """The most recent cumulative citation count observed for a paper (0 when unobserved)."""
-    return latest_value(session, paper_id, "citation")
-
-
-def _breakthrough_boost(session: Session, paper_id: str) -> float:
-    """The paper's momentum-aware ranking boost (a seam so tests can stub the score)."""
-    return breakthrough(session, paper_id).total
-
-
 def rank_window(session: Session, *, days: int = 7, k: int = 10) -> list[RankedPaper]:
-    """Top ``k`` papers of the window: recency-decayed, breakthrough-boosted."""
+    """Top ``k`` of the window's arrivals: recency-decayed, breakthrough-boosted."""
     now = datetime.now(UTC)
+    papers = papers_arrived_since(session, now - timedelta(days=days), limit=_CANDIDATE_POOL)
+    boosts = breakthrough_many(session, [paper.id for paper in papers])
     ranked: list[RankedPaper] = []
-    for paper in list_papers(session, days=days, limit=_CANDIDATE_POOL):
-        citations = _latest_citations(session, paper.id)
-        boost = _breakthrough_boost(session, paper.id)
+    for paper in papers:
+        boost = boosts[paper.id]
         age_days = max((now - paper.published_at).total_seconds() / 86400.0, 0.0)
-        score = math.exp(-age_days / _HALF_LIFE_DAYS) * (1.0 + boost)
-        ranked.append(RankedPaper(paper=paper, score=score, citations=citations))
+        score = math.exp(-age_days / _HALF_LIFE_DAYS) * (1.0 + boost.total)
+        ranked.append(
+            RankedPaper(
+                paper=paper,
+                score=score,
+                citations=float(paper.citation_count),
+                contributions=dict(boost.contributions),
+            )
+        )
     ranked.sort(key=lambda item: item.score, reverse=True)
     return ranked[:k]
 
@@ -129,16 +139,20 @@ def compose_digest(llm: LLM, items: list[RankedPaper], *, start: datetime, end: 
         cited = [cid for cid in found if cid in valid]
         span["cited"] = len(cited)
 
-        slug = week_slug(end)
+        # The ISO year, not the calendar year: a Dec-31 end can already sit in next year's
+        # week 01, and the title must agree with the slug about which year that is.
+        iso = end.isocalendar()
         return Digest(
-            slug=slug,
-            title=f"Research radar, week {slug.split('-w')[1]} {end.year}",
+            slug=week_slug(end),
+            title=f"Research radar, week {iso.week:02d} {iso.year}",
             period_start=start,
             period_end=end,
             body=body,
             cited=cited,
             items=items,
             llm_ok=llm_ok,
+            kind="weekly",
+            summary=f"The week's top {len(items)} papers, ranked.",
         )
 
 
@@ -149,7 +163,11 @@ def build_digest(
     days: int = 7,
     k: int = 10,
 ) -> Digest | None:
-    """Rank the window and synthesize the digest; None when the window is empty."""
+    """Rank the window and synthesize the digest; None when the window is empty.
+
+    Convenience for tests only: production callers (scheduler and CLI) use the
+    rank_digest/compose_digest split so no session stays open across the LLM round-trip.
+    """
     items, start, end = rank_digest(session, days=days, k=k)
     if not items:
         return None
