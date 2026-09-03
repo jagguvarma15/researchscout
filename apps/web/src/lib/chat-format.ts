@@ -1,5 +1,5 @@
-// Render LLM answer text to safe HTML. Follows renderDigestBody's escape-then-enrich
-// contract (lib/api.ts): escape everything first, then introduce tags only from a fixed
+// Render LLM answer text to safe HTML. Follows renderIssueBody's escape-then-enrich
+// contract (lib/math.ts): escape everything first, then introduce tags only from a fixed
 // literal set, and never re-parse produced HTML.
 //
 // Supported markdown, matching what the local models actually emit: **bold**, *italic*,
