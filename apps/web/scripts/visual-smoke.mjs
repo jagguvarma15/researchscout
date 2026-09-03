@@ -243,6 +243,7 @@ async function shootSurfaces(browser, details) {
     ['desktop-paper-dark', details.paper, { width: 1280, height: 900 }, 'dark'],
     ['desktop-digest-issue', details.digest, { width: 1280, height: 900 }, null],
     ['desktop-digest-issue-dark', details.digest, { width: 1280, height: 900 }, 'dark'],
+    ['phone-digest-issue', details.digest, { width: 390, height: 844 }, null],
     ['desktop-topic-detail', details.topic, { width: 1280, height: 900 }, null],
     ['desktop-benchmarks', '/benchmarks', { width: 1280, height: 1100 }, null],
     ['desktop-benchmarks-dark', '/benchmarks', { width: 1280, height: 1100 }, 'dark'],
