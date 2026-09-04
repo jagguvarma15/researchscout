@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from sqlalchemy import ColumnElement, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
@@ -49,6 +51,24 @@ def index_papers(session: Session, embedder: Embedder, *, batch_size: int = 64) 
             upsert_embedding(session, paper_id, embedder.model_id, vector)
             embedded += 1
         session.commit()
+
+
+def embeddings_for(
+    session: Session, paper_ids: Sequence[str], model_id: str
+) -> dict[str, list[float]]:
+    """The embeddings for the given papers under one model, in one IN-list query.
+
+    The MMR/explore hydrator: a handful of ids whose vectors the ANN search did not return.
+    """
+    if not paper_ids:
+        return {}
+    rows = session.execute(
+        select(PaperEmbeddingRow.paper_id, PaperEmbeddingRow.embedding).where(
+            PaperEmbeddingRow.model_id == model_id,
+            PaperEmbeddingRow.paper_id.in_(paper_ids),
+        )
+    )
+    return {paper_id: list(embedding) for paper_id, embedding in rows}
 
 
 def _configure_scan(session: Session) -> None:
