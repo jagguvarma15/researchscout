@@ -13,9 +13,11 @@ import {
   digestQuery,
   fetchDigest,
   fetchDigests,
+  fetchForYou,
   fetchPaper,
   fetchPapers,
   fetchSaved,
+  fetchSavedIds,
   fetchTopics,
 } from './api';
 
@@ -92,6 +94,55 @@ describe('fetchPaper', () => {
     await fetchPaper('doi:10.1145/3576915');
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url.endsWith('/v1/papers/doi%3A10.1145%2F3576915')).toBe(true);
+  });
+});
+
+describe('fetchForYou', () => {
+  it('returns the whole envelope, keeping the profile block', async () => {
+    const feed = { items: [{ id: 'arxiv:1' }], profile: { interests: 2, saves: 3, reads: 1, centroids: 2 } };
+    vi.stubGlobal('fetch', respondWith(feed));
+    const result = await fetchForYou('t');
+    expect(result).toEqual({ ok: true, data: feed });
+  });
+
+  it('builds the days and limit query', async () => {
+    const fetchMock = respondWith({ items: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchForYou('t', { days: 7, limit: 10 });
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url.endsWith('/v1/me/feed?days=7&limit=10')).toBe(true);
+  });
+
+  it('a bare call hits the plain feed path', async () => {
+    const fetchMock = respondWith({ items: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchForYou('t');
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url.endsWith('/v1/me/feed')).toBe(true);
+  });
+});
+
+describe('fetchSavedIds', () => {
+  it('unwraps the ids envelope', async () => {
+    vi.stubGlobal('fetch', respondWith({ ids: ['arxiv:1', 'arxiv:2'] }));
+    const result = await fetchSavedIds('t');
+    expect(result).toEqual({ ok: true, data: ['arxiv:1', 'arxiv:2'] });
+  });
+
+  it('passes the failure through (an old API 404s the route)', async () => {
+    vi.stubGlobal('fetch', respondWith(null, false, 404));
+    const result = await fetchSavedIds('t');
+    expect(result).toEqual({ ok: false, failure: { status: 404 } });
+  });
+});
+
+describe('readCatalog timeout', () => {
+  it('carries an abort signal so a hung API cannot stall the render', async () => {
+    const fetchMock = respondWith({ items: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchSavedIds('t');
+    const [, init] = fetchMock.mock.calls[0] as [string, { signal?: AbortSignal }];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 });
 
