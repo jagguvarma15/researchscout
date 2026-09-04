@@ -173,6 +173,20 @@ def saved_vectors(
     ]
 
 
+def saved_paper_ids(session: Session, user_sub: str) -> list[str]:
+    """Every paper id this user has saved, newest save first.
+
+    The id-set the feed pages need to light their save buttons, without hydrating the whole
+    library (titles, abstracts, tags) the way ``list_saved`` does.
+    """
+    rows = session.execute(
+        select(SavedPaperRow.paper_id)
+        .where(SavedPaperRow.user_sub == user_sub)
+        .order_by(SavedPaperRow.saved_at.desc())
+    ).scalars()
+    return list(rows)
+
+
 def saved_ids(session: Session, user_sub: str, paper_ids: list[str]) -> set[str]:
     """Which of ``paper_ids`` this user has saved (for annotating a feed page)."""
     if not paper_ids:
