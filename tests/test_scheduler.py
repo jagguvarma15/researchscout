@@ -800,7 +800,15 @@ def test_the_report_slot_prunes_the_metric_ledgers(monkeypatch: pytest.MonkeyPat
         "researchscout.store.llm_usage.prune_llm_usage",
         lambda session: pruned.append("llm"),
     )
+    monkeypatch.setattr(
+        "researchscout.store.feed_metrics.prune_feed_metrics",
+        lambda session: pruned.append("feed"),
+    )
+    monkeypatch.setattr(
+        "researchscout.store.events.prune_events",
+        lambda session: pruned.append("events") or 0,
+    )
 
     note = scheduler_mod._report(Settings())
     assert note == "window empty"
-    assert pruned == ["ask", "llm"]
+    assert pruned == ["ask", "llm", "feed", "events"]
