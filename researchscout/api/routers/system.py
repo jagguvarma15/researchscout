@@ -24,6 +24,7 @@ from researchscout import __version__
 from researchscout.api.deps import get_session
 from researchscout.api.schemas import (
     AskStats,
+    FeedStats,
     HealthCheckInfo,
     LlmPurposeCalls,
     LlmStats,
@@ -35,6 +36,7 @@ from researchscout.config import get_settings
 from researchscout.health import run_health_checks
 from researchscout.schedule import next_run, parse_times, previous_run
 from researchscout.store.ask_metrics import ask_summary, recent_notfound
+from researchscout.store.feed_metrics import feed_summary
 from researchscout.store.llm_usage import usage_summary
 from researchscout.store.models import PaperRow, SchedulerRunRow
 from researchscout.store.runs import last_started, recent_runs
@@ -172,6 +174,18 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
         if usage.calls_today > 0 or usage.last_quota_at is not None
         else None
     )
+    feed_stats = feed_summary(session)
+    feed = (
+        FeedStats(
+            days=feed_stats.days,
+            requests=feed_stats.requests,
+            p50_ms=feed_stats.p50_ms,
+            p95_ms=feed_stats.p95_ms,
+            cache_hit_rate=feed_stats.cache_hit_rate,
+        )
+        if feed_stats.requests > 0
+        else None
+    )
     return SystemStatus(
         version=__version__,
         build_sha=settings.build_sha or None,
@@ -187,4 +201,5 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
         schedule=_schedule_groups(),
         ask=ask,
         llm=llm,
+        feed=feed,
     )
