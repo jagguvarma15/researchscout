@@ -101,6 +101,14 @@ export async function fetchSaved(token?: string | null): Promise<CatalogResult<P
   return result.ok ? { ok: true, data: result.data.items } : result;
 }
 
+// Just the saved paper ids - what the feed pages need to light save buttons, without pulling
+// the whole library. A pre-wave backend serves no such route; the 404 falls into the failure
+// path and callers render an empty saved set, exactly as they already tolerate for fetchSaved.
+export async function fetchSavedIds(token?: string | null): Promise<CatalogResult<string[]>> {
+  const result = await readCatalog<{ ids: string[] }>('/v1/me/saved/ids', token);
+  return result.ok ? { ok: true, data: result.data.ids } : result;
+}
+
 // The reading list with its library fields - what /saved renders. fetchSaved above stays
 // for the pages that only need the id set.
 export interface SavedPaperItem extends PaperSummary {
@@ -136,19 +144,30 @@ export async function fetchSavedList(
   return readCatalog<SavedLibrary>(`/v1/me/saved${query ? `?${query}` : ''}`, token);
 }
 
+/* The reader's profile shape, for the For You transparency header. */
+export interface FeedProfileInfo {
+  interests: number;
+  saves: number;
+  reads: number;
+  centroids: number;
+}
+
+/* The feed envelope: the ranked papers plus, when there is a profile, its shape. `profile` is
+   absent on cold start and from a pre-wave backend; both this and the old page tolerate both. */
+export interface ForYouFeed {
+  items: PaperSummary[];
+  profile?: FeedProfileInfo | null;
+}
+
 export async function fetchForYou(
   token?: string | null,
   opts: { days?: number; limit?: number } = {},
-): Promise<CatalogResult<PaperSummary[]>> {
+): Promise<CatalogResult<ForYouFeed>> {
   const search = new URLSearchParams();
   if (opts.days) search.set('days', String(opts.days));
   if (opts.limit) search.set('limit', String(opts.limit));
   const query = search.toString();
-  const result = await readCatalog<{ items: PaperSummary[] }>(
-    `/v1/me/feed${query ? `?${query}` : ''}`,
-    token,
-  );
-  return result.ok ? { ok: true, data: result.data.items } : result;
+  return readCatalog<ForYouFeed>(`/v1/me/feed${query ? `?${query}` : ''}`, token);
 }
 
 export async function fetchInterests(token?: string | null): Promise<string[] | null> {
@@ -303,6 +322,14 @@ export interface LlmStats {
   last_quota_at: string | null;
 }
 
+export interface FeedStats {
+  days: number;
+  requests: number;
+  p50_ms: number | null;
+  p95_ms: number | null;
+  cache_hit_rate: number | null;
+}
+
 export interface SystemStatus {
   version: string;
   build_sha: string | null;
@@ -320,6 +347,8 @@ export interface SystemStatus {
   ask?: AskStats | null;
   // Today's model spend; null when no calls today (or an older API).
   llm?: LlmStats | null;
+  // For You render latency over the last week; null when nothing rendered (or an older API).
+  feed?: FeedStats | null;
 }
 
 export async function fetchSystemStatus(): Promise<SystemStatus | null> {
@@ -466,9 +495,16 @@ export function catalogMessage(failure: CatalogFailure, what: string): string {
   return `The ${what} endpoint answered ${failure.status}. The API log will say why.`;
 }
 
+// A hung API used to stall SSR (and so TTFB) until the platform killed the function; the
+// timeout turns that into the same degraded-page path a connection failure already takes.
+const CATALOG_TIMEOUT_MS = 10_000;
+
 async function readCatalog<T>(path: string, token?: string | null): Promise<CatalogResult<T>> {
   try {
-    const response = await fetch(`${API_URL}${path}`, { headers: apiHeaders(token) });
+    const response = await fetch(`${API_URL}${path}`, {
+      headers: apiHeaders(token),
+      signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
+    });
     if (!response.ok) return { ok: false, failure: { status: response.status } };
     return { ok: true, data: (await response.json()) as T };
   } catch {
