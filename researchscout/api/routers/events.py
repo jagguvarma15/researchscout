@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from researchscout.api.auth import User, require_user
 from researchscout.api.deps import get_session
 from researchscout.api.schemas import EventAck, EventBatch
+from researchscout.retrieve.profile_cache import invalidate
 from researchscout.store.events import EventInput, append_events
 
 router = APIRouter(tags=["events"])
@@ -36,4 +37,8 @@ def ingest_events(
             for item in body.events
         ],
     )
+    # Positive events (impressions, clicks) are high-volume and only drift the profile - the
+    # cache TTL covers them. A dismiss is rare and a hard negative, so rebuild on it.
+    if any(item.event == "dismiss" for item in body.events):
+        invalidate(user.sub)
     return EventAck(stored=stored)
