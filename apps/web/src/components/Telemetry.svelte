@@ -49,6 +49,14 @@
    * A day heading with nothing under it is a lie about the timeline, so an emptied list takes
    * its whole section with it - and undo restores that too, mid-animation or after.
    */
+  // A page that supplies a [data-feed-empty] block (For You) wants it shown once every card is
+  // gone and hidden again on undo. Document-scoped like the impression observer below; pages
+  // without the block hit the null path and nothing happens.
+  function syncFeedEmpty() {
+    const empty = document.querySelector<HTMLElement>('[data-feed-empty]');
+    if (empty) empty.hidden = document.querySelector('[data-paper-id]') !== null;
+  }
+
   function remove(card: HTMLElement): () => void {
     const list = card.parentElement;
     const before = card.nextElementSibling;
@@ -61,6 +69,7 @@
       card.classList.remove('going');
       card.style.removeProperty('height');
       if (wasOnlyCard && section) section.hidden = true;
+      syncFeedEmpty();
     };
 
     if (prefersReducedMotion()) {
@@ -89,6 +98,7 @@
       card.classList.remove('going');
       card.style.removeProperty('height');
       if (section) section.hidden = false;
+      syncFeedEmpty();
     };
   }
 
