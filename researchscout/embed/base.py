@@ -18,3 +18,7 @@ class Embedder(ABC):
     @abstractmethod
     def embed_query(self, text: str) -> list[float]:
         """Embed a search query (may apply a model-specific instruction prefix)."""
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        """Embed several queries at once; implementations override to batch the forward pass."""
+        return [self.embed_query(text) for text in texts]
