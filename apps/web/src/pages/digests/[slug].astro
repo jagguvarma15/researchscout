@@ -8,7 +8,7 @@ import SignalMark from '../../components/SignalMark.astro';
 import Telemetry from '../../components/Telemetry.svelte';
 import Base from '../../layouts/Base.astro';
 import type { PaperSummary } from '../../lib/api';
-import { catalogMessage, fetchDigest, fetchForYou, fetchSaved } from '../../lib/api';
+import { catalogMessage, fetchDigest, fetchForYou, fetchSavedIds } from '../../lib/api';
 import { humanDate, issueNumber, issueSummary, whyLine } from '../../lib/format';
 import { renderIssueBody, renderMathHTML } from '../../lib/math';
 import { morphName } from '../../lib/morph';
@@ -17,7 +17,7 @@ import { categoryName } from '../../lib/taxonomy';
 const slug = Astro.params.slug ?? '';
 const [result, savedResult] = await Promise.all([
   fetchDigest(slug),
-  fetchSaved(Astro.locals.accessToken),
+  fetchSavedIds(Astro.locals.accessToken),
 ]);
 const digest = result.ok ? result.data : null;
 // A 404 is the one failure that means "no such issue"; anything else is the API's problem
@@ -26,7 +26,7 @@ const missing = !result.ok && result.failure.status === 404;
 if (missing) {
   Astro.response.status = 404;
 }
-const savedIds = new Set(savedResult.ok ? savedResult.data.map((paper) => paper.id) : []);
+const savedIds = new Set(savedResult.ok ? savedResult.data : []);
 
 const issue = issueNumber(slug);
 // The API serves kind since the archive grew tabs; older payloads fall back to the slug shape.
@@ -51,10 +51,12 @@ if (digest !== null && kind === 'weekly' && Astro.locals.user !== null) {
       Math.max(Math.ceil((Date.now() - new Date(digest.period_start).getTime()) / 86_400_000), 1),
       14,
     );
+    // Serial after the Promise.all above (it depends on the digest's period), but the feed is
+    // ANN-fast now - well under the 300ms budget - so the coda no longer dominates this page.
     const personal = await fetchForYou(Astro.locals.accessToken, { days, limit: 10 });
     if (personal.ok) {
       const inIssue = new Set(items.map((item) => item.paper_id));
-      forYou = personal.data.filter((paper) => !inIssue.has(paper.id)).slice(0, 5);
+      forYou = personal.data.items.filter((paper) => !inIssue.has(paper.id)).slice(0, 5);
     }
   }
 }
@@ -332,10 +334,6 @@ const forYouMax = Math.max(...forYou.map((paper) => paper.score ?? 0), 0) || 1;
     list-style: none;
     margin: 0;
     padding: 0;
-  }
-  .foryou :global(.pill.reason) {
-    background: var(--accent-soft);
-    color: var(--accent-ink);
   }
   .back {
     margin: var(--space-5) 0 0;
