@@ -336,14 +336,22 @@ def _warm_models() -> None:
     from researchscout.config import get_settings
     from researchscout.embed.factory import default_embedder
 
+    settings = get_settings()
     started = time.perf_counter()
     default_embedder().embed_query("warmup")
     from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS  # noqa: F401
 
-    if get_settings().rerank_enabled:
+    if settings.rerank_enabled:
         from researchscout.rerank import get_reranker
 
         get_reranker()
+    if settings.foryou_centroids >= 1:
+        # The first v2 feed request otherwise pays the sklearn.cluster import plus the scipy /
+        # threadpool init a first KMeans fit triggers; two one-hot rows converge instantly.
+        import numpy as np
+        from sklearn.cluster import KMeans
+
+        KMeans(n_clusters=2, n_init=1, random_state=0).fit(np.eye(2, 384))
     typer.echo(f"models warm in {time.perf_counter() - started:.1f}s")
 
 
