@@ -340,6 +340,19 @@ const healthChecks = [
                   .
                 </li>
               )}
+              {status?.feed && (
+                <li>
+                  <strong>{status.feed.requests.toLocaleString('en-US')} For You renders</strong> in
+                  the last {status.feed.days} days
+                  {status.feed.p50_ms !== null &&
+                    `; ${status.feed.p50_ms}ms median${
+                      status.feed.p95_ms !== null ? ` (p95 ${status.feed.p95_ms}ms)` : ''
+                    }`}
+                  {status.feed.cache_hit_rate !== null &&
+                    `; ${Math.round(status.feed.cache_hit_rate * 100)} percent profile-cache hits`}
+                  .
+                </li>
+              )}
             </ul>
             {status?.ask && status.ask.notfound.length > 0 && (
               <details class="notfound">
