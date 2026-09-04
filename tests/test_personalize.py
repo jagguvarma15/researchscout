@@ -216,9 +216,16 @@ def test_personalized_ranks_interest_aligned_first(session: Session) -> None:
     upsert_embedding(session, "arxiv:2", embedder.model_id, _onehot(0))  # orthogonal
     session.flush()
 
-    results = personalized_papers(session, embedder, ["vision"], k=10, days=30)
+    timings: dict[str, float] = {}
+    profile: dict[str, int] = {}
+    results = personalized_papers(
+        session, embedder, ["vision"], k=10, days=30, timings=timings, profile=profile
+    )
     assert [item.paper.id for item in results] == ["arxiv:1", "arxiv:2"]
     assert all(item.reason is None for item in results)  # legacy path names no reasons
+    # The instrumentation out-dicts are filled even on the v1 path.
+    assert profile == {"interests": 1, "saves": 0, "reads": 0, "centroids": 1}
+    assert {"profile_ms", "search_ms", "signals_ms", "rank_ms"} <= set(timings)
 
 
 @pytest.mark.integration
@@ -319,3 +326,91 @@ def test_events_flag_filters_dismissed_papers(
     set_setting("RS_FORYOU_EVENTS", "true")
     results = personalized_papers(session, embedder, [], user_sub="local", k=10, days=30)
     assert {item.paper.id for item in results} == {"arxiv:1", "arxiv:2"}
+
+
+@pytest.mark.integration
+def test_account_dismissals_filtered_on_both_paths(
+    session: Session, set_setting: Callable[[str, str], None]
+) -> None:
+    """An account dismissal is respected whether or not RS_FORYOU_EVENTS is on."""
+    from researchscout.schema import Author, Paper
+    from researchscout.store import account
+    from researchscout.store.papers import upsert_paper
+    from researchscout.store.saved import save_paper
+    from researchscout.store.vectors import upsert_embedding
+
+    def _paper(pid: str) -> Paper:
+        return Paper(
+            id=pid,
+            external_ids={"arxiv": pid.split(":")[1]},
+            title=pid,
+            abstract="x",
+            authors=[Author(name="A")],
+            categories=["cs.LG"],
+            published_at=datetime.now(UTC) - timedelta(days=1),
+            source="arxiv",
+        )
+
+    embedder = MockEmbedder({"x": _onehot(1)})
+    for pid in ("arxiv:1", "arxiv:2"):
+        upsert_paper(session, _paper(pid))
+        upsert_embedding(session, pid, embedder.model_id, _onehot(1))
+    save_paper(session, "local", "arxiv:1")
+    account.record_dismissal(session, "local", "arxiv:2")
+    session.flush()
+
+    # v2 with events OFF: the account dismissal alone must drop arxiv:2.
+    set_setting("RS_FORYOU_CENTROIDS", "1")
+    results = personalized_papers(session, embedder, [], user_sub="local", k=10, days=30)
+    assert "arxiv:2" not in {item.paper.id for item in results}
+
+    # v1 (no centroids) also honors the account dismissal now.
+    set_setting("RS_FORYOU_CENTROIDS", "0")
+    results = personalized_papers(session, embedder, ["x"], user_sub="local", k=10, days=30)
+    assert "arxiv:2" not in {item.paper.id for item in results}
+
+
+@pytest.mark.integration
+def test_profile_cache_skips_the_rebuild(
+    session: Session, set_setting: Callable[[str, str], None], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second request within the TTL serves the cached profile instead of clustering again."""
+    from researchscout.schema import Author, Paper
+    from researchscout.store.papers import upsert_paper
+    from researchscout.store.saved import save_paper
+    from researchscout.store.vectors import upsert_embedding
+
+    paper = Paper(
+        id="arxiv:1",
+        external_ids={"arxiv": "1"},
+        title="Anchor",
+        abstract="x",
+        authors=[Author(name="A")],
+        categories=["cs.LG"],
+        published_at=datetime.now(UTC) - timedelta(days=1),
+        source="arxiv",
+    )
+    embedder = MockEmbedder({})
+    upsert_paper(session, paper)
+    upsert_embedding(session, "arxiv:1", embedder.model_id, _onehot(1))
+    save_paper(session, "local", "arxiv:1")
+    session.flush()
+
+    builds = {"n": 0}
+    real_build = personalize_mod.build_profile
+
+    def _counting_build(*args: object, **kwargs: object) -> object:
+        builds["n"] += 1
+        return real_build(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(personalize_mod, "build_profile", _counting_build)
+    set_setting("RS_FORYOU_CENTROIDS", "1")
+
+    first: dict[str, float] = {}
+    personalized_papers(session, embedder, [], user_sub="local", k=5, days=30, timings=first)
+    second: dict[str, float] = {}
+    personalized_papers(session, embedder, [], user_sub="local", k=5, days=30, timings=second)
+
+    assert builds["n"] == 1  # the second request did not rebuild
+    assert first["cache_hit"] == 0.0
+    assert second["cache_hit"] == 1.0
