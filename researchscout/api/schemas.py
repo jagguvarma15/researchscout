@@ -69,6 +69,26 @@ class PaperList(BaseModel):
     offset: int = 0
 
 
+class FeedProfileInfo(BaseModel):
+    """The shape of a reader's For You profile, for the page's transparency header."""
+
+    interests: int
+    saves: int
+    reads: int
+    centroids: int
+
+
+class FeedResponse(PaperList):
+    # None on cold start (no profile) and from a pre-wave backend; both web builds tolerate both.
+    profile: FeedProfileInfo | None = None
+
+
+class SavedIdList(BaseModel):
+    """Just the saved paper ids - what the feed pages need to light their save buttons."""
+
+    ids: list[str]
+
+
 class SavedUpdate(BaseModel):
     """A PATCH over one saved row - absent fields change nothing, empty values clear."""
 
@@ -643,6 +663,16 @@ class AskStats(BaseModel):
     hallucination_rate: float | None = None
 
 
+class FeedStats(BaseModel):
+    """For You render latency over a recent window, for the status payload and about page."""
+
+    days: int
+    requests: int
+    p50_ms: int | None
+    p95_ms: int | None
+    cache_hit_rate: float | None
+
+
 class LlmPurposeCalls(BaseModel):
     """One purpose's share of today's model spend."""
 
@@ -692,6 +722,8 @@ class SystemStatus(BaseModel):
     ask: AskStats | None = None
     # Today's model spend (None when no calls today and no recent quota death).
     llm: LlmStats | None = None
+    # For You render latency over the last week (None when nothing was rendered).
+    feed: FeedStats | None = None
 
 
 class NotableModelInfo(BaseModel):
