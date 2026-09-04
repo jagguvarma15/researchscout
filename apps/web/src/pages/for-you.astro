@@ -5,71 +5,172 @@ import PageIntro from '../components/PageIntro.astro';
 import PaperRow from '../components/PaperRow.astro';
 import Telemetry from '../components/Telemetry.svelte';
 import Base from '../layouts/Base.astro';
-import { catalogMessage, fetchForYou, fetchSaved } from '../lib/api';
+import { catalogMessage, fetchAccount, fetchForYou, fetchSavedIds } from '../lib/api';
+import type { Account, ForYouFeed, PaperSummary } from '../lib/api';
 
-const [result, savedResult] = await Promise.all([
-  fetchForYou(Astro.locals.accessToken),
-  fetchSaved(Astro.locals.accessToken),
-]);
-const savedIds = new Set(savedResult.ok ? savedResult.data.map((paper) => paper.id) : []);
+const user = Astro.locals.user;
+const token = Astro.locals.accessToken;
+
+const DAYS = ['7', '30', '90'] as const;
+const rawDays = Astro.url.searchParams.get('days') ?? '';
+const days = DAYS.includes(rawDays as (typeof DAYS)[number]) ? Number(rawDays) : 30;
+
+// One parallel batch for a signed-in reader: the feed, the saved id set (not the whole
+// library), and the account the shell would otherwise fetch serially after this page.
+let result: Awaited<ReturnType<typeof fetchForYou>> | null = null;
+let savedIds = new Set<string>();
+let account: Account | null = null;
+if (user !== null) {
+  const [feed, saved, acct] = await Promise.all([
+    fetchForYou(token, { days }),
+    fetchSavedIds(token),
+    fetchAccount(token),
+  ]);
+  result = feed;
+  savedIds = new Set(saved.ok ? saved.data : []);
+  account = acct;
+}
+
+const feed: ForYouFeed | null = result?.ok ? result.data : null;
+const items: PaperSummary[] = feed?.items ?? [];
+const profile = feed?.profile ?? null;
 
 // Meters read relative within this list; the personalization scores are not on a 0-1 scale.
-const signalMax = result.ok
-  ? Math.max(...result.data.map((paper) => paper.score ?? 0), 0) || 1
-  : 1;
+const signalMax = Math.max(...items.map((paper) => paper.score ?? 0), 0) || 1;
+
+function windowHref(value: number): string {
+  return value === 30 ? '/for-you' : `/for-you?days=${value}`;
+}
 ---
 
-<Base title="For you">
+<Base title="For you" account={account}>
   <PageIntro title="For you" lede="Recent papers ranked by your research interests." />
 
   {
-    !result.ok ? (
-      <EmptyState
-        kind="error"
-        icon="lucide:cloud-off"
-        message={catalogMessage(result.failure, 'personalized feed')}
-        action={{ href: '/for-you', label: 'Retry' }}
-      />
-    ) : result.data.length === 0 ? (
+    user === null ? (
       <EmptyState
         icon="lucide:sparkles"
-        message="No personalized picks yet."
-        hint="Add research interests to your profile and recent papers get ranked against them."
-        action={{ href: '/profile', label: 'Open your profile' }}
+        message="Sign in to see a feed that learns what you read."
+        hint="It ranks recent papers against your interests, saves, and reading."
+        action={{ href: '/login?next=/for-you', label: 'Sign in' }}
       />
     ) : (
-      <ul class="feed">
-        {result.data.map((paper, index) => (
-          <PaperRow
-            paper={paper}
-            signalMax={signalMax}
-            rank={index}
-            saved={savedIds.has(paper.id)}
-            dismissible={true}
-          >
-            <Fragment slot="extra">
-              {paper.reason && <span class="pill reason">{paper.reason}</span>}
-            </Fragment>
-          </PaperRow>
-        ))}
-      </ul>
+      <Fragment>
+        <div class="toolbar">
+          <span class="pills" role="group" aria-label="How far back to look">
+            {DAYS.map((value) => (
+              <a
+                class:list={['pill', { on: days === Number(value) }]}
+                href={windowHref(Number(value))}
+                aria-current={days === Number(value) ? 'page' : undefined}
+              >
+                {value}d
+              </a>
+            ))}
+          </span>
+          {profile && (
+            <a class="tuned" href="/profile">
+              Tuned by {profile.interests} interest{profile.interests === 1 ? '' : 's'} ·{' '}
+              {profile.saves} saved · {profile.reads} recent read
+              {profile.reads === 1 ? '' : 's'}
+            </a>
+          )}
+        </div>
+
+        {!result?.ok ? (
+          <EmptyState
+            kind="error"
+            icon="lucide:cloud-off"
+            message={catalogMessage(result!.failure, 'personalized feed')}
+            action={{ href: windowHref(days), label: 'Retry' }}
+          />
+        ) : items.length === 0 ? (
+          <EmptyState
+            icon="lucide:sparkles"
+            message="No personalized picks yet."
+            hint="Add research interests to your profile and recent papers get ranked against them."
+            action={{ href: '/profile', label: 'Open your profile' }}
+          />
+        ) : (
+          <Fragment>
+            <p class="count">
+              {items.length} pick{items.length === 1 ? '' : 's'} · last {days} days
+            </p>
+            <ul class="feed">
+              {items.map((paper, index) => (
+                <PaperRow
+                  paper={paper}
+                  signalMax={signalMax}
+                  rank={index}
+                  saved={savedIds.has(paper.id)}
+                  dismissible={true}
+                >
+                  <Fragment slot="extra">
+                    {paper.reason && <span class="pill reason">{paper.reason}</span>}
+                  </Fragment>
+                </PaperRow>
+              ))}
+            </ul>
+            <div data-feed-empty hidden>
+              <EmptyState
+                icon="lucide:check-check"
+                message="You dismissed everything here."
+                hint="More arrives with the next sweep - or widen the window."
+                action={{ href: windowHref(days), label: 'Refresh' }}
+              />
+            </div>
+          </Fragment>
+        )}
+
+        <Telemetry client:idle surface="for-you" enabled={true} />
+        <DismissNotice client:idle />
+      </Fragment>
     )
   }
-
-  <Telemetry client:idle surface="for-you" enabled={Astro.locals.user !== null} />
-  <DismissNotice client:idle />
 </Base>
 
 <style>
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.5rem 1rem;
+    padding-bottom: var(--space-3);
+    border-bottom: 1px solid var(--line);
+  }
+  .pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .toolbar .pill {
+    text-decoration: none;
+    color: var(--muted);
+  }
+  .toolbar .pill:hover {
+    color: var(--ink);
+  }
+  .toolbar .pill.on {
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+  }
+  .tuned {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: var(--text-xs);
+    text-decoration: none;
+  }
+  .tuned:hover {
+    color: var(--accent);
+  }
+  .count {
+    margin: var(--space-3) 0 var(--space-2);
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
   .feed {
     list-style: none;
     margin: 0;
     padding: 0;
-  }
-  /* Why this paper is here - the personalized feed's one extra fact, as an accent chip
-     on the shared pill shape. */
-  .reason {
-    background: var(--accent-soft);
-    color: var(--accent-ink);
   }
 </style>
