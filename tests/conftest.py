@@ -35,6 +35,24 @@ def _fresh_llm_usage() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
+def _fresh_foryou_caches() -> Iterator[None]:
+    """Empty the per-user profile cache and interest-vector cache around every test.
+
+    The integration suite shares one process, so a TRUNCATE cleans the DB but not these
+    in-process caches; and stub embedders reuse a model id across tests with different vectors,
+    so a stale interest vector would leak between them.
+    """
+    from researchscout.retrieve import profile_cache
+    from researchscout.retrieve.personalize import clear_interest_cache
+
+    profile_cache.clear()
+    clear_interest_cache()
+    yield
+    profile_cache.clear()
+    clear_interest_cache()
+
+
+@pytest.fixture(autouse=True)
 def _fresh_sources_config() -> Iterator[None]:
     """Give every test its own view of the sources registry file.
 
@@ -106,7 +124,7 @@ def session(pg_url: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
                 "user_interests, citation_edges, citation_fetches, events, pipeline_lineage, "
                 "account_searches, account_recent_papers, account_dismissals, account_filters, "
                 "ai_models, benchmarks, benchmark_results, scheduler_runs, llm_usage, "
-                "users RESTART IDENTITY CASCADE"
+                "feed_metrics, users RESTART IDENTITY CASCADE"
             )
         )
         # Migration 0019 guarantees the built-in local user exists; truncating users removes
