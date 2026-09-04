@@ -10,6 +10,7 @@ from researchscout.store.events import (
     append_events,
     dismissed_event_paper_ids,
     positive_event_vectors,
+    prune_events,
 )
 from researchscout.store.models import EventRow
 from researchscout.store.papers import upsert_paper
@@ -129,3 +130,32 @@ def test_dismissed_event_paper_ids_distinct(session: Session) -> None:
     )
     assert dismissed_event_paper_ids(session, "local") == ["arxiv:2401.00001"]
     assert dismissed_event_paper_ids(session, "someone-else") == []
+
+
+def test_prune_events_keeps_dismissals_and_fresh_rows(session: Session) -> None:
+    upsert_paper(session, _paper("2401.00001"))
+    old = datetime.now(UTC) - timedelta(days=200)
+    fresh = datetime.now(UTC) - timedelta(days=1)
+    session.add_all(
+        [
+            EventRow(
+                user_sub="local", event="impression", paper_id="arxiv:2401.00001", occurred_at=old
+            ),
+            EventRow(user_sub="local", event="click", paper_id="arxiv:2401.00001", occurred_at=old),
+            # A dismissal is never pruned, however old.
+            EventRow(
+                user_sub="local", event="dismiss", paper_id="arxiv:2401.00001", occurred_at=old
+            ),
+            # A recent positive stays.
+            EventRow(
+                user_sub="local", event="click", paper_id="arxiv:2401.00001", occurred_at=fresh
+            ),
+        ]
+    )
+    session.flush()
+
+    removed = prune_events(session, keep_days=180)
+    assert removed == 2  # the two old positives
+    kept = session.execute(select(EventRow.event, EventRow.occurred_at)).all()
+    events = sorted(event for event, _ in kept)
+    assert events == ["click", "dismiss"]  # the old dismiss and the fresh click survive
