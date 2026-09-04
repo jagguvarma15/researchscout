@@ -65,3 +65,15 @@ class LocalEmbedder(Embedder):
                 query_prefix_for(self.model_id) + text, normalize_embeddings=True
             )
         return list(vector.tolist())
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        # One slot and one forward pass for the whole batch - N separate embed_query calls
+        # would queue behind the 2-slot semaphore N times and run N single-item passes.
+        if not texts:
+            return []
+        prefix = query_prefix_for(self.model_id)
+        with model_slot():
+            vectors = self._model.encode(
+                [prefix + text for text in texts], normalize_embeddings=True
+            )
+        return [vector.tolist() for vector in vectors]
