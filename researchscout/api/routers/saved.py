@@ -10,12 +10,14 @@ from sqlalchemy.orm import Session
 
 from researchscout.api.auth import User, require_user
 from researchscout.api.deps import get_session
-from researchscout.api.schemas import SavedList, SavedPaperItem, SavedUpdate
+from researchscout.api.schemas import SavedIdList, SavedList, SavedPaperItem, SavedUpdate
 from researchscout.export import bibtex_export, csv_export
+from researchscout.retrieve.profile_cache import invalidate
 from researchscout.store.papers import get_paper
 from researchscout.store.saved import (
     list_saved,
     save_paper,
+    saved_paper_ids,
     saved_tags,
     unsave_paper,
     update_saved,
@@ -34,6 +36,7 @@ def save(
     if get_paper(session, paper_id) is None:
         raise HTTPException(status_code=404, detail=f"unknown paper id: {paper_id}")
     save_paper(session, user.sub, paper_id)
+    invalidate(user.sub)  # the profile leans on saves; rebuild it on the next feed request
     return {"saved": True}
 
 
@@ -63,7 +66,17 @@ def unsave(
 ) -> dict[str, bool]:
     """Remove a paper from the caller's reading list (idempotent)."""
     unsave_paper(session, user.sub, paper_id)
+    invalidate(user.sub)
     return {"saved": False}
+
+
+@router.get("/me/saved/ids")
+def my_saved_ids(
+    user: Annotated[User, Depends(require_user)],
+    session: Annotated[Session, Depends(get_session)],
+) -> SavedIdList:
+    """Just the saved paper ids - what the feed pages need without the whole library."""
+    return SavedIdList(ids=saved_paper_ids(session, user.sub))
 
 
 @router.get("/me/saved/export")
