@@ -63,7 +63,8 @@
   {#if open}
     <div class="menu" role="menu" aria-label="Account">
       <span class="menu-user" role="presentation">{username}</span>
-      <a role="menuitem" href="/profile">Profile</a>
+      <!-- no-prefetch: /profile is a private, no-store render; a hover-prefetch would be discarded. -->
+      <a role="menuitem" href="/profile" data-astro-prefetch="false">Profile</a>
       <!-- The drawer's document-level delegate reads the attribute off the bubbled click;
            closing here is this menu's own business. -->
       <button role="menuitem" type="button" data-open-settings onclick={() => (open = false)}>
