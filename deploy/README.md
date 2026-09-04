@@ -52,8 +52,12 @@ already live, off, and byte-identical to before until the value exists.
 
 On the Railway `api` service:
 
-- `RS_FORYOU_EVENTS=true` - clicked and dwelled papers join the For You profile;
-  dismissed papers never come back (needs `RS_FORYOU_CENTROIDS` at 1 or more).
+- For You v2 (the whole quartet - the feed is built and tested for this):
+  `RS_FORYOU_CENTROIDS=3`, `RS_FORYOU_MMR_LAMBDA=0.75`, `RS_FORYOU_EXPLORE_SLOTS=2`,
+  `RS_FORYOU_EVENTS=true`. Centroids cluster saved papers and interests into the "why this
+  paper" reasons; MMR diversifies; explore slots surface high-momentum papers outside the
+  profile; events fold in clicked/dwelled papers. Without `RS_FORYOU_CENTROIDS` at 1 or more
+  the feed runs the legacy single-centroid path and `RS_FORYOU_EVENTS` is inert.
 - `RS_HIGHLIGHTS_SYNC=true` - reader highlights follow the account across devices.
 - `RS_PUSH_ENABLED=true` with `RS_VAPID_PRIVATE_KEY`, `RS_VAPID_PUBLIC_KEY` and
   `RS_VAPID_SUBJECT` (mint a keypair with `uv run python -m py_vapid` or openssl) -
