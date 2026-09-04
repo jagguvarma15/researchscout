@@ -29,12 +29,22 @@ def _client() -> TestClient:
     return TestClient(app)
 
 
-def test_save_returns_saved(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_save_returns_saved_and_invalidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    invalidated: list[str] = []
     monkeypatch.setattr(saved_router, "get_paper", lambda *a: _paper())
     monkeypatch.setattr(saved_router, "save_paper", lambda *a: True)
+    monkeypatch.setattr(saved_router, "invalidate", lambda sub: invalidated.append(sub))
     response = _client().post("/v1/papers/arxiv:2401.00001/save")
     assert response.status_code == 200
     assert response.json() == {"saved": True}
+    assert invalidated == ["user-1"]  # the save rebuilds the profile next request
+
+
+def test_saved_ids_returns_the_id_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(saved_router, "saved_paper_ids", lambda s, sub: ["arxiv:1", "arxiv:2"])
+    response = _client().get("/v1/me/saved/ids")
+    assert response.status_code == 200
+    assert response.json() == {"ids": ["arxiv:1", "arxiv:2"]}
 
 
 def test_resave_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,11 +60,14 @@ def test_save_unknown_paper_is_404(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _client().post("/v1/papers/arxiv:0000.00000/save").status_code == 404
 
 
-def test_unsave_returns_unsaved(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unsave_returns_unsaved_and_invalidates(monkeypatch: pytest.MonkeyPatch) -> None:
+    invalidated: list[str] = []
     monkeypatch.setattr(saved_router, "unsave_paper", lambda *a: True)
+    monkeypatch.setattr(saved_router, "invalidate", lambda sub: invalidated.append(sub))
     response = _client().delete("/v1/papers/arxiv:2401.00001/save")
     assert response.status_code == 200
     assert response.json() == {"saved": False}
+    assert invalidated == ["user-1"]
 
 
 def _entry(pid: str = "arxiv:2401.00001") -> object:
