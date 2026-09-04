@@ -30,11 +30,16 @@
   // Grouped rather than listed: the rail carries three different kinds of destination now, and
   // eight undifferentiated rows read as a pile. The headings are list items with a
   // presentation role, so the whole rail stays one list to a screen reader.
-  const SECTIONS: { title: string; items: { href: string; label: string; icon: Component }[] }[] = [
+  const SECTIONS: {
+    title: string;
+    items: { href: string; label: string; icon: Component; prefetch?: boolean }[];
+  }[] = [
     {
       title: 'Discover',
       items: [
-        { href: '/for-you', label: 'For you', icon: Sparkles },
+        // no-prefetch: For You is a private, no-store personalized render - a hover would
+        // recompute the whole feed on the server only for the browser to discard it.
+        { href: '/for-you', label: 'For you', icon: Sparkles, prefetch: false },
         { href: '/topics', label: 'Trends', icon: TrendingUp },
         { href: '/digests', label: 'Digests', icon: Newspaper },
       ],
@@ -50,7 +55,7 @@
     {
       title: 'Library',
       items: [
-        { href: '/saved', label: 'Reading list', icon: Bookmark },
+        { href: '/saved', label: 'Reading list', icon: Bookmark, prefetch: false },
         { href: '/about', label: 'About', icon: Info },
       ],
     },
@@ -145,6 +150,7 @@
             class="btn btn-nav"
             href={item.href}
             aria-current={isCurrent(item.href) ? 'page' : undefined}
+            data-astro-prefetch={item.prefetch === false ? 'false' : undefined}
             style={isCurrent(item.href) ? 'view-transition-name: rail-active' : undefined}
           >
             <!-- The name makes the active pill its own transition group, so on navigation
