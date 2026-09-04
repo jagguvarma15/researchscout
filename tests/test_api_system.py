@@ -156,6 +156,37 @@ def test_status_reports_ask_usage(session: Session) -> None:
     assert body["ask"]["refused"] == 0 and body["ask"]["llm_errors"] == 0
 
 
+def test_status_reports_feed_usage(session: Session) -> None:
+    from researchscout.store.feed_metrics import record_feed
+
+    # Quiet deployment: no renders means no feed block.
+    body = _client(session).get("/v1/system/status").json()
+    assert body["feed"] is None
+
+    for total_ms, hit in ((80, True), (120, True), (300, False)):
+        record_feed(
+            session,
+            user_hash="abc123def456",
+            days=30,
+            k=20,
+            centroids=3,
+            candidates=100,
+            returned=20,
+            profile_cache_hit=hit,
+            profile_ms=2,
+            search_ms=30,
+            signals_ms=20,
+            rank_ms=8,
+            total_ms=total_ms,
+        )
+    session.commit()
+
+    body = _client(session).get("/v1/system/status").json()
+    assert body["feed"]["requests"] == 3
+    assert body["feed"]["p50_ms"] is not None
+    assert body["feed"]["cache_hit_rate"] == pytest.approx(2 / 3)
+
+
 def test_status_reports_llm_usage(session: Session) -> None:
     from researchscout.llm.usage import LlmCallUsage
     from researchscout.store.llm_usage import add_usage
