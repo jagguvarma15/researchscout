@@ -24,6 +24,7 @@ from researchscout.api.schemas import (
     SearchRecord,
     ViewRecord,
 )
+from researchscout.retrieve.profile_cache import invalidate
 from researchscout.store import account
 from researchscout.store.papers import get_papers
 
@@ -113,6 +114,9 @@ def dismiss(
 ) -> DismissalList:
     """Send a paper to the end of the feed. It is not hidden and stays reachable everywhere."""
     account.record_dismissal(session, user.sub, body.paper_id)
+    # Exclusions are applied per request, so the feed already respects this; invalidating keeps
+    # anything the cached profile might later carry about dismissals honest.
+    invalidate(user.sub)
     return DismissalList(items=account.dismissed_papers(session, user.sub))
 
 
@@ -124,6 +128,7 @@ def restore_dismissals(
 ) -> DismissalList:
     """Bring one paper back to its place in the feed, or all of them."""
     account.restore_dismissed(session, user.sub, [paper_id] if paper_id else None)
+    invalidate(user.sub)
     return DismissalList(items=account.dismissed_papers(session, user.sub))
 
 
