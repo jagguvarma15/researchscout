@@ -33,3 +33,7 @@ class StaticKeywordEmbedder(Embedder):
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]
+
+    def embed_queries(self, texts: list[str]) -> list[list[float]]:
+        # No query prefix in this space, so a query batch is just a document batch.
+        return self.embed_documents(texts) if texts else []
