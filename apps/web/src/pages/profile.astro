@@ -10,8 +10,9 @@ import { isAvatarSlug } from '../lib/avatars';
 
 const user = Astro.locals.user;
 const token = Astro.locals.accessToken;
-const interests = user ? await fetchInterests(token) : null;
-const account = user ? await fetchAccount(token) : null;
+const [interests, account] = user
+  ? await Promise.all([fetchInterests(token), fetchAccount(token)])
+  : [null, null];
 // Deleting an account only means anything when there is an identity provider behind it; a
 // local install has one built-in user that other rows point at.
 const canDelete = account !== null && account.sub !== 'local';
@@ -62,7 +63,8 @@ const initials =
           <section class="block panel">
             <h2>Research interests</h2>
             <p class="blurb">
-              Topics you care about - up to 20, each a short phrase. Changes save as you go.
+              Topics you care about - up to 20, each a short phrase. Changes save as you go and
+              shape your <a href="/for-you">For You feed</a>.
             </p>
             <div class="panel-body">
               {interests === null ? (
