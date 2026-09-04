@@ -396,7 +396,12 @@ class CitationEdgeRow(Base):
 
 class EventRow(Base):
     __tablename__ = "events"
-    __table_args__ = (Index("ix_events_paper_event", "paper_id", "event"),)
+    __table_args__ = (
+        Index("ix_events_paper_event", "paper_id", "event"),
+        # Every For You read filters user_sub first (positive vectors, dismissals) and the
+        # prune filters (event, occurred_at); this serves all three on the fastest-growing table.
+        Index("ix_events_user", "user_sub", "event", "occurred_at"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_sub: Mapped[str] = mapped_column(ForeignKey("users.sub", ondelete="CASCADE"))
@@ -518,6 +523,32 @@ class AskMetricRow(Base):
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     first_token_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hallucinated: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class FeedMetricRow(Base):
+    """One For You render: the window served, the profile shape, and the segment latencies."""
+
+    __tablename__ = "feed_metrics"
+    __table_args__ = (Index("ix_feed_metrics_requested_at", "requested_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    # The web's ownerTag derivation (12 chars of sha256, never the sub); NULL when anonymous.
+    user_hash: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    days: Mapped[int] = mapped_column(Integer)
+    # The requested limit ("limit" is reserved in Postgres).
+    k: Mapped[int] = mapped_column(Integer)
+    centroids: Mapped[int] = mapped_column(Integer)
+    candidates: Mapped[int] = mapped_column(Integer)
+    returned: Mapped[int] = mapped_column(Integer)
+    profile_cache_hit: Mapped[bool] = mapped_column(Boolean)
+    profile_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    search_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    signals_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rank_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_ms: Mapped[int] = mapped_column(Integer)
 
 
 class LlmUsageRow(Base):
