@@ -443,6 +443,13 @@ svg[data-icon] {
   white-space: nowrap;
 }
 
+/* Why the personalized feed picked a paper - the accent tint on the shared pill shape, one
+   source for both the For You rows and the weekly-digest coda. */
+.pill.reason {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
 /* The small uppercase section label. One letter-spacing for all of them - the table
    headers set the register and everything else follows it. */
 .micro-label {
