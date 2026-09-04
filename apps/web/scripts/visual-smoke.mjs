@@ -239,6 +239,8 @@ async function shootSurfaces(browser, details) {
     ['desktop-digests', '/digests', { width: 1280, height: 800 }, null],
     ['phone-digests', '/digests', { width: 390, height: 844 }, null],
     ['desktop-foryou', '/for-you', { width: 1280, height: 800 }, null],
+    ['desktop-foryou-dark', '/for-you', { width: 1280, height: 800 }, 'dark'],
+    ['phone-foryou', '/for-you', { width: 390, height: 844 }, null],
     ['desktop-paper', details.paper, { width: 1280, height: 900 }, null],
     ['desktop-paper-dark', details.paper, { width: 1280, height: 900 }, 'dark'],
     ['desktop-digest-issue', details.digest, { width: 1280, height: 900 }, null],
