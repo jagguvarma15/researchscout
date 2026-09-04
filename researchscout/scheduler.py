@@ -565,6 +565,8 @@ def _report(settings: Settings) -> str:
     from researchscout.store.ask_metrics import prune_ask_metrics
     from researchscout.store.db import session_scope
     from researchscout.store.digests import upsert_digest
+    from researchscout.store.events import prune_events
+    from researchscout.store.feed_metrics import prune_feed_metrics
     from researchscout.store.lineage import prune_lineage
     from researchscout.store.llm_usage import prune_llm_usage
     from researchscout.store.raw import prune_raw_items
@@ -593,6 +595,12 @@ def _report(settings: Settings) -> str:
         prune_ask_metrics(session)
     with session_scope() as session:
         prune_llm_usage(session)
+    with session_scope() as session:
+        prune_feed_metrics(session)
+    with session_scope() as session:
+        events_pruned = prune_events(session)
+    if events_pruned:
+        logger.info("pruned %d event(s)", events_pruned)
     return note
 
 
