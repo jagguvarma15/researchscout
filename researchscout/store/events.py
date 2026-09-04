@@ -13,7 +13,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from researchscout.store.models import EventRow, PaperEmbeddingRow, PaperRow, SavedPaperRow
@@ -112,3 +112,17 @@ def dismissed_event_paper_ids(session: Session, user_sub: str) -> list[str]:
         .distinct()
     ).scalars()
     return list(rows)
+
+
+def prune_events(session: Session, *, keep_days: int = 180) -> int:
+    """Drop events older than the window, except dismissals — For You's long-term memory.
+
+    Impressions dominate the table (one per card per page view) and personalization only reads
+    the last 30 days of positives, so nothing it uses is lost. Dismissals are the one signal
+    that must never expire: re-recommending a waved-away paper reads as deaf.
+    """
+    cutoff = datetime.now(UTC) - timedelta(days=keep_days)
+    result = session.execute(
+        delete(EventRow).where(EventRow.occurred_at < cutoff, EventRow.event != "dismiss")
+    )
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
