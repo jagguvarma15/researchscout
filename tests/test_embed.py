@@ -35,6 +35,25 @@ class MockEmbedder(Embedder):
         return self._mapping[text]
 
 
+def test_embed_queries_default_loops_embed_query() -> None:
+    """The base default reuses embed_query per text; only fast batchers override it."""
+    calls: list[str] = []
+
+    class _Loop(Embedder):
+        model_id = "loop"
+        dim = 3
+
+        def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            return [[0.0] for _ in texts]
+
+        def embed_query(self, text: str) -> list[float]:
+            calls.append(text)
+            return [float(len(text))]
+
+    assert _Loop().embed_queries(["a", "bb"]) == [[1.0], [2.0]]
+    assert calls == ["a", "bb"]
+
+
 def _paper(arxiv: str, title: str, abstract: str = "x") -> Paper:
     return Paper(
         id=f"arxiv:{arxiv}",
@@ -110,3 +129,9 @@ def test_local_embedder_contract() -> None:
     query = embedder.embed_query("hello world")
     assert len(query) == 384
     assert query != docs[0]  # query instruction prefix changes the vector
+
+    # Batched queries match one-at-a-time queries element for element.
+    batch = embedder.embed_queries(["hello world", "another query"])
+    assert len(batch) == 2 and len(batch[0]) == 384
+    assert batch[0] == pytest.approx(query, abs=1e-5)
+    assert embedder.embed_queries([]) == []
