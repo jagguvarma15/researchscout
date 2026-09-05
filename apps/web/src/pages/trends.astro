@@ -1,44 +1,34 @@
 ---
+import DataAsOf from '../components/DataAsOf.astro';
 import EmptyState from '../components/EmptyState.astro';
 import PageIntro from '../components/PageIntro.astro';
+import TrendChart from '../components/TrendChart.astro';
 import Base from '../layouts/Base.astro';
-import { catalogMessage, fetchTrends, formatDate } from '../lib/api';
-import { stepLineGeometry } from '../lib/sparkline';
+import { catalogMessage, fetchCatalogFreshness, fetchTrends, formatDate, formatScore } from '../lib/api';
+import { withMonthHeaders } from '../lib/timeline';
 
 // The movement page: where the headline benchmarks' state of the art went, and what the
 // major labs shipped - the catalogue's tables arranged along time instead of rank.
-const result = await fetchTrends();
+const [result, freshness] = await Promise.all([fetchTrends(), fetchCatalogFreshness()]);
+const asOf = freshness.ok ? freshness.data.as_of : null;
 
+// Only benchmarks with at least two advances have a line to draw; a single reading is dropped.
 const series = result.ok
   ? result.data.sota
+      .filter((entry) => entry.points.length >= 2)
       .map((entry) => ({
         ...entry,
-        geo: stepLineGeometry(entry.points.map((point) => point.score)),
+        first: entry.points[0],
+        leader: entry.points[entry.points.length - 1],
       }))
-      .filter((entry) => entry.geo !== null)
   : [];
 const releases = result.ok ? result.data.releases : [];
+const timeline = withMonthHeaders(releases);
 
-function fmtScore(scale: string, value: number): string {
-  return scale === 'fraction' ? `${(value * 100).toFixed(1)}%` : value.toLocaleString('en-US');
+// A fraction reads as a percentage; every other scale reads as its own number (Elo, dollars).
+function readScore(scale: string, value: number): string {
+  return scale === 'fraction' ? `${formatScore(value, scale)}%` : formatScore(value, scale);
 }
-
-// Month headers for the release timeline, computed once so the template only compares.
-function monthOf(published: string | null): string {
-  if (!published) return 'Undated';
-  return new Date(published).toLocaleDateString('en-US', {
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  });
-}
-const timeline = releases.map((model, index) => ({
-  ...model,
-  monthHeader:
-    index === 0 || monthOf(model.published_on) !== monthOf(releases[index - 1].published_on)
-      ? monthOf(model.published_on)
-      : null,
-}));
 ---
 
 <Base title="Frontier">
@@ -46,6 +36,11 @@ const timeline = releases.map((model, index) => ({
     title="Frontier"
     lede="Where the headline benchmarks' state of the art moved, and what the major labs shipped."
   />
+
+  <p class="cross-link">
+    <a href="/topics">See emerging research topics</a>
+  </p>
+  <DataAsOf date={asOf} label="Catalogue data as of" />
 
   {
     !result.ok ? (
@@ -73,34 +68,30 @@ const timeline = releases.map((model, index) => ({
                     <h3 class="bench-name">
                       <a href={`/benchmarks?b=${entry.id}`}>{entry.name}</a>
                     </h3>
-                    <span class="bench-now">
-                      {fmtScore(entry.scale, entry.points[entry.points.length - 1].score)}
-                    </span>
+                    <span class="bench-now">{readScore(entry.scale, entry.leader.score)}</span>
                   </div>
-                  <svg
-                    class="chart"
-                    width="640"
-                    height="120"
-                    viewBox="0 0 640 120"
-                    role="img"
-                    aria-label={`${entry.name} state of the art across ${entry.points.length} advances`}
-                  >
-                    <line x1="8" y1="112" x2="632" y2="112" />
-                    <path class="wash" d={entry.geo!.area} />
-                    <path class="steps" d={entry.geo!.path} />
-                    {entry.points.map((point, index) => (
-                      <circle cx={entry.geo!.points[index].x} cy={entry.geo!.points[index].y} r="4">
-                        <title>
-                          {`${point.model_name} - ${fmtScore(entry.scale, point.score)} - ${formatDate(point.on)}`}
-                        </title>
-                      </circle>
-                    ))}
-                  </svg>
+                  <TrendChart
+                    mode="step"
+                    values={entry.points.map((point) => point.score)}
+                    width={640}
+                    height={120}
+                    pad={8}
+                    baseline
+                    endDot={false}
+                    points={entry.points.map((point) => ({
+                      title: `${point.model_name} - ${readScore(entry.scale, point.score)} - ${formatDate(point.on)}`,
+                    }))}
+                    label={`${entry.name} state of the art across ${entry.points.length} advances`}
+                  />
                   <p class="bench-caption">
-                    <span>{formatDate(entry.points[0].on)}</span>
+                    <span>{formatDate(entry.first.on)}</span>
                     <span>
-                      {entry.points[entry.points.length - 1].model_name} leads as of{' '}
-                      {formatDate(entry.points[entry.points.length - 1].on)}
+                      {entry.leader.model_id ? (
+                        <a href={`/models/${entry.leader.model_id}`}>{entry.leader.model_name}</a>
+                      ) : (
+                        entry.leader.model_name
+                      )}{' '}
+                      leads as of {formatDate(entry.leader.on)}
                     </span>
                   </p>
                 </li>
@@ -123,7 +114,9 @@ const timeline = releases.map((model, index) => ({
                     <a class="what" href={`/models/${model.id}`}>
                       {model.name}
                     </a>
-                    <span class="who">{model.provider}</span>
+                    <a class="who" href={`/models?organization=${encodeURIComponent(model.provider)}`}>
+                      {model.provider}
+                    </a>
                   </li>
                 </Fragment>
               ))}
@@ -158,6 +151,22 @@ const timeline = releases.map((model, index) => ({
     .chart-grid {
       grid-template-columns: 1fr;
     }
+    .bench-name a,
+    .bench-caption a {
+      display: inline-block;
+      padding: 0.15rem 0;
+    }
+  }
+  .cross-link {
+    margin: 0.2rem 0 0;
+    font-size: var(--text-sm);
+  }
+  .cross-link a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .cross-link a:hover {
+    color: var(--accent);
   }
   .bench {
     padding: 1.1rem 1.25rem;
@@ -188,30 +197,8 @@ const timeline = releases.map((model, index) => ({
     font-weight: var(--weight-semibold);
     color: var(--accent-ink);
   }
-  .chart {
+  .bench :global(.trend-chart) {
     margin-top: 0.6rem;
-    max-width: 100%;
-    height: auto;
-    display: block;
-  }
-  .chart line {
-    stroke: var(--line);
-    stroke-width: 1;
-  }
-  .chart .steps {
-    fill: none;
-    stroke: var(--accent);
-    stroke-width: 2;
-    stroke-linejoin: round;
-  }
-  .chart .wash {
-    fill: var(--accent);
-    opacity: 0.08;
-  }
-  .chart circle {
-    fill: var(--accent);
-    stroke: var(--surface);
-    stroke-width: 2;
   }
   .bench-caption {
     display: flex;
@@ -220,6 +207,13 @@ const timeline = releases.map((model, index) => ({
     margin: 0.3rem 0 0;
     color: var(--muted);
     font-size: var(--text-xs);
+  }
+  .bench-caption a {
+    color: inherit;
+    text-decoration: none;
+  }
+  .bench-caption a:hover {
+    color: var(--accent);
   }
   .timeline {
     list-style: none;
@@ -269,5 +263,9 @@ const timeline = releases.map((model, index) => ({
     flex: none;
     color: var(--muted);
     font-size: var(--text-sm);
+    text-decoration: none;
+  }
+  .who:hover {
+    color: var(--accent);
   }
 </style>
