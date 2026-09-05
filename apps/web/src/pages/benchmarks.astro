@@ -1,4 +1,5 @@
 ---
+import DataAsOf from '../components/DataAsOf.astro';
 import EmptyState from '../components/EmptyState.astro';
 import PageIntro from '../components/PageIntro.astro';
 import Base from '../layouts/Base.astro';
@@ -6,20 +7,24 @@ import {
   catalogMessage,
   fetchBenchmark,
   fetchBenchmarks,
+  fetchCatalogFreshness,
   fetchHeadlineBenchmarks,
   fetchProviders,
   formatScore,
 } from '../lib/api';
+import { heatFraction, heatRange, type HeatRange } from '../lib/heat';
 
 const selected = Astro.url.searchParams.get('b') ?? '';
 
 // Neither the headline strip nor the provider comparison depends on which benchmark is open,
-// so all three fetches run together.
-const [listed, providerResult, headlineResult] = await Promise.all([
+// so all four reads run together.
+const [listed, providerResult, headlineResult, freshnessResult] = await Promise.all([
   fetchBenchmarks(),
   fetchProviders(),
   fetchHeadlineBenchmarks(),
+  fetchCatalogFreshness(),
 ]);
+const benchmarksAsOf = freshnessResult.ok ? freshnessResult.data.benchmarks_at : null;
 const benchmarks = listed.ok ? listed.data : null;
 const listFailure = listed.ok ? null : listed.failure;
 const providers = providerResult.ok ? providerResult.data : null;
@@ -41,22 +46,12 @@ function benchmarkLink(id: string): string {
 
 // Per-column min-max for the provider matrix heat: the tint says "stronger within this
 // column", so each benchmark normalizes against its own measured spread.
-const heatRange = new Map<string, { min: number; max: number }>();
-if (providers) {
-  for (const column of providers.columns) {
-    const values = providers.items
-      .filter((row) => column.id in row.scores)
-      .map((row) => row.scores[column.id]);
-    if (values.length > 0) {
-      heatRange.set(column.id, { min: Math.min(...values), max: Math.max(...values) });
-    }
-  }
-}
+const heatRanges: Map<string, HeatRange> = providers
+  ? heatRange(providers.items, providers.columns)
+  : new Map();
 
 function heatP(columnId: string, value: number): number {
-  const range = heatRange.get(columnId);
-  if (!range || range.max === range.min) return 1;
-  return (value - range.min) / (range.max - range.min);
+  return heatFraction(heatRanges, columnId, value);
 }
 
 // The leaderboard's relative bar reads against the board's own best score.
@@ -75,6 +70,8 @@ const boardMax = detail ? Math.max(...detail.results.map((result) => result.scor
       back to its entry.
     </p>
   </PageIntro>
+
+  <DataAsOf date={benchmarksAsOf} label="Catalogue data as of" />
 
   {
     listFailure && (
