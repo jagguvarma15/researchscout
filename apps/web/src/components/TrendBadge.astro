@@ -1,26 +1,28 @@
 ---
-// The topic trend as glyph plus word - never color alone. New and rising read in the
-// accent family; steady is a plain badge; fading dims and points down. Renders nothing
-// when the build has no continuity verdict yet.
+// The topic trend as glyph plus word - never color alone, so every verdict carries a distinct
+// mark and not only a colour: new is a plus, rising and fading are arrows, steady is an equals.
+// New and rising read in the accent family; steady and fading share the quiet register. Renders
+// nothing when the build has no continuity verdict yet.
 interface Props {
   trend: string | null;
 }
 
 const { trend } = Astro.props;
-const arrow =
-  trend === 'rising'
-    ? 'M1 11 L7 5 M7 5 L7 9 M7 5 L3 5'
-    : trend === 'fading'
-      ? 'M1 1 L7 7 M7 7 L7 3 M7 7 L3 7'
-      : null;
+const glyphs: Record<string, string> = {
+  new: 'M6 2 L6 10 M2 6 L10 6',
+  rising: 'M1 11 L7 5 M7 5 L7 9 M7 5 L3 5',
+  steady: 'M2 5 L10 5 M2 8 L10 8',
+  fading: 'M1 1 L7 7 M7 7 L7 3 M7 7 L3 7',
+};
+const glyph = trend ? glyphs[trend] : null;
 ---
 
 {
   trend && (
     <span class={`trend trend-${trend}`} title="Size trend across builds">
-      {arrow && (
+      {glyph && (
         <svg viewBox="0 0 12 12" aria-hidden="true">
-          <path d={arrow} fill="none" stroke="currentColor" stroke-width="1.6" />
+          <path d={glyph} fill="none" stroke="currentColor" stroke-width="1.6" />
         </svg>
       )}
       {trend}
