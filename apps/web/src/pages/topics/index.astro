@@ -1,41 +1,32 @@
 ---
+import DataAsOf from '../../components/DataAsOf.astro';
 import EmptyState from '../../components/EmptyState.astro';
 import PageIntro from '../../components/PageIntro.astro';
 import SignalMark from '../../components/SignalMark.astro';
 import TrendBadge from '../../components/TrendBadge.astro';
+import TrendChart from '../../components/TrendChart.astro';
 import Base from '../../layouts/Base.astro';
-import { catalogMessage, fetchTopics } from '../../lib/api';
+import { catalogMessage, fetchCatalogFreshness, fetchTopics } from '../../lib/api';
 import { renderMathHTML } from '../../lib/math';
-import { sparklineGeometry } from '../../lib/sparkline';
+import { applyTopicView, controlHref, resolveSort, resolveTrend, TREND_KEYS } from '../../lib/topics-view';
 
-const result = await fetchTopics();
+const [result, freshness] = await Promise.all([fetchTopics(), fetchCatalogFreshness()]);
+const rebuiltAt = freshness.ok ? freshness.data.topics_at : null;
 
 // Server-rendered controls: the trend chips narrow, the sort pills reorder, and both live
 // in the URL so a filtered view is shareable like every other list here.
 const params = Astro.url.searchParams;
-const TREND_KEYS = ['new', 'rising', 'steady', 'fading'] as const;
-const trendParam = params.get('trend') ?? '';
-const trendFilter = (TREND_KEYS as readonly string[]).includes(trendParam) ? trendParam : '';
-const sortParam = params.get('sort') === 'size' ? 'size' : 'score';
+const trendFilter = resolveTrend(params.get('trend'));
+const sortParam = resolveSort(params.get('sort'));
 
-function controlHref(trend: string, sort: string): string {
-  const next = new URLSearchParams();
-  if (trend) next.set('trend', trend);
-  if (sort !== 'score') next.set('sort', sort);
-  const query = next.toString();
-  return query ? `/topics?${query}` : '/topics';
-}
-
-let topics = result.ok
+const prepared = result.ok
   ? result.data.map((topic) => ({
       ...topic,
-      spark: sparklineGeometry(topic.history.map((point) => point.size)),
       memberMax: Math.max(...topic.papers.map((paper) => paper.score), 0),
     }))
   : [];
-const totalTopics = topics.length;
-if (trendFilter) topics = topics.filter((topic) => topic.trend === trendFilter);
-if (sortParam === 'size') topics = [...topics].sort((a, b) => b.size - a.size);
+const totalTopics = prepared.length;
+const topics = applyTopicView(prepared, { trend: trendFilter, sort: sortParam });
 ---
 
 <Base title="Trends">
@@ -43,6 +34,11 @@ if (sortParam === 'size') topics = [...topics].sort((a, b) => b.size - a.size);
     title="Emerging topics"
     lede="Clusters of recent papers, ranked by how fast their signals are climbing."
   />
+
+  <p class="cross-link">
+    <a href="/trends">Track the benchmark frontier</a>
+  </p>
+  <DataAsOf date={rebuiltAt} label="Topics rebuilt" />
 
   {
     result.ok && totalTopics > 0 && (
@@ -100,23 +96,13 @@ if (sortParam === 'size') topics = [...topics].sort((a, b) => b.size - a.size);
               <h2 class="topic-label">
                 <a href={`/topics/${topic.id}`}>{topic.label}</a>
               </h2>
-              {topic.spark && (
-                <svg
-                  class="spark"
-                  width="100"
-                  height="28"
-                  viewBox="0 0 100 28"
-                  role="img"
-                  aria-label={`Cluster size across ${topic.history.length} builds`}
-                >
-                  <title>
-                    {topic.history.map((point) => point.size).join(', ')} papers across the
-                    last {topic.history.length} builds
-                  </title>
-                  <path d={topic.spark.area} />
-                  <polyline points={topic.spark.line} />
-                  <circle cx={topic.spark.end.x} cy={topic.spark.end.y} r="4" />
-                </svg>
+              {topic.history.length >= 2 && (
+                <TrendChart
+                  values={topic.history.map((point) => point.size)}
+                  label={`Cluster size across ${topic.history.length} builds`}
+                  titleText={`${topic.history.map((point) => point.size).join(', ')} papers across the last ${topic.history.length} builds`}
+                  ring="var(--surface-2)"
+                />
               )}
             </div>
             <p class="topic-badges">
@@ -173,6 +159,22 @@ if (sortParam === 'size') topics = [...topics].sort((a, b) => b.size - a.size);
     background: var(--accent-soft);
     color: var(--accent-ink);
   }
+  @media (max-width: 40rem) {
+    .controls .pill {
+      padding: 0.5rem 0.85rem;
+    }
+  }
+  .cross-link {
+    margin: 0.2rem 0 var(--space-4);
+    font-size: var(--text-sm);
+  }
+  .cross-link a {
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .cross-link a:hover {
+    color: var(--accent);
+  }
   .topics {
     list-style: none;
     margin: 0;
@@ -214,25 +216,9 @@ if (sortParam === 'size') topics = [...topics].sort((a, b) => b.size - a.size);
   .topic-label a:hover {
     color: var(--accent);
   }
-  /* The size history behind the trend word: line, wash, and the latest build's dot. */
-  .spark {
+  /* The size history behind the trend word sits beside the label without stretching it. */
+  .topic-head :global(.trend-chart) {
     flex: none;
-  }
-  .spark polyline {
-    fill: none;
-    stroke: var(--accent);
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .spark path {
-    fill: var(--accent);
-    opacity: 0.08;
-  }
-  .spark circle {
-    fill: var(--accent);
-    stroke: var(--surface-2);
-    stroke-width: 2;
   }
   .topic-badges {
     display: flex;
