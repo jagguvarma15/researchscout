@@ -40,7 +40,12 @@ def trends(session: Annotated[Session, Depends(get_session)]) -> TrendsResponse:
                 name=series.name,
                 scale=series.scale,
                 points=[
-                    SotaPointInfo(on=point.on, score=point.score, model_name=point.model_name)
+                    SotaPointInfo(
+                        on=point.on,
+                        score=point.score,
+                        model_name=point.model_name,
+                        model_id=point.model_id,
+                    )
                     for point in series.points
                 ],
             )
