@@ -11,14 +11,23 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   catalogMessage,
   digestQuery,
+  fetchBenchmark,
+  fetchBenchmarks,
+  fetchCatalogFreshness,
   fetchDigest,
   fetchDigests,
   fetchForYou,
+  fetchModels,
+  fetchNotableModels,
   fetchPaper,
   fetchPapers,
+  fetchProviders,
   fetchSaved,
   fetchSavedIds,
+  fetchTopic,
   fetchTopics,
+  fetchTrends,
+  formatScore,
 } from './api';
 
 function respondWith(body: unknown, ok = true, status = 200) {
@@ -191,5 +200,118 @@ describe('the digest readers', () => {
     await fetchDigest('a b');
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url.endsWith('/v1/digests/a%20b')).toBe(true);
+  });
+});
+
+describe('formatScore', () => {
+  it('shows a fraction as a one-decimal number (the page adds the percent sign)', () => {
+    expect(formatScore(0.947, 'fraction')).toBe('94.7');
+  });
+
+  it('groups a large raw score rather than multiplying it (Vending Bench was 1118187.3)', () => {
+    expect(formatScore(1118187.3, 'raw')).toBe('1,118,187');
+  });
+
+  it('keeps a small raw score to two decimals', () => {
+    expect(formatScore(87.5, 'raw')).toBe('87.50');
+  });
+});
+
+describe('fetchTrends', () => {
+  it('returns the sota and releases payload, carrying model ids on frontier points', async () => {
+    const body = {
+      sota: [
+        {
+          id: 'gpqa-diamond',
+          name: 'GPQA Diamond',
+          scale: 'fraction',
+          points: [{ on: '2025-01-01', score: 0.5, model_name: 'X', model_id: 'x-1' }],
+        },
+      ],
+      releases: [],
+    };
+    vi.stubGlobal('fetch', respondWith(body));
+    expect(await fetchTrends()).toEqual({ ok: true, data: body });
+  });
+});
+
+describe('fetchModels', () => {
+  it('always pins the page size and omits the default sort', async () => {
+    const fetchMock = respondWith({ items: [], total: 0 });
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchModels({ sort: 'released' });
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url.endsWith('/v1/models?limit=50')).toBe(true);
+  });
+
+  it('carries filters and turns a page into an offset', async () => {
+    const fetchMock = respondWith({ items: [], total: 0 });
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchModels({ organization: 'OpenAI', sort: 'downloads', page: 3 });
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toContain('organization=OpenAI');
+    expect(url).toContain('sort=downloads');
+    expect(url).toContain('offset=100');
+  });
+
+  it('keeps the items and total envelope', async () => {
+    vi.stubGlobal('fetch', respondWith({ items: [{ id: 'm1' }], total: 7 }));
+    expect(await fetchModels()).toEqual({ ok: true, data: { items: [{ id: 'm1' }], total: 7 } });
+  });
+});
+
+describe('the catalogue readers', () => {
+  it('fetchBenchmarks unwraps the items envelope', async () => {
+    vi.stubGlobal('fetch', respondWith({ items: [{ id: 'mmlu' }] }));
+    expect(await fetchBenchmarks()).toEqual({ ok: true, data: [{ id: 'mmlu' }] });
+  });
+
+  it('fetchBenchmark encodes the id and asks for a leaderboard page', async () => {
+    const fetchMock = respondWith({ id: 'a b', results: [] });
+    vi.stubGlobal('fetch', fetchMock);
+    await fetchBenchmark('a b');
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url.endsWith('/v1/benchmarks/a%20b?limit=50')).toBe(true);
+  });
+
+  it('fetchProviders returns the columns-and-items table', async () => {
+    const table = { columns: [{ id: 'mmlu', name: 'MMLU', scale: 'fraction' }], items: [] };
+    vi.stubGlobal('fetch', respondWith(table));
+    expect(await fetchProviders()).toEqual({ ok: true, data: table });
+  });
+
+  it('fetchNotableModels unwraps the items envelope', async () => {
+    vi.stubGlobal('fetch', respondWith({ items: [{ id: 'x' }] }));
+    expect(await fetchNotableModels()).toEqual({ ok: true, data: [{ id: 'x' }] });
+  });
+});
+
+describe('fetchTopic', () => {
+  it('returns a result on success, not a bare object', async () => {
+    vi.stubGlobal('fetch', respondWith({ id: 5, label: 'Diffusion' }));
+    expect(await fetchTopic(5)).toEqual({ ok: true, data: { id: 5, label: 'Diffusion' } });
+  });
+
+  it('reports a 404 so a missing topic is not confused with an unreachable API', async () => {
+    vi.stubGlobal('fetch', respondWith(null, false, 404));
+    expect(await fetchTopic(9)).toEqual({ ok: false, failure: { status: 404 } });
+  });
+
+  it('reports an unreachable API with a null status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('down')));
+    expect(await fetchTopic(9)).toEqual({ ok: false, failure: { status: null } });
+  });
+});
+
+describe('fetchCatalogFreshness', () => {
+  it('returns the freshness payload', async () => {
+    const body = {
+      models_at: '2026-09-01T00:00:00Z',
+      benchmarks_at: '2026-09-02T00:00:00Z',
+      topics_at: null,
+      as_of: '2026-09-02T00:00:00Z',
+    };
+    vi.stubGlobal('fetch', respondWith(body));
+    expect(await fetchCatalogFreshness()).toEqual({ ok: true, data: body });
   });
 });
