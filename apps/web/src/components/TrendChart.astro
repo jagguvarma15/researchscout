@@ -1,0 +1,146 @@
+---
+// One chart for the whole trends family: the topic-size sparkline (index and detail) and the
+// benchmark frontier step-line. The three pages drew the same scaffold - baseline, area wash,
+// stroke, dots - three times; this is that scaffold once, driven by geometry from lib/sparkline.
+//
+// mode selects sparkline vs step geometry. points[] draws one dot per value: a dot with an href
+// is wrapped in a link (with a larger transparent hit circle for a comfortable tap target), a dot
+// with a title carries a tooltip. pointStyle 'quiet' is the ring-only build dot; the end dot is
+// always the solid emphasis dot. ring overrides the solid-dot ring colour (the index uses
+// --surface-2 where the others use --surface).
+import { sparklineGeometry, stepLineGeometry } from '../lib/sparkline';
+
+interface ChartPoint {
+  href?: string;
+  title?: string;
+  ariaLabel?: string;
+}
+
+interface Props {
+  values: number[];
+  mode?: 'line' | 'step';
+  width?: number;
+  height?: number;
+  pad?: number;
+  baseline?: boolean;
+  label: string;
+  titleText?: string;
+  points?: ChartPoint[];
+  pointStyle?: 'solid' | 'quiet';
+  dotRadius?: number;
+  endDot?: boolean;
+  ring?: string;
+  class?: string;
+}
+
+const {
+  values,
+  mode = 'line',
+  width = 100,
+  height = 28,
+  pad = 4,
+  baseline = false,
+  label,
+  titleText,
+  points,
+  pointStyle = 'solid',
+  dotRadius = 4,
+  endDot = true,
+  ring,
+  class: className,
+} = Astro.props;
+
+const spark = mode === 'line' ? sparklineGeometry(values, width, height, pad) : null;
+const step = mode === 'step' ? stepLineGeometry(values, width, height, pad) : null;
+const geo = spark ?? step;
+const baselineY = height - 2;
+const interactive = (points ?? []).some((point) => point.href);
+const hitRadius = dotRadius + 6;
+---
+
+{
+  geo && (
+    <svg
+      class:list={['trend-chart', `mode-${mode}`, `dot-${pointStyle}`, className]}
+      style={ring ? `--chart-ring:${ring}` : undefined}
+      width={width}
+      height={height}
+      viewBox={`0 0 ${width} ${height}`}
+      role={interactive ? 'group' : 'img'}
+      aria-label={label}
+    >
+      {titleText && <title>{titleText}</title>}
+      {baseline && (
+        <line class="baseline" x1={pad} y1={baselineY} x2={width - pad} y2={baselineY} />
+      )}
+      <path class="area" d={geo.area} />
+      {spark && <polyline class="stroke" points={spark.line} />}
+      {step && <path class="stroke" d={step.path} />}
+      {points &&
+        geo.points.map((coord, index) => {
+          const point = points[index];
+          if (!point) return null;
+          const dot = (
+            <circle class="dot point" cx={coord.x} cy={coord.y} r={dotRadius}>
+              {point.title && <title>{point.title}</title>}
+            </circle>
+          );
+          return point.href ? (
+            <a href={point.href} aria-label={point.ariaLabel}>
+              <circle class="hit" cx={coord.x} cy={coord.y} r={hitRadius} />
+              {dot}
+            </a>
+          ) : (
+            dot
+          );
+        })}
+      {endDot && <circle class="dot end" cx={geo.end.x} cy={geo.end.y} r={4} />}
+    </svg>
+  )
+}
+
+<style>
+  .trend-chart {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
+  .baseline {
+    stroke: var(--line);
+    stroke-width: 1;
+  }
+  .area {
+    fill: var(--accent);
+    opacity: 0.08;
+  }
+  .stroke {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2;
+    stroke-linejoin: round;
+  }
+  .mode-line .stroke {
+    stroke-linecap: round;
+  }
+  .dot {
+    fill: var(--accent);
+    stroke: var(--chart-ring, var(--surface));
+    stroke-width: 2;
+  }
+  /* Quiet build dots stay out of the way until hovered so the line remains the story. */
+  .dot-quiet .point {
+    fill: var(--surface);
+    stroke: var(--accent);
+    stroke-width: 1.5;
+    opacity: 0.6;
+  }
+  .dot-quiet a:hover .point,
+  .dot-quiet a:focus-visible .point {
+    fill: var(--accent);
+    opacity: 1;
+  }
+  /* A larger, invisible target so a build or advance dot is comfortable to tap on a phone. */
+  .hit {
+    fill: transparent;
+  }
+</style>
