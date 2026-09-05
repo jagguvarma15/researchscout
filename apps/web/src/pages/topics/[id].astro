@@ -1,50 +1,60 @@
 ---
-// The topic page: the endpoint has existed since the topics API landed, with no page
-// consuming it. The payload carries id, title, and score per member, so members render
-// as a ranked list in the digest register - full feed rows would need the endpoint to
-// serve complete paper summaries.
+// The topic page: members carry their field and publish date (joined on the detail read) and
+// render as a ranked list in the digest register. Each history build links into the feed for
+// its window through the shared chart.
 import { Icon } from 'astro-icon/components';
 import EmptyState from '../../components/EmptyState.astro';
 import PageIntro from '../../components/PageIntro.astro';
 import SignalMark from '../../components/SignalMark.astro';
 import TrendBadge from '../../components/TrendBadge.astro';
+import TrendChart from '../../components/TrendChart.astro';
 import Base from '../../layouts/Base.astro';
-import { fetchTopic, formatDate } from '../../lib/api';
+import { catalogMessage, fetchTopic, formatDate } from '../../lib/api';
 import { renderMathHTML } from '../../lib/math';
-import { sparklineGeometry } from '../../lib/sparkline';
+import { windowHref } from '../../lib/frontier';
 
 const rawId = Astro.params.id ?? '';
 const topicId = /^\d+$/.test(rawId) ? Number(rawId) : null;
-const topic = topicId === null ? null : await fetchTopic(topicId);
-if (topic === null) {
+const result = topicId === null ? null : await fetchTopic(topicId);
+const topic = result?.ok ? result.data : null;
+// A missing id and a genuine 404 are "not found" (a real 404 status); any other failure is the
+// API being unreachable, which renders an error with a retry rather than claiming the topic
+// does not exist - the two were indistinguishable before.
+const failure = result && !result.ok && result.failure.status !== 404 ? result.failure : null;
+const notFound = topic === null && failure === null;
+if (notFound) {
   Astro.response.status = 404;
 }
 
-const spark = topic ? sparklineGeometry(topic.history.map((point) => point.size), 640, 120, 8) : null;
+const values = topic ? topic.history.map((point) => point.size) : [];
 const firstBuilt = topic?.history[0]?.built_at ?? null;
 const lastBuilt = topic?.history[topic.history.length - 1]?.built_at ?? null;
 const memberMax = topic ? Math.max(...topic.papers.map((paper) => paper.score), 0) : 0;
 
-// Each build point links into the feed windowed back to that build's day, so "what did
-// this topic look like then" is one click. Clamped to the API's window bounds.
-function windowHref(builtAt: string): string {
-  const age = Math.ceil((Date.now() - new Date(builtAt).getTime()) / 86_400_000);
-  return `/?days=${Math.min(Math.max(age, 1), 365)}`;
-}
-
-const builds =
-  topic && spark
-    ? topic.history.map((point, index) => ({
-        ...point,
-        x: spark.points[index].x,
-        y: spark.points[index].y,
-      }))
-    : [];
+// Each build carries the link into the feed for its window, plus a tooltip and its own label;
+// the shared chart places the dots from the same geometry it draws the line with.
+const buildPoints = topic
+  ? topic.history.map((point) => ({
+      href: windowHref(point.built_at),
+      title: `${point.size} papers - ${formatDate(point.built_at)}`,
+      ariaLabel: `${point.size} papers at the ${formatDate(point.built_at)} build - open the feed for that window`,
+    }))
+  : [];
 ---
 
-<Base title={topic?.label ?? 'Not found'}>
+<Base title={topic?.label ?? (failure ? 'Topic unavailable' : 'Not found')}>
   {
-    topic === null ? (
+    failure ? (
+      <Fragment>
+        <PageIntro title="Topic unavailable" />
+        <EmptyState
+          kind="error"
+          icon="lucide:cloud-off"
+          message={catalogMessage(failure, 'this topic')}
+          action={{ href: `/topics/${rawId}`, label: 'Retry' }}
+        />
+      </Fragment>
+    ) : topic === null ? (
       <Fragment>
         <PageIntro title="Topic not found" />
         <EmptyState
@@ -65,35 +75,21 @@ const builds =
             {topic.size} paper{topic.size === 1 ? '' : 's'}
           </span>
         </p>
-        {spark && (
+        {topic.history.length >= 2 && (
           <figure class="history">
-            <svg
-              class="chart"
-              width="640"
-              height="120"
-              viewBox="0 0 640 120"
-              role="group"
-              aria-label={`Cluster size across ${topic.history.length} builds - each point opens the feed for its window`}
-            >
-              <title>
-                {topic.history.map((point) => point.size).join(', ')} papers across the last
-                {' '}{topic.history.length} builds
-              </title>
-              <line x1="8" y1="112" x2="632" y2="112" />
-              <path d={spark.area} />
-              <polyline points={spark.line} />
-              {builds.map((build) => (
-                <a
-                  href={windowHref(build.built_at)}
-                  aria-label={`${build.size} papers at the ${formatDate(build.built_at)} build - open the feed for that window`}
-                >
-                  <circle class="build" cx={build.x} cy={build.y} r="5">
-                    <title>{`${build.size} papers - ${formatDate(build.built_at)}`}</title>
-                  </circle>
-                </a>
-              ))}
-              <circle cx={spark.end.x} cy={spark.end.y} r="4" />
-            </svg>
+            <TrendChart
+              mode="line"
+              values={values}
+              width={640}
+              height={120}
+              pad={8}
+              baseline
+              pointStyle="quiet"
+              dotRadius={5}
+              points={buildPoints}
+              label={`Cluster size across ${topic.history.length} builds - each point opens the feed for its window`}
+              titleText={`${values.join(', ')} papers across the last ${topic.history.length} builds`}
+            />
             {firstBuilt && lastBuilt && (
               <figcaption class="chart-caption">
                 <span>{formatDate(firstBuilt)}</span>
@@ -108,6 +104,12 @@ const builds =
           {topic.papers.map((paper) => (
             <li>
               <a href={`/papers/${paper.paper_id}`} set:html={renderMathHTML(paper.title)} />
+              {(paper.primary_category || paper.published_at) && (
+                <span class="member-meta">
+                  {paper.primary_category && <span class="badge">{paper.primary_category}</span>}
+                  {paper.published_at && <span class="badge">{formatDate(paper.published_at)}</span>}
+                </span>
+              )}
               <SignalMark
                 score={paper.score}
                 max={memberMax}
@@ -144,43 +146,6 @@ const builds =
   .history {
     margin: var(--space-5) 0 0;
     max-width: 40rem;
-  }
-  .chart {
-    max-width: 100%;
-    height: auto;
-    display: block;
-  }
-  .chart line {
-    stroke: var(--line);
-    stroke-width: 1;
-  }
-  .chart polyline {
-    fill: none;
-    stroke: var(--accent);
-    stroke-width: 2;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-  }
-  .chart path {
-    fill: var(--accent);
-    opacity: 0.08;
-  }
-  .chart circle {
-    fill: var(--accent);
-    stroke: var(--surface);
-    stroke-width: 2;
-  }
-  /* Every build is a target now; quiet until hovered so the line stays the story. */
-  .chart .build {
-    fill: var(--surface);
-    stroke: var(--accent);
-    stroke-width: 1.5;
-    opacity: 0.6;
-  }
-  .chart a:hover .build,
-  .chart a:focus-visible .build {
-    fill: var(--accent);
-    opacity: 1;
   }
   .chart-caption {
     display: flex;
@@ -228,7 +193,19 @@ const builds =
   .members a:hover {
     color: var(--accent);
   }
+  /* A member's field and publish date, joined on the detail read. */
+  .member-meta {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
   .back {
     margin: var(--space-5) 0 0;
+  }
+  @media (max-width: 40rem) {
+    /* Give the title the full row so the meta chips and the meter wrap comfortably below it. */
+    .members a {
+      min-width: 100%;
+    }
   }
 </style>
