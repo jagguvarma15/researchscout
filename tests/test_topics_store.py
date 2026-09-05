@@ -4,7 +4,23 @@ import pytest
 from sqlalchemy.orm import Session
 
 from researchscout.cluster import Member, Topic
-from researchscout.store.topics import classify_trend, list_topics, replace_topics
+from researchscout.schema import Author, Paper
+from researchscout.store.papers import upsert_paper
+from researchscout.store.topics import classify_trend, list_topics, paper_meta, replace_topics
+
+
+def _paper(pid: str) -> Paper:
+    return Paper(
+        id=pid,
+        external_ids={"arxiv": pid.split(":")[-1]},
+        title="T",
+        abstract="a",
+        authors=[Author(name="A")],
+        categories=["cs.LG"],
+        primary_category="cs.LG",
+        published_at=datetime(2026, 8, 20, tzinfo=UTC),
+        source="arxiv",
+    )
 
 
 def _topic(label: str, centroid: list[float], *, size: int = 3, score: float = 1.0) -> Topic:
@@ -23,6 +39,28 @@ def test_classify_trend_transitions() -> None:
     assert classify_trend([{"size": 3}, {"size": 5}]) == "rising"
     assert classify_trend([{"size": 5}, {"size": 5}]) == "steady"
     assert classify_trend([{"size": 5}, {"size": 2}]) == "fading"
+
+
+def test_classify_trend_reads_the_full_history() -> None:
+    # A steady climb reads rising; its mirror reads fading.
+    assert classify_trend([{"size": s} for s in [2, 3, 4, 5, 6, 7]]) == "rising"
+    assert classify_trend([{"size": s} for s in [7, 6, 5, 4, 3, 2]]) == "fading"
+    # A one-paper wobble around a level is steady, not a build-to-build flip (the last-two bug).
+    assert classify_trend([{"size": s} for s in [5, 4, 5, 4, 5, 4]]) == "steady"
+    # A long plateau with a single closing uptick does not flip to rising.
+    assert classify_trend([{"size": s} for s in [8, 8, 8, 8, 8, 9]]) == "steady"
+
+
+@pytest.mark.integration
+def test_paper_meta_returns_category_and_date(session: Session) -> None:
+    upsert_paper(session, _paper("arxiv:2608.00001"))
+    session.flush()
+    meta = paper_meta(session, ["arxiv:2608.00001", "arxiv:missing"])
+    # A member no longer in the corpus simply has no entry.
+    assert "arxiv:missing" not in meta
+    entry = meta["arxiv:2608.00001"]
+    assert entry.primary_category == "cs.LG"
+    assert entry.published_at == datetime(2026, 8, 20, tzinfo=UTC)
 
 
 @pytest.mark.integration
