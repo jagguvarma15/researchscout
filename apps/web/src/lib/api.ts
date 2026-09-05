@@ -221,6 +221,8 @@ export interface SotaPoint {
   on: string;
   score: number;
   model_name: string;
+  /* The catalogue id of the model that set the record, or null when it is not catalogued. */
+  model_id?: string | null;
 }
 
 export interface SotaSeries {
@@ -237,6 +239,19 @@ export interface TrendsData {
 
 export async function fetchTrends(): Promise<CatalogResult<TrendsData>> {
   return readCatalog<TrendsData>('/v1/trends');
+}
+
+// When the catalogue and topics were last rebuilt — the trends-family "data as of" line.
+export interface CatalogFreshness {
+  models_at: string | null;
+  benchmarks_at: string | null;
+  topics_at: string | null;
+  /* The newer of the model and benchmark refreshes — a single "catalogue data as of" moment. */
+  as_of: string | null;
+}
+
+export async function fetchCatalogFreshness(): Promise<CatalogResult<CatalogFreshness>> {
+  return readCatalog<CatalogFreshness>('/v1/catalog/freshness');
 }
 
 // A data source as /about lists it. The attribution fields are null together when a source
@@ -349,6 +364,8 @@ export interface SystemStatus {
   llm?: LlmStats | null;
   // For You render latency over the last week; null when nothing rendered (or an older API).
   feed?: FeedStats | null;
+  // When the catalogue and topics were last rebuilt; null when empty (or an older API).
+  catalog?: CatalogFreshness | null;
 }
 
 export async function fetchSystemStatus(): Promise<SystemStatus | null> {
@@ -690,6 +707,9 @@ export interface TopicPaper {
   paper_id: string;
   title: string;
   score: number;
+  /* Filled on the topic-detail read; absent on the index list and for departed members. */
+  primary_category?: string | null;
+  published_at?: string | null;
 }
 
 export interface TopicHistoryPoint {
@@ -714,13 +734,7 @@ export async function fetchTopics(): Promise<CatalogResult<TopicDetail[]>> {
   return result.ok ? { ok: true, data: result.data.items } : result;
 }
 
-export async function fetchTopic(id: number): Promise<TopicDetail | null> {
-  try {
-    const response = await fetch(`${API_URL}/v1/topics/${id}`, { headers: apiHeaders() });
-    if (!response.ok) return null;
-    return (await response.json()) as TopicDetail;
-  } catch {
-    return null;
-  }
+export async function fetchTopic(id: number): Promise<CatalogResult<TopicDetail>> {
+  return readCatalog<TopicDetail>(`/v1/topics/${id}`);
 }
 
