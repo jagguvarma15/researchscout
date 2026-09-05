@@ -247,14 +247,18 @@ async function shootSurfaces(browser, details) {
     ['desktop-digest-issue-dark', details.digest, { width: 1280, height: 900 }, 'dark'],
     ['phone-digest-issue', details.digest, { width: 390, height: 844 }, null],
     ['desktop-topic-detail', details.topic, { width: 1280, height: 900 }, null],
+    ['phone-topic-detail', details.topic, { width: 390, height: 844 }, null],
     ['desktop-benchmarks', '/benchmarks', { width: 1280, height: 1100 }, null],
     ['desktop-benchmarks-dark', '/benchmarks', { width: 1280, height: 1100 }, 'dark'],
+    ['phone-benchmarks', '/benchmarks', { width: 390, height: 900 }, null],
     ['desktop-models-sorted', '/models?sort=downloads', { width: 1280, height: 900 }, null],
+    ['phone-models', '/models?sort=downloads', { width: 390, height: 900 }, null],
     ['desktop-saved', '/saved', { width: 1280, height: 900 }, null],
     ['desktop-search', '/search?q=attention', { width: 1280, height: 900 }, null],
     ['phone-search', '/search?q=attention', { width: 390, height: 844 }, null],
     ['desktop-frontier', '/trends', { width: 1280, height: 1000 }, null],
     ['desktop-frontier-dark', '/trends', { width: 1280, height: 1000 }, 'dark'],
+    ['phone-frontier', '/trends', { width: 390, height: 844 }, null],
   ];
   for (const [name, path, viewport, theme] of shots) {
     if (!path) {
