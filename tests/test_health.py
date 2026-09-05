@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from researchscout.config import Settings
 from researchscout.health import (
     check_auth_posture,
+    check_catalog_freshness,
     check_corpus_freshness,
     check_hung_runs,
     check_pipeline_runs,
@@ -18,6 +19,8 @@ from researchscout.health import (
     run_health_checks,
     summarize,
 )
+from researchscout.store import catalog
+from researchscout.store.catalog import ModelUpsert
 from researchscout.store.runs import record_run, record_task_started
 
 NY = ZoneInfo("America/New_York")
@@ -222,6 +225,7 @@ def test_run_health_checks_reports_every_check(session: Session) -> None:
         "corpus_freshness",
         "hung_run",
         "storage",
+        "catalog_freshness",
         "auth_posture",
     ]
 
@@ -230,3 +234,21 @@ def test_run_health_checks_reports_every_check(session: Session) -> None:
 def test_corpus_freshness_skips_on_an_interval_schedule(session: Session) -> None:
     check = check_corpus_freshness(session, Settings(scheduler_pipeline_at=""), datetime.now(UTC))
     assert check.status == "skipped"
+
+
+@pytest.mark.integration
+def test_catalog_freshness_skips_warns_and_passes(session: Session) -> None:
+    now = datetime.now(UTC)
+    # An empty catalogue has nothing to be stale about.
+    assert check_catalog_freshness(session, now).status == "skipped"
+
+    catalog.upsert_models(
+        session, [ModelUpsert(name="M", organization="OpenAI", source="epoch_ai")]
+    )
+    session.commit()
+
+    # upsert stamps refreshed_at at write time, so it reads fresh now and stale four days on.
+    assert check_catalog_freshness(session, now + timedelta(hours=1)).status == "ok"
+    warn = check_catalog_freshness(session, now + timedelta(days=4))
+    assert warn.status == "warn"
+    assert "refreshed" in warn.detail
