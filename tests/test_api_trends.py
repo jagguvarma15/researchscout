@@ -68,6 +68,15 @@ def test_trends_reports_frontier_and_releases(session: Session) -> None:
     assert releases == ["Second Frontier", "First Frontier"]  # newest first
 
 
+def test_frontier_points_carry_the_model_id(session: Session) -> None:
+    _seed(session)
+    body = _client(session).get("/v1/trends").json()
+    points = {point["model_name"]: point for point in body["sota"][0]["points"]}
+    # The advance-setters are in the catalogue, so each point links to its model page.
+    assert points["First Frontier"]["model_id"] == catalog.slug("First Frontier")
+    assert points["Second Frontier"]["model_id"] == catalog.slug("Second Frontier")
+
+
 def test_trends_empty_catalogue(session: Session) -> None:
     body = _client(session).get("/v1/trends").json()
     assert body == {"sota": [], "releases": []}
