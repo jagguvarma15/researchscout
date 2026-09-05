@@ -680,6 +680,63 @@ def test_headline_benchmarks_take_the_best_curated_score(session: Session) -> No
     assert items[0].result_count == 3
 
 
+def test_sota_series_carries_the_model_id(session: Session) -> None:
+    catalog.upsert_models(
+        session,
+        [
+            ModelUpsert(
+                name="Early",
+                organization="OpenAI",
+                publication_date=date(2026, 1, 1),
+                source="epoch_ai",
+            ),
+            ModelUpsert(
+                name="Later",
+                organization="Anthropic",
+                publication_date=date(2026, 3, 1),
+                source="epoch_ai",
+            ),
+        ],
+    )
+    session.flush()
+    known = catalog.known_model_ids(session)
+    catalog.replace_benchmark_results(
+        session,
+        "MMLU",
+        None,
+        [
+            ("Early", 0.70, date(2026, 1, 2), "Epoch"),
+            ("Later", 0.90, date(2026, 3, 2), "Epoch"),
+            ("Uncatalogued", 0.95, date(2026, 4, 1), "Epoch"),
+        ],
+        known,
+    )
+    session.flush()
+
+    config = parse_providers({"benchmarks": ["mmlu"], "providers": [{"name": "OpenAI"}]})
+    points = {point.model_name: point for point in catalog.sota_series(session, config)[0].points}
+    assert points["Early"].model_id == catalog.slug("Early")
+    assert points["Later"].model_id == catalog.slug("Later")
+    # A frontier point set by a model the catalogue does not carry has no model id.
+    assert points["Uncatalogued"].model_id is None
+
+
+def test_catalog_freshness_reports_the_latest_refresh(session: Session) -> None:
+    empty = catalog.catalog_freshness(session)
+    assert (empty.models_at, empty.benchmarks_at, empty.topics_at) == (None, None, None)
+
+    catalog.upsert_models(
+        session, [ModelUpsert(name="M", organization="OpenAI", source="epoch_ai")]
+    )
+    session.flush()
+
+    fresh = catalog.catalog_freshness(session)
+    assert fresh.models_at is not None
+    # No benchmarks or topics were built, so their timestamps stay null.
+    assert fresh.benchmarks_at is None
+    assert fresh.topics_at is None
+
+
 def test_any_upstream_failure_shape_is_caught_per_source(
     session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
