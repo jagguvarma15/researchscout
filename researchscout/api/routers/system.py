@@ -24,6 +24,7 @@ from researchscout import __version__
 from researchscout.api.deps import get_session
 from researchscout.api.schemas import (
     AskStats,
+    CatalogFreshnessInfo,
     FeedStats,
     HealthCheckInfo,
     LlmPurposeCalls,
@@ -36,6 +37,7 @@ from researchscout.config import get_settings
 from researchscout.health import run_health_checks
 from researchscout.schedule import next_run, parse_times, previous_run
 from researchscout.store.ask_metrics import ask_summary, recent_notfound
+from researchscout.store.catalog import catalog_freshness
 from researchscout.store.feed_metrics import feed_summary
 from researchscout.store.llm_usage import usage_summary
 from researchscout.store.models import PaperRow, SchedulerRunRow
@@ -186,6 +188,18 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
         if feed_stats.requests > 0
         else None
     )
+    freshness = catalog_freshness(session)
+    stamps = [at for at in (freshness.models_at, freshness.benchmarks_at) if at is not None]
+    catalog = (
+        CatalogFreshnessInfo(
+            models_at=freshness.models_at,
+            benchmarks_at=freshness.benchmarks_at,
+            topics_at=freshness.topics_at,
+            as_of=max(stamps) if stamps else None,
+        )
+        if stamps or freshness.topics_at is not None
+        else None
+    )
     return SystemStatus(
         version=__version__,
         build_sha=settings.build_sha or None,
@@ -202,4 +216,5 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
         ask=ask,
         llm=llm,
         feed=feed,
+        catalog=catalog,
     )
