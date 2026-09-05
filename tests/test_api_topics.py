@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -6,6 +7,7 @@ from fastapi.testclient import TestClient
 import researchscout.api.routers.topics as topics_router
 from researchscout.api.deps import get_session
 from researchscout.api.main import create_app
+from researchscout.store.topics import PaperMeta
 
 
 class FakeTopicRow:
@@ -41,9 +43,30 @@ def test_topics_index_carries_the_size_history(monkeypatch: pytest.MonkeyPatch) 
 
 def test_topic_detail(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(topics_router, "get_topic", lambda *a: FakeTopicRow())
+    monkeypatch.setattr(topics_router, "paper_meta", lambda *a: {})
     response = _client().get("/v1/topics/7")
     assert response.status_code == 200
-    assert response.json()["history"][-1]["size"] == 14
+    body = response.json()
+    assert body["history"][-1]["size"] == 14
+    # No metadata for the member -> the chip fields serialize as null.
+    assert body["papers"][0]["primary_category"] is None
+    assert body["papers"][0]["published_at"] is None
+
+
+def test_topic_detail_enriches_members(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(topics_router, "get_topic", lambda *a: FakeTopicRow())
+    monkeypatch.setattr(
+        topics_router,
+        "paper_meta",
+        lambda *a: {
+            "arxiv:2608.11402": PaperMeta(
+                primary_category="cs.LG", published_at=datetime(2026, 8, 20, tzinfo=UTC)
+            )
+        },
+    )
+    member = _client().get("/v1/topics/7").json()["papers"][0]
+    assert member["primary_category"] == "cs.LG"
+    assert member["published_at"].startswith("2026-08-20")
 
 
 def test_topic_detail_404(monkeypatch: pytest.MonkeyPatch) -> None:
