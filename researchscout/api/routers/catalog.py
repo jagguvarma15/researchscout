@@ -20,6 +20,7 @@ from researchscout.api.schemas import (
     BenchmarkList,
     BenchmarkResultSummary,
     BenchmarkSummary,
+    CatalogFreshnessInfo,
     HeadlineBenchmarkInfo,
     HeadlineBenchmarkList,
     ModelList,
@@ -33,6 +34,25 @@ from researchscout.providers import load_providers
 from researchscout.store import catalog
 
 router = APIRouter(tags=["catalog"])
+
+
+@router.get("/catalog/freshness")
+def catalog_freshness(
+    session: Annotated[Session, Depends(get_session)],
+) -> CatalogFreshnessInfo:
+    """When the model catalogue, the benchmarks, and the topics were last rebuilt.
+
+    The one source the trends-family pages read for their "data as of" line; ``as_of`` is the
+    newer of the model and benchmark refreshes, so a page can show a single moment.
+    """
+    freshness = catalog.catalog_freshness(session)
+    stamps = [at for at in (freshness.models_at, freshness.benchmarks_at) if at is not None]
+    return CatalogFreshnessInfo(
+        models_at=freshness.models_at,
+        benchmarks_at=freshness.benchmarks_at,
+        topics_at=freshness.topics_at,
+        as_of=max(stamps) if stamps else None,
+    )
 
 
 @router.get("/models")
