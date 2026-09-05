@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from researchscout.config import Settings
 from researchscout.llm.errors import is_quota_note
 from researchscout.schedule import parse_times
+from researchscout.store.catalog import catalog_freshness
 from researchscout.store.models import PaperRow, RawItemRow, SignalRow
 from researchscout.store.runs import last_ok_finish, open_runs_older_than, recent_finished_by_task
 
@@ -34,6 +35,7 @@ _HUNG_AFTER = timedelta(hours=6)
 _STREAK_LEN = 3
 _RAW_ROWS_CEILING = 500_000
 _SIGNAL_ROWS_CEILING = 5_000_000
+_CATALOG_STALE_AFTER = timedelta(days=3)
 
 
 @dataclass(frozen=True)
@@ -169,6 +171,26 @@ def check_storage(session: Session, settings: Settings, now: datetime) -> Health
     return HealthCheck("storage", "ok", detail)
 
 
+def check_catalog_freshness(session: Session, now: datetime) -> HealthCheck:
+    """Warn (never fail) when the model/benchmark catalogue has not refreshed lately.
+
+    The catalogue task runs daily and every trends-family page reads it, so a persistently
+    failing Epoch or Hugging Face fetch would otherwise serve stale standings with nothing
+    visible. Warn rather than fail, matching ``check_corpus_freshness``: stale reference data
+    is a degradation, not an outage, and it carries no urgency of its own.
+    """
+    freshness = catalog_freshness(session)
+    stamps = [at for at in (freshness.models_at, freshness.benchmarks_at) if at is not None]
+    if not stamps:
+        return HealthCheck("catalog_freshness", "skipped", "catalogue empty")
+    age = now - max(stamps)
+    if age > _CATALOG_STALE_AFTER:
+        return HealthCheck("catalog_freshness", "warn", f"catalogue last refreshed {age.days}d ago")
+    return HealthCheck(
+        "catalog_freshness", "ok", f"catalogue refreshed {age.total_seconds() / 3600:.1f}h ago"
+    )
+
+
 def check_auth_posture(settings: Settings) -> HealthCheck:
     """Is the identity configuration coherent for how this install is deployed?
 
@@ -203,6 +225,7 @@ def run_health_checks(
         check_corpus_freshness(session, settings, now),
         check_hung_runs(session, now),
         check_storage(session, settings, now),
+        check_catalog_freshness(session, now),
         check_auth_posture(settings),
     ]
 
