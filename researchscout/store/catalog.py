@@ -30,6 +30,7 @@ from researchscout.store.models import (
     BenchmarkResultRow,
     BenchmarkRow,
     PaperRow,
+    TopicRow,
 )
 
 _PUNCTUATION = re.compile(r"[^a-z0-9]+")
@@ -629,6 +630,9 @@ class SotaPoint:
     on: date_type
     score: float
     model_name: str
+    #: The catalogue id of the model that set it, when that model is in the catalogue - null
+    #: when the frontier row names a model the catalogue does not carry (the frontier is global).
+    model_id: str | None
 
 
 @dataclass(frozen=True)
@@ -655,6 +659,7 @@ def sota_series(session: Session, config: ProviderConfig) -> list[SotaSeries]:
         select(
             BenchmarkResultRow.benchmark_id,
             BenchmarkResultRow.model_name,
+            BenchmarkResultRow.model_id,
             BenchmarkResultRow.score,
             BenchmarkResultRow.measured_on,
             BenchmarkRow.name.label("benchmark_name"),
@@ -683,13 +688,42 @@ def sota_series(session: Session, config: ProviderConfig) -> list[SotaSeries]:
         if best is None or row.score > best:
             frontier[row.benchmark_id] = row.score
             series.points.append(
-                SotaPoint(on=row.measured_on, score=row.score, model_name=row.model_name)
+                SotaPoint(
+                    on=row.measured_on,
+                    score=row.score,
+                    model_name=row.model_name,
+                    model_id=row.model_id,
+                )
             )
     return [
         grouped[benchmark_id]
         for benchmark_id in wanted
         if benchmark_id in grouped and len(grouped[benchmark_id].points) >= 2
     ]
+
+
+@dataclass(frozen=True)
+class CatalogFreshness:
+    """When each dataset the trends family reads was last rebuilt - the "data as of" line."""
+
+    models_at: datetime | None
+    benchmarks_at: datetime | None
+    topics_at: datetime | None
+
+
+def catalog_freshness(session: Session) -> CatalogFreshness:
+    """The most recent refresh of the model catalogue, the benchmarks, and the topics.
+
+    The model and benchmark rows carry the timestamp the daily catalogue task stamps; the
+    topics table's build time is the wholesale rebuild's own clock. Three ``max()`` reads,
+    database-only, so the status endpoint and the pages can call it on a page load.
+    """
+    models_at = session.execute(select(func.max(AiModelRow.refreshed_at))).scalar_one_or_none()
+    benchmarks_at = session.execute(
+        select(func.max(BenchmarkRow.refreshed_at))
+    ).scalar_one_or_none()
+    topics_at = session.execute(select(func.max(TopicRow.built_at))).scalar_one_or_none()
+    return CatalogFreshness(models_at=models_at, benchmarks_at=benchmarks_at, topics_at=topics_at)
 
 
 def provider_leaders(
