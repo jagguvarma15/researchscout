@@ -1,0 +1,30 @@
+---
+// A muted "data as of" line for the trends-family pages. Renders nothing when the date is null,
+// so a page whose datasets have never been built simply omits it. The label lets the same
+// component say "Catalogue data as of ..." on the landscape pages and "Topics rebuilt ..." on
+// the topics list.
+import { formatDate } from '../lib/api';
+
+interface Props {
+  date: string | null | undefined;
+  label?: string;
+}
+
+const { date, label = 'Catalogue data as of' } = Astro.props;
+---
+
+{
+  date && (
+    <p class="data-as-of" role="status">
+      {label} {formatDate(date)}
+    </p>
+  )
+}
+
+<style>
+  .data-as-of {
+    margin: 0.4rem 0 0;
+    color: var(--muted);
+    font-size: var(--text-xs);
+  }
+</style>
