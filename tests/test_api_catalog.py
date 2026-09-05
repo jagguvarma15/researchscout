@@ -320,3 +320,24 @@ def test_headline_is_a_route_not_a_benchmark_id(monkeypatch: pytest.MonkeyPatch)
     assert item["id"] == "gpqa-diamond"
     assert item["best_score"] == 0.93
     assert item["provider"] == "Alibaba"
+
+
+def test_catalog_freshness_route(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import UTC, datetime
+
+    from researchscout.store.catalog import CatalogFreshness
+
+    monkeypatch.setattr(
+        catalog_router.catalog,
+        "catalog_freshness",
+        lambda session: CatalogFreshness(
+            models_at=datetime(2026, 9, 1, tzinfo=UTC),
+            benchmarks_at=datetime(2026, 9, 2, tzinfo=UTC),
+            topics_at=None,
+        ),
+    )
+    body = _client().get("/v1/catalog/freshness").json()
+    # as_of is the newer of the two refreshes, so a page can show one moment.
+    assert body["as_of"].startswith("2026-09-02")
+    assert body["models_at"].startswith("2026-09-01")
+    assert body["topics_at"] is None
