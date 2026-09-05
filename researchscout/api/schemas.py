@@ -549,6 +549,10 @@ class TopicPaper(BaseModel):
     paper_id: str
     title: str
     score: float
+    # Filled on the topic-detail read (joined from the paper) so a member can show its field
+    # and date; left null on the index list and for members no longer in the corpus.
+    primary_category: str | None = None
+    published_at: datetime | None = None
 
 
 class TopicHistoryPoint(BaseModel):
@@ -697,6 +701,16 @@ class LlmStats(BaseModel):
     last_quota_at: datetime | None = None
 
 
+class CatalogFreshnessInfo(BaseModel):
+    """When each dataset the trends family reads was last rebuilt - the "data as of" line."""
+
+    models_at: datetime | None = None
+    benchmarks_at: datetime | None = None
+    topics_at: datetime | None = None
+    # The newer of the model and benchmark refreshes - the single "catalogue data as of" moment.
+    as_of: datetime | None = None
+
+
 class SystemStatus(BaseModel):
     """What is deployed and whether it is fetching - the deploy-verify payload."""
 
@@ -724,6 +738,8 @@ class SystemStatus(BaseModel):
     llm: LlmStats | None = None
     # For You render latency over the last week (None when nothing was rendered).
     feed: FeedStats | None = None
+    # When the model/benchmark catalogue and the topics were last rebuilt (None when empty).
+    catalog: CatalogFreshnessInfo | None = None
 
 
 class NotableModelInfo(BaseModel):
@@ -748,6 +764,9 @@ class SotaPointInfo(BaseModel):
     on: date
     score: float
     model_name: str
+    # The catalogue id of the model that set it, when it is in the catalogue - null otherwise,
+    # so the frontier chart links each advance to its model page when it can.
+    model_id: str | None = None
 
 
 class SotaSeriesInfo(BaseModel):
