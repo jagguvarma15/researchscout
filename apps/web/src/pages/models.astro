@@ -1,17 +1,20 @@
 ---
 import { Icon } from 'astro-icon/components';
+import DataAsOf from '../components/DataAsOf.astro';
 import EmptyState from '../components/EmptyState.astro';
 import PageIntro from '../components/PageIntro.astro';
 import Pager from '../components/Pager.astro';
 import Base from '../layouts/Base.astro';
 import {
   catalogMessage,
+  fetchCatalogFreshness,
   fetchModels,
   fetchNotableModels,
   MODEL_PAGE_SIZE,
   MODEL_SORTS,
   type AiModel,
 } from '../lib/api';
+import { barWidth as computeBar } from '../lib/bars';
 import { compact, exponent, weightsLabel } from '../lib/format';
 import { morphName } from '../lib/morph';
 import { pageLink } from '../lib/paging';
@@ -31,7 +34,7 @@ const descending =
   rawDirection === 'asc' ? false : rawDirection === 'desc' ? true : DESCENDING_BY_DEFAULT.has(sort);
 const page = Math.max(1, Number(params.get('page') ?? '1') || 1);
 
-const [result, notableResult] = await Promise.all([
+const [result, notableResult, freshnessResult] = await Promise.all([
   fetchModels({
     q,
     organization,
@@ -43,7 +46,9 @@ const [result, notableResult] = await Promise.all([
     page,
   }),
   fetchNotableModels(),
+  fetchCatalogFreshness(),
 ]);
+const modelsAsOf = freshnessResult.ok ? freshnessResult.data.models_at : null;
 // Best-effort: the strip renders when it has rows and stays out of the way otherwise. The
 // main table's error card already reports catalogue trouble; a second one would say it twice.
 const notable = notableResult.ok ? notableResult.data : [];
@@ -69,13 +74,7 @@ const barValue = (model: AiModel): number | null =>
 const barMax = Math.max(...(models ?? []).map((model) => barValue(model) ?? 0), 0);
 
 function barWidth(model: AiModel): number | null {
-  const value = barValue(model);
-  if (value === null || value <= 0 || barMax <= 0) return null;
-  if (sort === 'compute') {
-    const top = Math.log10(barMax);
-    return top > 0 ? Math.round((Math.log10(value) / top) * 100) : null;
-  }
-  return Math.round((value / barMax) * 100);
+  return computeBar(barValue(model), barMax, { log: sort === 'compute' });
 }
 
 function sortAria(key: string): 'ascending' | 'descending' | 'none' {
@@ -139,6 +138,8 @@ const pageCount = Math.max(1, Math.ceil(total / MODEL_PAGE_SIZE));
     title="AI models"
     lede="Language, vision and multimodal models with the facts that let you compare them: who built them, how large, on how much compute, and whether the weights are yours to run. Models whose paper is in this corpus link straight to it."
   />
+
+  <DataAsOf date={modelsAsOf} label="Catalogue data as of" />
 
   {
     notable.length > 0 && (
