@@ -187,6 +187,25 @@ def test_status_reports_feed_usage(session: Session) -> None:
     assert body["feed"]["cache_hit_rate"] == pytest.approx(2 / 3)
 
 
+def test_status_reports_catalog_freshness(session: Session) -> None:
+    from researchscout.store import catalog
+    from researchscout.store.catalog import ModelUpsert
+
+    # Quiet deployment: an empty catalogue means no catalog block.
+    body = _client(session).get("/v1/system/status").json()
+    assert body["catalog"] is None
+
+    catalog.upsert_models(
+        session, [ModelUpsert(name="M", organization="OpenAI", source="epoch_ai")]
+    )
+    session.commit()
+
+    body = _client(session).get("/v1/system/status").json()
+    assert body["catalog"]["models_at"] is not None
+    assert body["catalog"]["as_of"] is not None
+    assert body["catalog"]["benchmarks_at"] is None
+
+
 def test_status_reports_llm_usage(session: Session) -> None:
     from researchscout.llm.usage import LlmCallUsage
     from researchscout.store.llm_usage import add_usage
