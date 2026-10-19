@@ -31,6 +31,7 @@ it after, so even a task that hangs leaves evidence.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -88,6 +89,9 @@ class Task:
     max_retries: int = 2
     retry_delay_sec: float = 1800.0
     retries_left: int = 0
+    #: The rate-limited upstream this task walks, if any. Tasks sharing one take turns
+    #: after a throttled failure instead of each knocking on the same blocked door.
+    upstream: str | None = None
 
     def due(self, now: float, wall: datetime) -> bool:
         """True once the relevant clock has reached the next-run deadline.
@@ -120,6 +124,8 @@ class Scheduler:
         self._sleep = sleep
         self._wall = wall
         self._heartbeat = heartbeat or (lambda: None)
+        # Upstream name -> when it may be asked again, set by a throttled failure.
+        self._cooldowns: dict[str, datetime] = {}
         for task in tasks:
             if task.at:
                 # An interval task starts due, so a fresh process does its work at once. A
@@ -155,11 +161,44 @@ class Scheduler:
         else:
             task.next_at = self._clock() + task.interval_sec
 
+    def _cooling_until(self, task: Task, wall: datetime) -> datetime | None:
+        """When this task's upstream may be asked again, or None if it is free now."""
+        if task.upstream is None:
+            return None
+        until = self._cooldowns.get(task.upstream)
+        return until if until is not None and wall < until else None
+
+    def _defer(self, task: Task, until: datetime) -> None:
+        """Push a due task to the end of its upstream's cooldown without running it.
+
+        Not a failure: no ledger row, no retry spent. A wall-clock task never moves past its
+        own next slot, the same cap a retry obeys.
+        """
+        logger.info(
+            "deferring %s: %s is rate limiting until %s",
+            task.name,
+            task.upstream,
+            until.isoformat(timespec="minutes"),
+        )
+        if task.at:
+            slot = next_run(task.at, self._wall(), task.zone)
+            task.next_wall = min(until, slot) if slot is not None else until
+        else:
+            task.next_at = self._clock() + (until - self._wall()).total_seconds()
+
     def _run(self, task: Task) -> None:
         try:
             task.run()
         except Exception as exc:  # noqa: BLE001 - a failing task must not stop the loop
             logger.warning("scheduled task %s failed", task.name, exc_info=True)
+            throttled = is_quota_note(str(exc))
+            if task.upstream is not None and throttled:
+                # Every task on this upstream waits out the same pause the retry does.
+                # Without it, arXiv's ingest retry landed on the revisions slot and the two
+                # walks ran back to back into one block, extending it each night.
+                until = self._wall() + timedelta(seconds=task.retry_delay_sec * 2)
+                previous = self._cooldowns.get(task.upstream)
+                self._cooldowns[task.upstream] = max(until, previous) if previous else until
             if task.at and task.retries_left > 0 and not is_quota_status(exc):
                 # Re-arm within the day rather than concede the slot: arXiv being down at
                 # half past midnight should cost half an hour, not twenty-four. A failure
@@ -173,7 +212,7 @@ class Scheduler:
                 task.retries_left -= 1
                 wall = self._wall()
                 slot = next_run(task.at, wall, task.zone)
-                delay = task.retry_delay_sec * (2 if is_quota_note(str(exc)) else 1)
+                delay = task.retry_delay_sec * (2 if throttled else 1)
                 retry_at = wall + timedelta(seconds=delay)
                 task.next_wall = min(retry_at, slot) if slot is not None else retry_at
                 self._heartbeat()
@@ -185,6 +224,10 @@ class Scheduler:
             # quota is a documented operating state, not an incident.
             if not is_quota_status(exc):
                 observe.capture_exception(exc)
+        else:
+            if task.upstream is not None:
+                # The upstream answered: whoever was waiting on it may go.
+                self._cooldowns.pop(task.upstream, None)
         self._reschedule(task)
         self._heartbeat()
 
@@ -200,6 +243,10 @@ class Scheduler:
         ran: list[str] = []
         for task in self._tasks:
             if task.due(now, wall):
+                until = self._cooling_until(task, wall)
+                if until is not None:
+                    self._defer(task, until)
+                    continue
                 self._run(task)
                 ran.append(task.name)
         self._heartbeat()
@@ -635,9 +682,25 @@ _STILL_FAILING = "still failing: "
 _NOTE_COMPARE_LEN = 380
 
 
+_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _failure_shape(note: str) -> str:
+    """The note with every number masked: ages, counts and URL dates move run to run.
+
+    Unmasked, "last successful ingest 26.4h ago" never equals the next run's "26.9h ago",
+    so an unchanged outage raised every thirty minutes for a day.
+    """
+    return _NUMBER_RE.sub("#", note)
+
+
 def _same_failure(previous: str, note: str) -> bool:
-    stripped = previous.removeprefix(_STILL_FAILING)
-    return stripped[:_NOTE_COMPARE_LEN] == note[:_NOTE_COMPARE_LEN]
+    # Masked first, then cut to the shorter side: masking shortens the two notes by
+    # different amounts, and the ledger may already have truncated the previous one.
+    before = _failure_shape(previous.removeprefix(_STILL_FAILING))
+    now = _failure_shape(note)
+    size = min(len(before), len(now), _NOTE_COMPARE_LEN)
+    return size > 0 and before[:size] == now[:size]
 
 
 def _health(settings: Settings) -> str:
@@ -759,8 +822,14 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
     # it stays with the daily set.
     report_at = parse_times(settings.scheduler_report_at) or daily_at
 
-    def task(name: str, interval: float, run: TaskFn, at: tuple[clock_time, ...]) -> Task:
-        return Task(name, interval, _recorded(name, run), at=at, zone=zone)
+    def task(
+        name: str,
+        interval: float,
+        run: TaskFn,
+        at: tuple[clock_time, ...],
+        upstream: str | None = None,
+    ) -> Task:
+        return Task(name, interval, _recorded(name, run), at=at, zone=zone, upstream=upstream)
 
     tasks: list[Task] = []
     if settings.scheduler_batch_pipeline:
@@ -773,6 +842,7 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
                 settings.scheduler_ingest_interval_sec,
                 partial(_ingest, settings),
                 pipeline_at,
+                upstream="arxiv",
             ),
             task(
                 "categorize",
@@ -806,7 +876,15 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
             ),
         ]
         if revisions_at:
-            tasks.append(task("revisions", 86400.0, partial(_revisions, settings), revisions_at))
+            tasks.append(
+                task(
+                    "revisions",
+                    86400.0,
+                    partial(_revisions, settings),
+                    revisions_at,
+                    upstream="arxiv",
+                )
+            )
     else:
         # The one configuration in which this process schedules nothing that fetches a paper.
         # That is correct when the stream is running, and silently wrong when it is not - a
