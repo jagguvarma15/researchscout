@@ -365,6 +365,98 @@ def test_the_doubled_throttle_wait_still_never_passes_the_next_slot() -> None:
     assert task.next_wall == datetime(2026, 8, 4, 14, 45, tzinfo=NY)
 
 
+def _throttle() -> None:
+    raise RuntimeError("stopped early: Client error '429 Unknown Error' for url 'x'")
+
+
+def test_a_throttled_task_holds_its_upstream_for_the_others() -> None:
+    """The night of 2026-10-17: ingest's retry landed on the revisions slot, both walked
+    arXiv back to back into one block. Now revisions waits out the same pause."""
+    calls: list[str] = []
+    outcome = {"ingest": "throttle"}
+
+    def ingest() -> None:
+        calls.append("ingest")
+        if outcome["ingest"] == "throttle":
+            _throttle()
+
+    ingest_task = Task("ingest", 60.0, ingest, at=(time(0, 30),), zone=NY, upstream="arxiv")
+    revisions = Task(
+        "revisions",
+        60.0,
+        lambda: calls.append("revisions"),
+        at=(time(1, 30),),
+        zone=NY,
+        upstream="arxiv",
+    )
+    now = {"wall": datetime(2026, 10, 17, 0, 0, tzinfo=NY)}
+    sched = Scheduler([ingest_task, revisions], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 10, 17, 0, 30, tzinfo=NY)
+    assert sched.run_due(0.0) == ["ingest"]
+    assert ingest_task.next_wall == datetime(2026, 10, 17, 1, 30, tzinfo=NY)
+
+    # 01:30: ingest's retry and the revisions slot are both due. Ingest goes first, is
+    # throttled again, and revisions is pushed to the new end of the pause, unrun.
+    now["wall"] = datetime(2026, 10, 17, 1, 30, tzinfo=NY)
+    assert sched.run_due(0.0) == ["ingest"]
+    assert revisions.next_wall == datetime(2026, 10, 17, 2, 30, tzinfo=NY)
+    assert revisions.retries_left == revisions.max_retries  # a deferral spends no retry
+    assert calls == ["ingest", "ingest"]
+
+    # 02:30: arXiv answers ingest, which lifts the pause, so revisions runs right behind.
+    outcome["ingest"] = "ok"
+    now["wall"] = datetime(2026, 10, 17, 2, 30, tzinfo=NY)
+    assert sched.run_due(0.0) == ["ingest", "revisions"]
+    assert revisions.next_wall == datetime(2026, 10, 18, 1, 30, tzinfo=NY)
+
+
+def test_a_deferral_never_passes_the_tasks_own_next_slot() -> None:
+    first = Task("a", 60.0, _throttle, at=(time(14, 0),), zone=NY, upstream="arxiv")
+    second = Task(
+        "b", 60.0, lambda: None, at=(time(14, 0), time(14, 20)), zone=NY, upstream="arxiv"
+    )
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([first, second], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["a"]
+    # The pause runs to 15:00, but b's own 14:20 slot comes first.
+    assert second.next_wall == datetime(2026, 8, 4, 14, 20, tzinfo=NY)
+
+
+def test_a_plain_failure_holds_nobody_back() -> None:
+    def down() -> None:
+        raise RuntimeError("The read operation timed out")
+
+    first = Task("a", 60.0, down, at=(time(14, 0),), zone=NY, upstream="arxiv")
+    second = Task("b", 60.0, lambda: None, at=(time(14, 0),), zone=NY, upstream="arxiv")
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([first, second], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["a", "b"]
+
+
+def test_a_throttle_on_one_upstream_leaves_other_tasks_alone() -> None:
+    first = Task("a", 60.0, _throttle, at=(time(14, 0),), zone=NY, upstream="arxiv")
+    other = Task("b", 60.0, lambda: None, at=(time(14, 0),), zone=NY, upstream="s2")
+    plain = Task("c", 60.0, lambda: None, at=(time(14, 0),), zone=NY)
+    now = {"wall": datetime(2026, 8, 4, 13, 59, tzinfo=NY)}
+    sched = Scheduler([first, other, plain], clock=lambda: 0.0, wall=lambda: now["wall"])
+
+    now["wall"] = datetime(2026, 8, 4, 14, 0, tzinfo=NY)
+    assert sched.run_due(0.0) == ["a", "b", "c"]
+
+
+def test_the_arxiv_walks_share_one_upstream() -> None:
+    settings = Settings(scheduler_batch_pipeline=True, scheduler_revisions_at="01:30")
+    upstreams = {t.name: t.upstream for t in build_tasks(settings)}
+    assert upstreams["ingest"] == "arxiv"
+    assert upstreams["revisions"] == "arxiv"
+    assert upstreams["citations"] is None  # Semantic Scholar is its own pool
+
+
 def test_an_interval_task_still_starts_due() -> None:
     task = Task("x", 60.0, lambda: None)
     Scheduler([task], clock=lambda: 1000.0, wall=lambda: datetime(2026, 8, 4, 15, 2, tzinfo=NY))
@@ -660,6 +752,43 @@ def test_health_raises_again_when_the_failure_changes(monkeypatch: pytest.Monkey
     _patch_health(monkeypatch, failing=True, previous_note="task_streaks=fail(something else)")
     with pytest.raises(RuntimeError, match="task_streaks=fail"):
         scheduler_mod._health(Settings())
+
+
+def test_health_stays_quiet_while_only_the_numbers_move(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An outage's age grows every run; that is the same failure, not a new one."""
+    import researchscout.scheduler as scheduler_mod
+    from researchscout.health import HealthCheck, summarize
+
+    def checks_at(hours: str) -> list[HealthCheck]:
+        return [HealthCheck("pipeline_runs", "fail", f"last successful ingest {hours}h ago")]
+
+    previous = "still failing: " + summarize(checks_at("26.4"))
+    current = checks_at("26.9")
+    monkeypatch.setattr("researchscout.store.db.session_scope", lambda: nullcontext(None))
+    monkeypatch.setattr("researchscout.health.run_health_checks", lambda session, settings: current)
+    monkeypatch.setattr(
+        "researchscout.store.runs.last_finished",
+        lambda session, task: SimpleNamespace(note=previous),
+    )
+    assert scheduler_mod._health(Settings()) == "still failing: " + summarize(current)
+
+
+def test_health_matches_a_previous_note_the_ledger_truncated() -> None:
+    import researchscout.scheduler as scheduler_mod
+
+    note = "task_streaks=fail(" + "fetched=2000 refreshed=2000 " * 30 + ")"
+    stored = ("still failing: " + note.replace("2000", "0"))[:400]
+    assert scheduler_mod._same_failure(stored, note)
+
+
+def test_health_still_sees_a_different_check_failing() -> None:
+    import researchscout.scheduler as scheduler_mod
+
+    before = "pipeline_runs=fail(last successful ingest 26.4h ago) storage=ok"
+    after = "pipeline_runs=ok storage=fail(raw rows 600000 over 500000)"
+    assert not scheduler_mod._same_failure(before, after)
 
 
 def test_health_returns_the_plain_summary_when_all_ok(monkeypatch: pytest.MonkeyPatch) -> None:
