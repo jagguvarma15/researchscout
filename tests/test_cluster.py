@@ -5,6 +5,7 @@ import pytest
 import researchscout.cluster as cluster_mod
 from researchscout.cluster import (
     build_topics,
+    cluster_count,
     cluster_keywords,
     cluster_labels,
     label_topic,
@@ -32,6 +33,45 @@ def test_cluster_labels_separates_distant_groups() -> None:
 def test_cluster_labels_edge_cases() -> None:
     assert cluster_labels([], threshold=0.5) == []
     assert cluster_labels([[1.0, 0.0]], threshold=0.5) == [0]
+
+
+def test_cluster_count_scales_with_the_window() -> None:
+    assert cluster_count(4710, 80) == 59
+    assert cluster_count(160, 80) == 2
+    assert cluster_count(30, 80) == 1  # below one topic's worth: a single cluster
+    assert cluster_count(5, 1) == 5  # never more clusters than papers
+    assert cluster_count(5, 0) == 5  # a zero target cannot divide by zero
+
+
+def test_kmeans_separates_groups_and_assigns_everyone() -> None:
+    vectors = [
+        [1.0, 0.0, 0.0],
+        [0.99, 0.02, 0.0],
+        [0.98, 0.01, 0.01],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.02, 0.99],
+        [0.01, 0.01, 0.98],
+    ]
+    labels = cluster_labels(vectors, threshold=0.5, algo="kmeans", target_size=3)
+    assert labels[0] == labels[1] == labels[2]
+    assert labels[3] == labels[4] == labels[5]
+    assert labels[0] != labels[3]
+    assert -1 not in labels
+
+
+def test_kmeans_groups_by_direction_not_length() -> None:
+    # Same direction at very different magnitudes must land together (cosine semantics).
+    vectors = [[10.0, 0.0], [0.1, 0.0], [0.0, 5.0], [0.0, 0.2]]
+    labels = cluster_labels(vectors, threshold=0.5, algo="kmeans", target_size=2)
+    assert labels[0] == labels[1]
+    assert labels[2] == labels[3]
+    assert labels[0] != labels[2]
+
+
+def test_kmeans_tiny_inputs() -> None:
+    assert cluster_labels([], threshold=0.5, algo="kmeans") == []
+    assert cluster_labels([[1.0, 0.0]], threshold=0.5, algo="kmeans") == [0]
+    assert cluster_labels([[1.0, 0.0], [0.0, 1.0]], threshold=0.5, algo="kmeans") == [0, 0]
 
 
 class _FakeLLM(LLM):
@@ -137,7 +177,9 @@ def test_build_topics_excludes_the_outlier_pool(monkeypatch: pytest.MonkeyPatch)
         ("arxiv:3", "a lone misfit", [0.0, 1.0]),
     ]
     monkeypatch.setattr(cluster_mod, "window_vectors", lambda *a, **k: rows)
-    monkeypatch.setattr(cluster_mod, "cluster_labels", lambda v, *, threshold, algo: [0, 0, -1])
+    monkeypatch.setattr(
+        cluster_mod, "cluster_labels", lambda v, *, threshold, algo, **kw: [0, 0, -1]
+    )
     monkeypatch.setattr(cluster_mod, "breakthrough", lambda s, pid: SimpleNamespace(total=1.0))
     topics = build_topics(
         None,  # type: ignore[arg-type]
@@ -202,7 +244,7 @@ def _patch_three_clusters(monkeypatch: pytest.MonkeyPatch) -> None:
     }
     monkeypatch.setattr(cluster_mod, "window_vectors", lambda *a, **k: rows)
     monkeypatch.setattr(
-        cluster_mod, "cluster_labels", lambda v, *, threshold, algo: [0, 0, 1, 1, 2, 2]
+        cluster_mod, "cluster_labels", lambda v, *, threshold, algo, **kw: [0, 0, 1, 1, 2, 2]
     )
     monkeypatch.setattr(
         cluster_mod, "breakthrough", lambda s, pid: SimpleNamespace(total=scores[pid])
@@ -229,6 +271,19 @@ def test_build_topics_labels_only_the_ranked_survivors(monkeypatch: pytest.Monke
     assert build.llm_labels == 2
     assert build.fallback_labels == 0
     assert [topic.score for topic in build.topics] == [10.0, 6.0]
+
+
+def test_size_breaks_momentum_ties(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A fresh corpus has no signals: every cluster scores zero, so the bigger ones lead."""
+    rows = [(f"arxiv:{i}", f"t{i}", [1.0, 0.0]) for i in range(6)]
+    monkeypatch.setattr(cluster_mod, "window_vectors", lambda *a, **k: rows)
+    monkeypatch.setattr(
+        cluster_mod, "cluster_labels", lambda v, *, threshold, algo, **kw: [0, 1, 1, 1, 2, 2]
+    )
+    monkeypatch.setattr(cluster_mod, "breakthrough", lambda s, pid: SimpleNamespace(total=0.0))
+    monkeypatch.setattr(cluster_mod, "cluster_keywords", lambda docs, **k: {})
+    build = _build(_CountingLLM(), max_topics=2)
+    assert [topic.size for topic in build.topics] == [3, 2]
 
 
 def test_a_label_failure_falls_back_to_keywords_without_latching(
