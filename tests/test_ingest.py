@@ -332,3 +332,27 @@ def test_window_start_is_stable_within_the_hour(monkeypatch: pytest.MonkeyPatch)
         None, "arxiv", NOW + timedelta(minutes=20), overlap_days=4, max_window_days=30
     )
     assert first == later
+
+
+def test_keep_after_skips_new_papers_older_than_the_window(session: Session) -> None:
+    cutoff = SINCE + timedelta(days=10)
+    fresh = _paper("2401.00011").model_copy(update={"published_at": cutoff + timedelta(days=1)})
+    stale = _paper("2401.00012")  # published at SINCE, before the cutoff
+    summary = run_ingest(session, FakeSource([fresh, stale]), SINCE, keep_after=cutoff)
+    assert summary.new_papers == 1
+    assert summary.out_of_window == 1
+    assert get_paper(session, "arxiv:2401.00011") is not None
+    assert get_paper(session, "arxiv:2401.00012") is None
+
+
+def test_keep_after_still_refreshes_a_paper_already_stored(session: Session) -> None:
+    """A saved paper the purge exempted keeps taking its revisions."""
+    run_ingest(session, FakeSource([_paper("2401.00013", title="v1")]), SINCE)
+    revised = _paper("2401.00013", title="v2")
+    summary = run_ingest(
+        session, FakeSource([revised]), SINCE, keep_after=SINCE + timedelta(days=10)
+    )
+    assert summary.collapsed == 1
+    assert summary.out_of_window == 0
+    stored = get_paper(session, "arxiv:2401.00013")
+    assert stored is not None and stored.title == "v2"
