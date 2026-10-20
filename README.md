@@ -122,7 +122,8 @@ in the personalized feed), `RS_HIGHLIGHTS_SYNC` (reader marks follow the account
 `RS_PUSH_ENABLED` plus a VAPID keypair (browser notices when an issue publishes, with
 `FEED_TOKEN` on the web side for the Atom feed), `RS_STREAM_LABELS_ENABLED`
 (config/labels.yaml classification), `RS_SCHEDULER_REVISIONS_AT` (the arXiv revisions
-sweep), and per-source credentials in `config/sources.yaml` (GitHub stars, OpenAlex
+sweep), `RS_RETENTION_DAYS` (a rolling corpus window: older papers, and the digests
+they fed, are deleted nightly unless a reader saved them), and per-source credentials in `config/sources.yaml` (GitHub stars, OpenAlex
 citations, OpenReview scores, Bluesky discussion).
 
 ## Data sources and attribution
