@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -94,6 +95,30 @@ def test_feed_forwards_days_and_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(feed_router, "personalized_papers", fake_rank)
     _client().get("/v1/me/feed?days=7&limit=5")
     assert seen == {"days": 7, "k": 5}
+
+
+def test_feed_window_clamps_to_retention(
+    monkeypatch: pytest.MonkeyPatch, set_setting: Callable[[str, str], None]
+) -> None:
+    seen: dict[str, Any] = {}
+
+    def fake_rank(*args: Any, **kwargs: Any) -> list[PersonalizedPaper]:
+        seen["days"] = kwargs["days"]
+        return []
+
+    monkeypatch.setattr(feed_router, "personalized_papers", fake_rank)
+    set_setting("RS_RETENTION_DAYS", "10")
+    body = _client().get("/v1/me/feed?days=30").json()
+    assert seen["days"] == 10
+    assert body["window_days"] == 10
+    assert body["retention_days"] == 10
+
+
+def test_feed_reports_no_retention_when_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(feed_router, "personalized_papers", lambda *a, **k: [])
+    body = _client().get("/v1/me/feed?days=30").json()
+    assert body["window_days"] == 30
+    assert body["retention_days"] is None
 
 
 def test_feed_records_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
