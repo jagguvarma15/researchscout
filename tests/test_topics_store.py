@@ -101,6 +101,23 @@ def test_topic_identity_carries_across_builds(session: Session) -> None:
 
 
 @pytest.mark.integration
+def test_a_fresh_write_drops_identity_and_history(session: Session) -> None:
+    t1 = datetime(2026, 7, 1, tzinfo=UTC)
+    t2 = datetime(2026, 7, 2, tzinfo=UTC)
+    replace_topics(session, [_topic("diffusion", [1.0, 0.0], size=3)], built_at=t1)
+    first = list_topics(session)[0]
+
+    # The same centroid would inherit the key; a fresh write never matches.
+    replace_topics(session, [_topic("diffusion", [1.0, 0.0], size=5)], built_at=t2, fresh=True)
+    rows = list_topics(session)
+    assert len(rows) == 1
+    assert rows[0].topic_key != first.topic_key
+    assert [point["size"] for point in rows[0].history] == [5]
+    assert rows[0].trend is None
+    assert rows[0].first_seen == t2
+
+
+@pytest.mark.integration
 def test_previous_key_is_inherited_at_most_once(session: Session) -> None:
     replace_topics(session, [_topic("seed", [1.0, 0.0])], built_at=datetime(2026, 7, 1, tzinfo=UTC))
     seed_key = list_topics(session)[0].topic_key
