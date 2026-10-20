@@ -100,20 +100,31 @@ def paper_meta(session: Session, ids: Sequence[str]) -> dict[str, PaperMeta]:
 
 
 def replace_topics(
-    session: Session, topics: Sequence[Topic], *, built_at: datetime | None = None
+    session: Session,
+    topics: Sequence[Topic],
+    *,
+    built_at: datetime | None = None,
+    fresh: bool = False,
 ) -> None:
     """Replace the topic set, carrying identity from the most similar previous topics.
 
     Matching is greedy in the given (momentum-first) order and one-to-one: each previous
     ``topic_key`` is inherited at most once, and only above the cosine threshold. Unmatched
     topics start a fresh key and history.
+
+    ``fresh`` drops every previous topic without matching: new keys, a one-point history,
+    and no trend verdict, since there is nothing earlier to compare against.
     """
     now = built_at or datetime.now(UTC)
-    previous = [
-        (row.topic_key, list(row.centroid or []), list(row.history or []), row.first_seen)
-        for row in session.execute(select(TopicRow)).scalars()
-        if row.topic_key and row.centroid
-    ]
+    previous = (
+        []
+        if fresh
+        else [
+            (row.topic_key, list(row.centroid or []), list(row.history or []), row.first_seen)
+            for row in session.execute(select(TopicRow)).scalars()
+            if row.topic_key and row.centroid
+        ]
+    )
     session.execute(delete(TopicRow))
     session.flush()
 
@@ -145,7 +156,7 @@ def replace_topics(
                     {"paper_id": m.paper_id, "title": m.title, "score": m.score}
                     for m in topic.members
                 ],
-                trend=classify_trend(history),
+                trend=None if fresh else classify_trend(history),
                 history=history,
                 centroid=topic.centroid or None,
                 first_seen=first_seen,
