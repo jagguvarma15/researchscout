@@ -59,21 +59,43 @@ class TopicBuild:
     fallback_labels: int = 0
 
 
+def cluster_count(size: int, target_size: int) -> int:
+    """How many clusters KMeans asks for: about ``target_size`` papers each, at least one."""
+    return max(1, min(size, round(size / max(target_size, 1))))
+
+
 def cluster_labels(
-    vectors: list[list[float]], *, threshold: float, algo: str = "agglomerative"
+    vectors: list[list[float]],
+    *,
+    threshold: float,
+    algo: str = "agglomerative",
+    target_size: int = 80,
 ) -> list[int]:
-    """Cluster id per vector; ``-1`` marks HDBSCAN outliers (agglomerative assigns everything).
+    """Cluster id per vector; ``-1`` marks HDBSCAN outliers (the others assign everything).
 
     agglomerative merges points within the cosine ``threshold``. hdbscan (sklearn-native since
     1.3, no extra dependency) finds density peaks with no fixed count and leaves misfits in
-    the ``-1`` pool — genuinely informative for a radar: a paper with no cohort yet may be an
-    emerging topic of one. ``threshold`` is ignored under hdbscan.
+    the ``-1`` pool. kmeans partitions the unit-normalized vectors into ``cluster_count``
+    groups of roughly ``target_size``: linear memory, deterministic, and the one of the three
+    that still yields dozens of coherent topics on a broad multi-thousand-paper window.
+    ``threshold`` applies to agglomerative only.
     """
     if not vectors:
         return []
     import numpy as np
 
     data = np.array(vectors, dtype=float)
+    if algo == "kmeans":
+        from sklearn.cluster import KMeans
+
+        # Unit length, so Euclidean k-means groups by cosine direction like the other paths.
+        norms = np.linalg.norm(data, axis=1, keepdims=True)
+        data = data / np.maximum(norms, 1e-12)
+        clusters = cluster_count(len(vectors), target_size)
+        if clusters == 1:
+            return [0 for _ in vectors]
+        model = KMeans(n_clusters=clusters, n_init=4, random_state=0)
+        return [int(label) for label in model.fit_predict(data)]
     if algo == "hdbscan":
         if len(vectors) < 2:
             return [-1 for _ in vectors]
@@ -187,6 +209,7 @@ def build_topics(
     max_topics: int = 12,
     label_titles: int = 4,
     algo: str = "agglomerative",
+    target_size: int = 80,
 ) -> TopicBuild:
     """Cluster the window's embedded papers, score and label each cluster, momentum-first.
 
@@ -204,7 +227,9 @@ def build_topics(
     if not rows:
         return TopicBuild([])
 
-    labels = cluster_labels([vector for _, _, vector in rows], threshold=threshold, algo=algo)
+    labels = cluster_labels(
+        [vector for _, _, vector in rows], threshold=threshold, algo=algo, target_size=target_size
+    )
     groups: dict[int, list[tuple[str, str, list[float]]]] = {}
     for (paper_id, title, vector), cluster in zip(rows, labels, strict=True):
         if cluster == -1:
@@ -224,7 +249,11 @@ def build_topics(
             reverse=True,
         )
         candidates.append((cluster, members, scored))
-    candidates.sort(key=lambda entry: sum(member.score for member in entry[2]), reverse=True)
+    # Momentum first; size breaks ties, which matters on a fresh corpus where most papers
+    # have no signals yet and every cluster would otherwise score zero.
+    candidates.sort(
+        key=lambda entry: (sum(member.score for member in entry[2]), len(entry[1])), reverse=True
+    )
     del candidates[max_topics:]
 
     topics: list[Topic] = []
