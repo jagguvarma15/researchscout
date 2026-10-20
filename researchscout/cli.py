@@ -29,6 +29,7 @@ topics_app = typer.Typer(help="Build and inspect emerging topics.", no_args_is_h
 serve_app = typer.Typer(help="Run ResearchScout services.", no_args_is_help=True)
 eval_app = typer.Typer(help="Evaluate retrieval quality and embedding speed.", no_args_is_help=True)
 stream_app = typer.Typer(help="Run and observe the streaming pipeline.", no_args_is_help=True)
+retention_app = typer.Typer(help="The rolling corpus window.", no_args_is_help=True)
 app.add_typer(sources_app, name="sources")
 app.add_typer(db_app, name="db")
 app.add_typer(signals_app, name="signals")
@@ -36,6 +37,7 @@ app.add_typer(topics_app, name="topics")
 app.add_typer(serve_app, name="serve")
 app.add_typer(eval_app, name="eval")
 app.add_typer(stream_app, name="stream")
+app.add_typer(retention_app, name="retention")
 
 
 @app.command()
@@ -62,10 +64,12 @@ def ingest(
     """Fetch a source, normalize, dedup, and store (idempotent, replayable)."""
     import httpx
 
+    from researchscout.config import get_settings
     from researchscout.ingest.pipeline import run_ingest
     from researchscout.sources import get_source
     from researchscout.sources.arxiv import ArxivSource
     from researchscout.store.db import session_scope
+    from researchscout.store.retention import retention_cutoff
 
     try:
         src = get_source(source)
@@ -78,7 +82,14 @@ def ingest(
 
     try:
         with session_scope() as session:
-            summary = run_ingest(session, src, since, max_items=max_items, resume=resume)
+            summary = run_ingest(
+                session,
+                src,
+                since,
+                max_items=max_items,
+                resume=resume,
+                keep_after=retention_cutoff(get_settings()),
+            )
     except httpx.HTTPStatusError as exc:
         code = exc.response.status_code
         hint = " (rate limited — wait and retry)" if code == 429 else ""
@@ -90,7 +101,35 @@ def ingest(
 
     typer.secho(
         f"{summary.source}: fetched={summary.fetched} new={summary.new_papers} "
-        f"collapsed={summary.collapsed} signals={summary.signals} raw={summary.raw_stored}",
+        f"collapsed={summary.collapsed} signals={summary.signals} raw={summary.raw_stored}"
+        + (f" too_old={summary.out_of_window}" if summary.out_of_window else ""),
+        fg=typer.colors.GREEN,
+    )
+
+
+@retention_app.command("purge")
+def retention_purge(
+    dry_run: Annotated[
+        bool, typer.Option("--dry-run", help="Count what would be removed; delete nothing.")
+    ] = False,
+) -> None:
+    """Delete papers older than RS_RETENTION_DAYS (saved ones kept) and their digests."""
+    from researchscout.config import get_settings
+    from researchscout.store.db import session_scope
+    from researchscout.store.retention import count_expired, purge_expired, retention_cutoff
+
+    cutoff = retention_cutoff(get_settings())
+    if cutoff is None:
+        typer.secho(
+            "Retention is off (RS_RETENTION_DAYS=0); nothing to do.", fg=typer.colors.YELLOW
+        )
+        raise typer.Exit(code=0)
+    with session_scope() as session:
+        summary = count_expired(session, cutoff) if dry_run else purge_expired(session, cutoff)
+    verb = "would remove" if dry_run else "removed"
+    typer.secho(
+        f"cutoff {cutoff.isoformat(timespec='minutes')}: {verb} {summary.papers} paper(s), "
+        f"{summary.digests} digest(s); kept {summary.exempt} saved paper(s)",
         fg=typer.colors.GREEN,
     )
 
@@ -797,7 +836,11 @@ def topics_build(
     from researchscout.store.topics import replace_topics
 
     settings = get_settings()
-    window = days if days is not None else settings.cluster_window_days
+    from researchscout.store.retention import effective_window_days
+
+    window = effective_window_days(
+        days if days is not None else settings.cluster_window_days, settings
+    )
     embedder = default_embedder()
     llm = OpenAICompatLLM()
     with session_scope() as session:
@@ -809,7 +852,7 @@ def topics_build(
             threshold=settings.cluster_distance_threshold,
             algo=settings.cluster_algo,
         )
-        replace_topics(session, build.topics)
+        replace_topics(session, build.topics, fresh=settings.retention_days > 0)
     typer.secho(f"built {len(build.topics)} topic(s)", fg=typer.colors.GREEN)
     if build.fallback_labels:
         typer.secho(
