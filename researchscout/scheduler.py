@@ -625,6 +625,7 @@ def _topics(settings: Settings) -> str:
             days=effective_window_days(settings.cluster_window_days, settings),
             threshold=settings.cluster_distance_threshold,
             algo=settings.cluster_algo,
+            target_size=settings.cluster_target_size,
         )
         # Under retention every build is a fresh write: the papers a previous topic was
         # built from are gone, so carrying its identity and size history would compare
