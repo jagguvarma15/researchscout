@@ -69,6 +69,14 @@ On the Railway `api` service:
   toggle.
 - `RS_STREAM_LABELS_ENABLED=true` - the categorize task classifies papers against
   `config/labels.yaml`.
+- `RS_RETENTION_DAYS=10` (with `RS_RAW_ITEMS_KEEP_DAYS=10`) - keep only the last ten days
+  of papers by submission date. The pipeline slot runs ingest, then the purge (saved and
+  highlighted papers are kept; digest issues that ended before the cutoff go too), then
+  enrichment, then a fresh topics build. Ingest and revisions stop landing older papers,
+  and For You offers only windows inside the ten days. Take `make backup` first, and run
+  the first purge by hand - `railway ssh` then `scout retention purge --dry-run`, then
+  without the flag - because it deletes most of a years-deep corpus at once; a plain
+  `VACUUM ANALYZE` afterwards lets Postgres reuse the space.
 - `RS_SCHEDULER_REVISIONS_AT=01:30` - the arXiv revisions sweep (v2s, DOIs, journal
   references) gets its nightly slot; unset, it never runs.
 - Signal source credentials: `GITHUB_TOKEN` (then flip `code_adoption.enabled` in
