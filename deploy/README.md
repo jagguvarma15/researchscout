@@ -77,6 +77,10 @@ On the Railway `api` service:
   the first purge by hand - `railway ssh` then `scout retention purge --dry-run`, then
   without the flag - because it deletes most of a years-deep corpus at once; a plain
   `VACUUM ANALYZE` afterwards lets Postgres reuse the space.
+- `RS_CLUSTER_ALGO=kmeans` (with `RS_CLUSTER_TARGET_SIZE=80`) - topics from k-means with
+  the cluster count scaled to the window, about 80 papers per topic. On a broad window of
+  thousands of papers the other two collapse: average-linkage agglomerative chains into one
+  cluster and hdbscan either does the same or leaves most papers unclustered.
 - `RS_SCHEDULER_REVISIONS_AT=01:30` - the arXiv revisions sweep (v2s, DOIs, journal
   references) gets its nightly slot; unset, it never runs.
 - Signal source credentials: `GITHUB_TOKEN` (then flip `code_adoption.enabled` in
