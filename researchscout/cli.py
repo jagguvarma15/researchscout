@@ -851,6 +851,7 @@ def topics_build(
             days=window,
             threshold=settings.cluster_distance_threshold,
             algo=settings.cluster_algo,
+            target_size=settings.cluster_target_size,
         )
         replace_topics(session, build.topics, fresh=settings.retention_days > 0)
     typer.secho(f"built {len(build.topics)} topic(s)", fg=typer.colors.GREEN)
