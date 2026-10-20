@@ -205,6 +205,7 @@ def system_status(session: Annotated[Session, Depends(get_session)]) -> SystemSt
         build_sha=settings.build_sha or None,
         migration=migration,
         papers=papers,
+        retention_days=settings.retention_days or None,
         newest_paper_at=newest_published,
         newest_paper_created_at=newest_created,
         runs=runs,
