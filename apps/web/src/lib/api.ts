@@ -157,6 +157,10 @@ export interface FeedProfileInfo {
 export interface ForYouFeed {
   items: PaperSummary[];
   profile?: FeedProfileInfo | null;
+  /* The look-back the API used after clamping, and the corpus retention window (null = off).
+     Both absent from a backend that predates retention. */
+  window_days?: number | null;
+  retention_days?: number | null;
 }
 
 export async function fetchForYou(
