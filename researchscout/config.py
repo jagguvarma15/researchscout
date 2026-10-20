@@ -158,6 +158,11 @@ class Settings(BaseSettings):
     signal_auto_import: bool = False
     # Raw fetched payloads are kept this many days for replay/debugging, then pruned.
     raw_items_keep_days: int = 30
+    # Rolling corpus window in days on the arXiv submission date (0 = keep everything).
+    # When set, the nightly pipeline deletes older papers (saved or highlighted ones are
+    # exempt) and the digest issues they fed, ingest stops landing older papers, topics are
+    # rebuilt fresh after each ingest, and every look-back is clamped to the window.
+    retention_days: int = 0
     # Breakthrough scoring: how the signal series becomes a ranking boost. The window bounds how
     # far back momentum is measured; the weights set how much velocity and acceleration count
     # relative to the raw level.
