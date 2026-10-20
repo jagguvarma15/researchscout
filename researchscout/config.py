@@ -189,10 +189,14 @@ class Settings(BaseSettings):
     # Emerging-topic clustering: the window to cluster over and the cosine-distance threshold that
     # decides how tight a cluster is (lower = tighter, more topics). The scheduler rebuilds daily.
     # algo "hdbscan" (sklearn-native) needs no fixed count and leaves outliers unclustered; the
-    # threshold only applies to the default agglomerative path.
+    # threshold only applies to the default agglomerative path. "kmeans" sizes the cluster
+    # count from the corpus (about cluster_target_size papers per topic) and assigns every
+    # paper: on a broad window of thousands of papers, average-linkage agglomerative chains
+    # into one cluster and hdbscan either does the same or leaves most papers as noise.
     cluster_window_days: int = 30
     cluster_distance_threshold: float = 0.5
-    cluster_algo: Literal["agglomerative", "hdbscan"] = "agglomerative"
+    cluster_algo: Literal["agglomerative", "hdbscan", "kmeans"] = "agglomerative"
+    cluster_target_size: int = 80
     scheduler_topics_interval_sec: int = 86400
     # Agentic ask: decompose the question into sub-questions and follow one hop of references.
     agentic_ask: bool = False
