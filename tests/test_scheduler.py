@@ -457,6 +457,41 @@ def test_the_arxiv_walks_share_one_upstream() -> None:
     assert upstreams["citations"] is None  # Semantic Scholar is its own pool
 
 
+def test_retention_runs_after_ingest_and_topics_close_the_pipeline() -> None:
+    settings = Settings(
+        scheduler_batch_pipeline=True,
+        scheduler_pipeline_at="00:30",
+        scheduler_daily_at="17:00",
+        retention_days=10,
+    )
+    tasks = build_tasks(settings)
+    names = [t.name for t in tasks]
+    assert names.index("retention") == names.index("ingest") + 1
+    assert names.index("topics") == names.index("fulltext") + 1
+    assert names.count("topics") == 1
+    topics = tasks[names.index("topics")]
+    assert topics.at == (time(0, 30), time(17, 0))
+
+
+def test_without_retention_the_pipeline_is_unchanged() -> None:
+    settings = Settings(
+        scheduler_batch_pipeline=True,
+        scheduler_pipeline_at="00:30",
+        scheduler_daily_at="17:00",
+    )
+    tasks = build_tasks(settings)
+    names = [t.name for t in tasks]
+    assert "retention" not in names
+    assert names.index("topics") > names.index("digest")
+    assert tasks[names.index("topics")].at == (time(17, 0),)
+
+
+def test_the_retention_task_reports_off_without_a_window() -> None:
+    import researchscout.scheduler as scheduler_mod
+
+    assert scheduler_mod._retention(Settings(retention_days=0)) == "off"
+
+
 def test_an_interval_task_still_starts_due() -> None:
     task = Task("x", 60.0, lambda: None)
     Scheduler([task], clock=lambda: 1000.0, wall=lambda: datetime(2026, 8, 4, 15, 2, tzinfo=NY))
@@ -555,6 +590,7 @@ def test_one_failing_source_does_not_stop_the_others(monkeypatch: pytest.MonkeyP
             skipped=0,
             stopped_early=None,
             stopped_by_error=False,
+            out_of_window=0,
         )
 
     _patch_source_run(monkeypatch, [_Source("broken"), _Source("fine")], fake_run_ingest)
@@ -581,6 +617,7 @@ def test_an_error_stop_fails_the_ledger_row(monkeypatch: pytest.MonkeyPatch) -> 
             skipped=0,
             stopped_early="429 from upstream",
             stopped_by_error=True,
+            out_of_window=0,
         )
 
     _patch_source_run(monkeypatch, [_Source("arxiv")], fake_run_ingest)
@@ -611,6 +648,7 @@ def test_a_non_http_failure_is_isolated_too(monkeypatch: pytest.MonkeyPatch) -> 
             skipped=0,
             stopped_early=None,
             stopped_by_error=False,
+            out_of_window=0,
         )
 
     _patch_source_run(monkeypatch, [_Source("broken"), _Source("fine")], fake_run_ingest)
@@ -636,6 +674,7 @@ def test_signals_excludes_the_citation_sources(monkeypatch: pytest.MonkeyPatch) 
             skipped=0,
             stopped_early=None,
             stopped_by_error=False,
+            out_of_window=0,
         )
 
     sources = [_Source("semantic_scholar"), _Source("hf_trending"), _Source("openalex")]
