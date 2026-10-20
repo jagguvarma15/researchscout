@@ -5,7 +5,7 @@ exact field names pinned here.
 """
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +18,14 @@ from researchscout.store.papers import upsert_paper
 from researchscout.store.runs import record_run
 
 pytestmark = pytest.mark.integration
+
+# The ledger prunes finished rows past its keep window on every write, so run rows must be
+# recent: fixed August dates aged out in October and the rows vanished under the test.
+_RUN_DAY = (datetime.now(UTC) - timedelta(days=1)).date()
+
+
+def _run_at(hour: int, minute: int) -> datetime:
+    return datetime(_RUN_DAY.year, _RUN_DAY.month, _RUN_DAY.day, hour, minute, tzinfo=UTC)
 
 
 def _client(session: Session) -> TestClient:
@@ -47,16 +55,16 @@ def test_status_reports_corpus_and_runs(
     record_run(
         session,
         "scheduler",
-        started_at=datetime(2026, 8, 5, 8, 59, tzinfo=UTC),
-        finished_at=datetime(2026, 8, 5, 8, 59, tzinfo=UTC),
+        started_at=_run_at(8, 59),
+        finished_at=_run_at(8, 59),
         ok=True,
         note="started: 8 task(s)",
     )
     record_run(
         session,
         "ingest",
-        started_at=datetime(2026, 8, 5, 9, 0, tzinfo=UTC),
-        finished_at=datetime(2026, 8, 5, 9, 1, tzinfo=UTC),
+        started_at=_run_at(9, 0),
+        finished_at=_run_at(9, 1),
         ok=True,
     )
     session.commit()
@@ -73,7 +81,7 @@ def test_status_reports_corpus_and_runs(
     # Four slots a day means some slot is always in the past; the exact one depends on when
     # the test runs, so pin presence rather than a value.
     assert body["pipeline_due_at"] is not None
-    assert body["scheduler_started_at"].startswith("2026-08-05")
+    assert body["scheduler_started_at"].startswith(_RUN_DAY.isoformat())
     names = [check["name"] for check in body["health"]]
     assert "pipeline_runs" in names
     assert "corpus_freshness" in names
@@ -88,12 +96,12 @@ def test_status_carries_running_rows_and_the_last_health_run(session: Session) -
     record_run(
         session,
         "health",
-        started_at=datetime(2026, 8, 5, 9, 0, tzinfo=UTC),
-        finished_at=datetime(2026, 8, 5, 9, 0, tzinfo=UTC),
+        started_at=_run_at(9, 0),
+        finished_at=_run_at(9, 0),
         ok=True,
         note="freshness=ok",
     )
-    record_task_started(session, "fulltext", started_at=datetime(2026, 8, 5, 10, 0, tzinfo=UTC))
+    record_task_started(session, "fulltext", started_at=_run_at(10, 0))
     session.commit()
 
     body = _client(session).get("/v1/system/status").json()
