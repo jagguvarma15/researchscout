@@ -47,6 +47,9 @@ class IngestSummary:
     out_of_scope: int = 0
     #: Fetched but unparseable (a malformed entry): logged and passed over, never fatal.
     skipped: int = 0
+    #: New papers submitted before ``keep_after`` (the retention window), not stored: the
+    #: next purge would only delete them again.
+    out_of_window: int = 0
     #: Why the run ended before pagination was exhausted (rate limit, nothing-new stop), or
     #: None for a full walk. Everything counted above is stored either way.
     stopped_early: str | None = None
@@ -108,6 +111,7 @@ def run_ingest(
     max_items: int | None = None,
     resume: bool = False,
     stop_after_known_pages: int | None = None,
+    keep_after: datetime | None = None,
 ) -> IngestSummary:
     """Fetch a source page by page, normalize, dedup, and store; return a run summary.
 
@@ -125,6 +129,9 @@ def run_ingest(
     entry was already stored. Sound only for sources that page newest-first (arXiv does):
     everything past those pages is older still, so it is already here. Backfills leave it
     ``None`` and walk the whole window.
+
+    ``keep_after`` is the retention cutoff: a paper submitted before it is not stored unless
+    it already is (a saved paper the purge exempted still takes its refresh).
     """
     summary = IngestSummary(source=source.name)
     cursor: str | None = None
@@ -176,6 +183,8 @@ def run_ingest(
                     # and stays link-only.
                     upsert_paper(session, obj)
                 summary.collapsed += 1
+            elif keep_after is not None and obj.published_at < keep_after:
+                summary.out_of_window += 1
             else:
                 upsert_paper(session, obj)
                 summary.new_papers += 1
