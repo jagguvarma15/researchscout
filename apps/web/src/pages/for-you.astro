@@ -7,13 +7,15 @@ import Telemetry from '../components/Telemetry.svelte';
 import Base from '../layouts/Base.astro';
 import { catalogMessage, fetchAccount, fetchForYou, fetchSavedIds } from '../lib/api';
 import type { Account, ForYouFeed, PaperSummary } from '../lib/api';
+import { defaultWindow, lookbackWindows, parseWindow } from '../lib/windows';
 
 const user = Astro.locals.user;
 const token = Astro.locals.accessToken;
 
-const DAYS = ['7', '30', '90'] as const;
-const rawDays = Astro.url.searchParams.get('days') ?? '';
-const days = DAYS.includes(rawDays as (typeof DAYS)[number]) ? Number(rawDays) : 30;
+// The request asks for what the reader picked (or the stock default); the API clamps it to
+// the corpus retention window and the response says what it used, so the pills drawn below
+// always match the corpus without a second round trip.
+const requested = parseWindow(Astro.url.searchParams.get('days'));
 
 // One parallel batch for a signed-in reader: the feed, the saved id set (not the whole
 // library), and the account the shell would otherwise fetch serially after this page.
@@ -22,7 +24,7 @@ let savedIds = new Set<string>();
 let account: Account | null = null;
 if (user !== null) {
   const [feed, saved, acct] = await Promise.all([
-    fetchForYou(token, { days }),
+    fetchForYou(token, { days: requested ?? defaultWindow(null) }),
     fetchSavedIds(token),
     fetchAccount(token),
   ]);
@@ -34,12 +36,15 @@ if (user !== null) {
 const feed: ForYouFeed | null = result?.ok ? result.data : null;
 const items: PaperSummary[] = feed?.items ?? [];
 const profile = feed?.profile ?? null;
+const retention = feed?.retention_days ?? null;
+const windows = lookbackWindows(retention);
+const days = feed?.window_days ?? requested ?? defaultWindow(retention);
 
 // Meters read relative within this list; the personalization scores are not on a 0-1 scale.
 const signalMax = Math.max(...items.map((paper) => paper.score ?? 0), 0) || 1;
 
 function windowHref(value: number): string {
-  return value === 30 ? '/for-you' : `/for-you?days=${value}`;
+  return value === defaultWindow(retention) ? '/for-you' : `/for-you?days=${value}`;
 }
 ---
 
@@ -58,11 +63,11 @@ function windowHref(value: number): string {
       <Fragment>
         <div class="toolbar">
           <span class="pills" role="group" aria-label="How far back to look">
-            {DAYS.map((value) => (
+            {windows.map((value) => (
               <a
-                class:list={['pill', { on: days === Number(value) }]}
-                href={windowHref(Number(value))}
-                aria-current={days === Number(value) ? 'page' : undefined}
+                class:list={['pill', { on: days === value }]}
+                href={windowHref(value)}
+                aria-current={days === value ? 'page' : undefined}
               >
                 {value}d
               </a>
