@@ -16,6 +16,7 @@ from researchscout.config import get_settings
 from researchscout.embed.base import Embedder
 from researchscout.retrieve.personalize import personalized_papers
 from researchscout.store.interests import get_interests
+from researchscout.store.retention import effective_window_days
 from researchscout.trace import trace_span
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,8 @@ def my_feed(
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
 ) -> FeedResponse:
     """Papers ranked by the caller's interests; empty when they have none."""
-    window = days if days is not None else get_settings().freshness_days
+    settings = get_settings()
+    window = effective_window_days(days if days is not None else settings.freshness_days, settings)
     timings: dict[str, float] = {}
     profile: dict[str, int] = {}
     started = perf_counter()
@@ -83,4 +85,6 @@ def my_feed(
             for item in results
         ],
         profile=FeedProfileInfo(**profile) if profile else None,
+        window_days=window,
+        retention_days=settings.retention_days or None,
     )
