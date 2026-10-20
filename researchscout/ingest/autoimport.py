@@ -20,6 +20,7 @@ from researchscout.config import get_settings
 from researchscout.importing import fetch_arxiv_entry, land_entry
 from researchscout.sources.arxiv import _normalize_payload
 from researchscout.store.db import session_scope
+from researchscout.store.retention import within_retention
 from researchscout.taxonomy import in_scope
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,10 @@ def land_unknown_papers(arxiv_ids: list[str]) -> dict[str, str]:
             logger.warning("auto-import: skipping malformed entry %s", arxiv_id)
             continue
         if not in_scope(paper.categories):
+            continue
+        if not within_retention(paper.published_at, settings):
+            # Trending lists resurface older papers; under retention the next purge would
+            # only delete them again.
             continue
         with session_scope() as session:
             paper_id, _, _ = land_entry(session, payload)
