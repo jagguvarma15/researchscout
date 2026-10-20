@@ -81,6 +81,10 @@ class FeedProfileInfo(BaseModel):
 class FeedResponse(PaperList):
     # None on cold start (no profile) and from a pre-wave backend; both web builds tolerate both.
     profile: FeedProfileInfo | None = None
+    # The look-back actually used after clamping to retention, and the retention window
+    # itself (None = off), so the page can offer only windows the corpus can fill.
+    window_days: int | None = None
+    retention_days: int | None = None
 
 
 class SavedIdList(BaseModel):
@@ -722,6 +726,8 @@ class SystemStatus(BaseModel):
     # shows) and created_at is when it landed here (what "is the pipeline running" means).
     newest_paper_at: datetime | None
     newest_paper_created_at: datetime | None = None
+    # The rolling corpus window in days (None = every paper is kept).
+    retention_days: int | None = None
     runs: list[SchedulerRun]
     # The pipeline slot most recently due (None on an interval schedule) and the newest
     # scheduler start-up. Together they let a verifier tell "the ledger is young" apart from
