@@ -280,7 +280,9 @@ def _run_sources(
     from researchscout.ingest.pipeline import run_ingest, window_start
     from researchscout.sources import enabled_sources
     from researchscout.store.db import session_scope
+    from researchscout.store.retention import effective_window_days, retention_cutoff
 
+    keep_after = retention_cutoff(settings) if kind == "content" else None
     parts: list[str] = []
     failed = False
     for source in enabled_sources(kind):
@@ -292,13 +294,17 @@ def _run_sources(
                     session,
                     source.name,
                     overlap_days=settings.scheduler_ingest_window_days,
-                    max_window_days=settings.scheduler_ingest_max_window_days,
+                    # An outage never walks further back than the corpus keeps.
+                    max_window_days=effective_window_days(
+                        settings.scheduler_ingest_max_window_days, settings
+                    ),
                 )
                 summary = run_ingest(
                     session,
                     source,
                     since,
                     resume=True,
+                    keep_after=keep_after,
                     stop_after_known_pages=(
                         (settings.scheduler_ingest_early_stop_pages or None)
                         if kind == "content"
@@ -312,7 +318,10 @@ def _run_sources(
             continue
         suffix = f", stopped early: {summary.stopped_early}" if summary.stopped_early else ""
         if kind == "content":
-            part = f"{summary.source}: fetched={summary.fetched} new={summary.new_papers}{suffix}"
+            part = f"{summary.source}: fetched={summary.fetched} new={summary.new_papers}"
+            if summary.out_of_window:
+                part += f" too_old={summary.out_of_window}"
+            part += suffix
         else:
             part = f"{summary.source}: {summary.signals} observation(s){suffix}"
         logger.info("%s %s", kind, part)
@@ -364,6 +373,7 @@ def _revisions(settings: Settings) -> str:
     from researchscout.ingest.pipeline import run_ingest, window_start
     from researchscout.sources.arxiv import ArxivUpdatesSource
     from researchscout.store.db import session_scope
+    from researchscout.store.retention import retention_cutoff
 
     source = ArxivUpdatesSource()
     with session_scope() as session:
@@ -373,14 +383,35 @@ def _revisions(settings: Settings) -> str:
             overlap_days=_REVISIONS_OVERLAP_DAYS,
             max_window_days=_REVISIONS_MAX_WINDOW_DAYS,
         )
-        summary = run_ingest(session, source, since, resume=True)
+        # Most revisions are of papers submitted long ago; under retention those are not
+        # landed, only the stored ones refresh.
+        summary = run_ingest(
+            session, source, since, resume=True, keep_after=retention_cutoff(settings)
+        )
     suffix = f", stopped early: {summary.stopped_early}" if summary.stopped_early else ""
+    too_old = f" too_old={summary.out_of_window}" if summary.out_of_window else ""
     note = (
-        f"fetched={summary.fetched} refreshed={summary.collapsed} new={summary.new_papers}{suffix}"
+        f"fetched={summary.fetched} refreshed={summary.collapsed} new={summary.new_papers}"
+        f"{too_old}{suffix}"
     )
     logger.info("revisions %s", note)
     if summary.stopped_by_error:
         raise RuntimeError(note)
+    return note
+
+
+def _retention(settings: Settings) -> str:
+    """Delete papers past the retention window, and the digest issues they fed."""
+    from researchscout.store.db import session_scope
+    from researchscout.store.retention import purge_expired, retention_cutoff
+
+    cutoff = retention_cutoff(settings)
+    if cutoff is None:
+        return "off"
+    with session_scope() as session:
+        summary = purge_expired(session, cutoff)
+    note = summary.note()
+    logger.info("retention: %s", note)
     return note
 
 
@@ -583,6 +614,7 @@ def _topics(settings: Settings) -> str:
     from researchscout.cluster import build_topics
     from researchscout.llm.openai_compat import OpenAICompatLLM
     from researchscout.store.db import session_scope
+    from researchscout.store.retention import effective_window_days
     from researchscout.store.topics import replace_topics
 
     with session_scope() as session:
@@ -590,11 +622,14 @@ def _topics(settings: Settings) -> str:
             session,
             _embedder(),
             OpenAICompatLLM(),
-            days=settings.cluster_window_days,
+            days=effective_window_days(settings.cluster_window_days, settings),
             threshold=settings.cluster_distance_threshold,
             algo=settings.cluster_algo,
         )
-        replace_topics(session, build.topics)
+        # Under retention every build is a fresh write: the papers a previous topic was
+        # built from are gone, so carrying its identity and size history would compare
+        # against a corpus that no longer exists.
+        replace_topics(session, build.topics, fresh=settings.retention_days > 0)
     note = f"{len(build.topics)} topic(s)"
     if build.fallback_labels:
         note += f"; labels: {build.llm_labels} llm, {build.fallback_labels} keyword-fallback"
@@ -617,6 +652,7 @@ def _report(settings: Settings) -> str:
     from researchscout.store.lineage import prune_lineage
     from researchscout.store.llm_usage import prune_llm_usage
     from researchscout.store.raw import prune_raw_items
+    from researchscout.store.retention import effective_window_days
 
     zone = ZoneInfo(settings.scheduler_timezone)
     with session_scope() as session:
@@ -635,7 +671,10 @@ def _report(settings: Settings) -> str:
     if pruned:
         logger.info("pruned %d lineage rows", pruned)
     with session_scope() as session:
-        raw_pruned = prune_raw_items(session, keep_days=settings.raw_items_keep_days)
+        raw_pruned = prune_raw_items(
+            session,
+            keep_days=effective_window_days(settings.raw_items_keep_days, settings),
+        )
     if raw_pruned:
         logger.info("pruned %d raw item(s)", raw_pruned)
     with session_scope() as session:
@@ -831,6 +870,18 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
     ) -> Task:
         return Task(name, interval, _recorded(name, run), at=at, zone=zone, upstream=upstream)
 
+    retention = settings.retention_days > 0
+    topics_task = task(
+        "topics",
+        settings.scheduler_topics_interval_sec,
+        partial(_topics, settings),
+        # Under retention, topics also rebuild at the end of each pipeline slot, so what
+        # they show never outlives the ingest that replaced the corpus under them.
+        tuple(sorted(set(daily_at) | set(pipeline_at)))
+        if retention and settings.scheduler_batch_pipeline
+        else daily_at,
+    )
+
     tasks: list[Task] = []
     if settings.scheduler_batch_pipeline:
         # Ordered so a cycle flows the way a paper does: arrive, get keywords and an
@@ -844,6 +895,12 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
                 pipeline_at,
                 upstream="arxiv",
             ),
+        ]
+        if retention:
+            # Straight after ingest, before anything spends work enriching papers that are
+            # about to be deleted.
+            tasks.append(task("retention", 86400.0, partial(_retention, settings), pipeline_at))
+        tasks += [
             task(
                 "categorize",
                 settings.scheduler_categorize_interval_sec,
@@ -862,6 +919,10 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
                 partial(_fulltext, settings, heartbeat),
                 pipeline_at,
             ),
+        ]
+        if retention:
+            tasks.append(topics_task)
+        tasks += [
             task(
                 "signals",
                 settings.scheduler_signals_interval_sec,
@@ -904,9 +965,7 @@ def build_tasks(settings: Settings, *, heartbeat: Heartbeat | None = None) -> li
         task(
             "digest", settings.scheduler_digest_interval_sec, partial(_digest, settings), daily_at
         ),
-        task(
-            "topics", settings.scheduler_topics_interval_sec, partial(_topics, settings), daily_at
-        ),
+        *([] if retention and settings.scheduler_batch_pipeline else [topics_task]),
         task(
             "report", settings.scheduler_report_interval_sec, partial(_report, settings), report_at
         ),
